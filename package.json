@@ -1,0 +1,5 @@
+{
+  "name": "workplace-hrms", "version": "1.0.0", "private": true, "type": "module",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": { "start": "node --env-file-if-exists=.env server/index.js", "test": "node --test test/*.test.js", "bootstrap": "node --env-file-if-exists=.env server/bootstrap.js" }
+}
