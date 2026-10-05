@@ -13,7 +13,7 @@ Attendance application with an Android/iPhone Expo client, a responsive admin po
 
 ## Run the web portal and API
 
-Requires Node.js 24 or newer. The server has no third-party runtime dependencies.
+Requires Node.js 24 or newer. Run `npm ci` first. The server uses the `pg` driver for hosted PostgreSQL; local development can still use SQLite.
 
 1. Copy `.env.example` to `.env`.
 2. Set `ADMIN_EMAIL`, `ADMIN_NAME`, and a unique `ADMIN_PASSWORD` of at least 12 characters.
@@ -21,7 +21,26 @@ Requires Node.js 24 or newer. The server has no third-party runtime dependencies
 4. Remove `ADMIN_PASSWORD` from `.env` and run `npm start`.
 5. Open http://localhost:3000. Add a workplace, then employees.
 
-`npm test` exercises the geofence and authenticated attendance workflow. A separate local preview database, if present, lives under ignored `.local/`; it is never deployed.
+`npm test` exercises the geofence and authenticated attendance workflow against both SQLite and an embedded PostgreSQL engine (PGlite), plus PostgreSQL rollback and the hosted-storage guard. This does not replace a live Neon connection check. A separate local preview database, if present, lives under ignored `.local/`; it is never deployed.
+
+## Free showcase deployment: Render + Neon
+
+This is the selected showcase target. `render.yaml` explicitly requests Render's **free** web service; it does not provision a paid disk or Render database.
+
+1. Create a **Free** Neon project and database. Copy the PostgreSQL connection string from its Connect dialog, keeping TLS enabled (`sslmode=require` or stronger). Keep it private.
+2. Open [Deploy this repository to Render](https://render.com/deploy?repo=https://github.com/dsnai11/HRMS). Connect GitHub if prompted and select the Blueprint in this repository.
+3. Enter the Neon connection string as `DATABASE_URL`. Confirm that the service plan is **Free** before deploying. The Blueprint generates a private `SETUP_TOKEN` automatically.
+4. Wait for the deployment and `/health` check to succeed. Open the generated HTTPS URL. In Render's environment settings, view `SETUP_TOKEN` and use it once on the portal's setup screen to create your own administrator credentials. Remove `SETUP_TOKEN` after setup.
+5. Add a showcase workplace at the place where you will demonstrate punching, and create a test employee. Share the test credentials privately. The code does not bypass location checks for demonstrations.
+6. Set the mobile app's `EXPO_PUBLIC_API_URL` to the Render HTTPS origin and rebuild/restart the app as appropriate.
+
+Free Render services sleep after idle periods, and waking may delay the first request. Open the portal before a presentation. Records live in Neon rather than Render's temporary filesystem; free quotas and provider availability still apply. Do not use Render's expiring free Postgres database for this setup. There is no production availability guarantee.
+
+`DATABASE_URL` selects PostgreSQL. On Render, or with `REQUIRE_POSTGRES=true`, a missing URL stops startup instead of falling back to a disposable SQLite file. Existing local SQLite records are left untouched and are **not** automatically copied to Neon. Run one app instance for the showcase; requests are serialized to preserve the read/check/write semantics of the original app.
+
+Before moving to paid production, review the existing mobile audit findings, test real phones, define attendance exceptions and backups, and load-test the database/request concurrency approach. Upgrading hosting does not by itself complete those steps.
+
+References: [Render free-service limits](https://render.com/docs/free), [Render Blueprint configuration](https://render.com/docs/blueprint-spec), [Neon](https://neon.com).
 
 ## Android and iPhone
 
@@ -61,4 +80,4 @@ Railway references: [volumes](https://docs.railway.com/volumes/reference), [heal
 - SQLite with a volume supports a single-service pilot. Multi-instance deployment requires a shared database and distributed rate limits.
 - No email delivery, self-service password recovery, leave, payroll, biometric identification, background tracking, or automatic retention policy is included.
 - Validate GPS permission denial, poor signal, boundary edges, offline responses, duplicate taps, overnight shifts, and both physical phone platforms before employee rollout.
-- The mobile dependency audit currently reports 29 findings (19 high, 10 moderate), including transitive Expo/Metro tooling and Expo Router dependencies. Compatible automatic fixes have been applied; remaining automated recommendations include incompatible SDK changes. These findings require review before production mobile distribution. The separately deployed Node API has no third-party runtime packages.
+- The mobile dependency audit currently reports 29 findings (19 high, 10 moderate), including transitive Expo/Metro tooling and Expo Router dependencies. Compatible automatic fixes have been applied; remaining automated recommendations include incompatible SDK changes. These findings require review before production mobile distribution. The API's dependencies are audited separately from the mobile app.

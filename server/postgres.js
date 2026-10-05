@@ -1,0 +1,92 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { Pool } from "pg";
+
+// The application deliberately runs as a single instance for the showcase.
+// Serialize request work so async SQLite transactions and PostgreSQL read/check/write
+// sequences have the same semantics. Transactions still commit atomically in the DB.
+export function serializedStore(store) {
+  let tail = Promise.resolve();
+  store.serialized = (fn) => {
+    const task = tail.then(fn);
+    tail = task.catch(() => {});
+    return task;
+  };
+  return store;
+}
+
+export function createPostgresStore(pool) {
+  const context = new AsyncLocalStorage();
+  const query = (sql, params = []) =>
+    (context.getStore() || pool).query(sql, params);
+  const normalize = (row) =>
+    row && { ...row, ...("n" in row ? { n: Number(row.n) } : {}) };
+  return serializedStore({
+    dialect: "postgres",
+    prepare(sql) {
+      // SQL here is application-owned; values always travel as bound parameters.
+      let index = 0;
+      const statement = sql.replace(/\?/g, () => `$${++index}`);
+      return {
+        async get(...params) {
+          return normalize((await query(statement, params)).rows[0]);
+        },
+        async all(...params) {
+          return (await query(statement, params)).rows.map(normalize);
+        },
+        async run(...params) {
+          const returning =
+            /^INSERT\s+INTO\s+(users|workplaces|shifts|audit)\b/i.test(
+              statement,
+            );
+          const result = await query(
+            statement + (returning ? " RETURNING id" : ""),
+            params,
+          );
+          return {
+            changes: result.rowCount ?? result.affectedRows,
+            lastInsertRowid: result.rows[0]?.id,
+          };
+        },
+      };
+    },
+    exec: (sql) => query(sql),
+    async transaction(fn) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const result = await context.run(client, fn);
+        await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+    close: () => pool.end(),
+  });
+}
+
+export async function openPostgres(connectionString, schema) {
+  const pool = new Pool({
+    connectionString,
+    max: 3,
+    connectionTimeoutMillis: 15000,
+    idleTimeoutMillis: 30000,
+  });
+  // Do not print connection strings or SQL parameters in logs.
+  pool.on("error", () =>
+    console.error(
+      "PostgreSQL idle connection failed; the pool will reconnect.",
+    ),
+  );
+  const db = createPostgresStore(pool);
+  try {
+    await db.exec(schema);
+    return db;
+  } catch (error) {
+    await pool.end();
+    throw error;
+  }
+}

@@ -4,13 +4,13 @@ import { fileURLToPath } from "node:url";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
   openDatabase,
+  openConfiguredDatabase,
   createAdmin,
   passwordHash,
   passwordMatches,
   tokenHash,
 } from "./db.js";
 import { checkLocation, HttpError } from "./geo.js";
-
 const publicDir = new URL("../public/", import.meta.url);
 const dummyHash = passwordHash("unused-password-for-timing");
 const safeUser = (u) => ({
@@ -71,7 +71,6 @@ function csvCell(value) {
   if (/^[=+\-@\t\r\n]/.test(s)) s = `'${s}`;
   return `"${s.replaceAll('"', '""')}"`;
 }
-
 export function createApp({
   db = openDatabase(process.env.DATABASE_PATH || "./data/hrms.sqlite"),
   production = process.env.NODE_ENV === "production",
@@ -89,7 +88,10 @@ export function createApp({
   function rateLimit(key, max, window = 900000) {
     const now = Date.now();
     for (const [k, v] of limits) if (v.until < now) limits.delete(k);
-    const limit = limits.get(key) || { count: 0, until: now + window };
+    const limit = limits.get(key) || {
+      count: 0,
+      until: now + window,
+    };
     limit.count++;
     limits.set(key, limit);
     if (limit.count > max)
@@ -98,24 +100,14 @@ export function createApp({
         "Too many attempts. Please wait 15 minutes and retry.",
       );
   }
-  const audit = (actor, action, detail) =>
-    db
+  const audit = async (actor, action, detail) =>
+    await db
       .prepare(
         "INSERT INTO audit(actor_id,action,detail,created_at) VALUES(?,?,?,?)",
       )
       .run(actor, action, JSON.stringify(detail), new Date().toISOString());
-  function transaction(fn) {
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      const result = fn();
-      db.exec("COMMIT");
-      return result;
-    } catch (e) {
-      db.exec("ROLLBACK");
-      throw e;
-    }
-  }
-  const server = http.createServer(async (req, res) => {
+  const transaction = (fn) => db.transaction(fn);
+  const handle = async (req, res) => {
     const headers = {
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
@@ -139,8 +131,10 @@ export function createApp({
       const path = url.pathname;
       const method = req.method;
       if (path === "/health" && method === "GET") {
-        db.prepare("SELECT 1").get();
-        return send(200, { ok: true });
+        await db.prepare("SELECT 1").get();
+        return send(200, {
+          ok: true,
+        });
       }
       if (!path.startsWith("/api/")) {
         if (method !== "GET") throw new HttpError(405, "Method not allowed.");
@@ -179,7 +173,9 @@ export function createApp({
           timezone,
           setupRequired:
             Boolean(process.env.SETUP_TOKEN) &&
-            !db.prepare("SELECT id FROM users WHERE role='admin'").get(),
+            !(await db
+              .prepare("SELECT id FROM users WHERE role='admin'")
+              .get()),
         });
       if (path === "/api/setup" && method === "POST") {
         rateLimit(`setup:${req.socket.remoteAddress}`, 10);
@@ -193,18 +189,24 @@ export function createApp({
           )
         )
           throw new HttpError(403, "Invalid setup code.");
-        if (db.prepare("SELECT id FROM users WHERE role='admin'").get())
+        if (await db.prepare("SELECT id FROM users WHERE role='admin'").get())
           throw new HttpError(409, "Administrator setup is already complete.");
         const name = string(body.name, "Name");
         const email = string(body.email, "Email", 254).toLowerCase();
         const pw = password(body.password);
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
           throw new HttpError(400, "Enter a valid email.");
-        transaction(() => {
-          createAdmin(db, { name, email, password: pw });
-          audit(null, "administrator_created", {});
+        await transaction(async () => {
+          await createAdmin(db, {
+            name,
+            email,
+            password: pw,
+          });
+          await audit(null, "administrator_created", {});
         });
-        return send(201, { ok: true });
+        return send(201, {
+          ok: true,
+        });
       }
       if (path === "/api/login" && method === "POST") {
         const body = await readBody(req);
@@ -215,21 +217,30 @@ export function createApp({
             : "";
         rateLimit(`ip:${req.socket.remoteAddress}`, 100);
         rateLimit(`email:${email}`, 10);
-        const user = db.prepare("SELECT * FROM users WHERE email=?").get(email);
+        const user = await db
+          .prepare("SELECT * FROM users WHERE email=?")
+          .get(email);
         const valid = passwordMatches(pw, user?.password_hash || dummyHash);
         if (!valid || !user?.active)
           throw new HttpError(401, "Email or password is incorrect.");
         const token = randomBytes(32).toString("hex");
-        db.prepare("DELETE FROM sessions WHERE expires_at < ?").run(Date.now());
-        db.prepare("INSERT INTO sessions VALUES(?,?,?)").run(
-          tokenHash(token),
-          user.id,
-          Date.now() + 86400000,
-        );
-        audit(user.id, "login", {});
+        await db
+          .prepare("DELETE FROM sessions WHERE expires_at < ?")
+          .run(Date.now());
+        await db
+          .prepare("INSERT INTO sessions VALUES(?,?,?)")
+          .run(tokenHash(token), user.id, Date.now() + 86400000);
+        await audit(user.id, "login", {});
         return send(
           200,
-          { user: safeUser(user), ...(body.native === true ? { token } : {}) },
+          {
+            user: safeUser(user),
+            ...(body.native === true
+              ? {
+                  token,
+                }
+              : {}),
+          },
           {
             "Set-Cookie": `hrms_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400${production ? "; Secure" : ""}`,
           },
@@ -240,19 +251,21 @@ export function createApp({
         : /(?:^|;\s*)hrms_session=([^;]+)/.exec(req.headers.cookie || "")?.[1];
       const user =
         token &&
-        db
+        (await db
           .prepare(
             "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND u.active=1",
           )
-          .get(tokenHash(token), Date.now());
+          .get(tokenHash(token), Date.now()));
       if (!user) throw new HttpError(401, "Please sign in again.");
       if (path === "/api/logout" && method === "POST") {
-        db.prepare("DELETE FROM sessions WHERE token_hash=?").run(
-          tokenHash(token),
-        );
+        await db
+          .prepare("DELETE FROM sessions WHERE token_hash=?")
+          .run(tokenHash(token));
         return send(
           200,
-          { ok: true },
+          {
+            ok: true,
+          },
           {
             "Set-Cookie": `hrms_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${production ? "; Secure" : ""}`,
           },
@@ -262,16 +275,16 @@ export function createApp({
         return send(200, {
           user: safeUser(user),
           workplace: user.workplace_id
-            ? db
+            ? await db
                 .prepare("SELECT * FROM workplaces WHERE id=?")
                 .get(user.workplace_id)
             : null,
           openShift:
-            db
+            (await db
               .prepare(
                 "SELECT * FROM shifts WHERE user_id=? AND out_at IS NULL",
               )
-              .get(user.id) || null,
+              .get(user.id)) || null,
         });
       }
       if (path === "/api/password" && method === "POST") {
@@ -286,16 +299,20 @@ export function createApp({
           throw new HttpError(400, "Current password is incorrect.");
         if (body.currentPassword === next)
           throw new HttpError(400, "Choose a different password.");
-        transaction(() => {
-          db.prepare(
-            "UPDATE users SET password_hash=?,must_change_password=0 WHERE id=?",
-          ).run(passwordHash(next), user.id);
-          db.prepare(
-            "DELETE FROM sessions WHERE user_id=? AND token_hash<>?",
-          ).run(user.id, tokenHash(token));
-          audit(user.id, "password_changed", {});
+        await transaction(async () => {
+          await db
+            .prepare(
+              "UPDATE users SET password_hash=?,must_change_password=0 WHERE id=?",
+            )
+            .run(passwordHash(next), user.id);
+          await db
+            .prepare("DELETE FROM sessions WHERE user_id=? AND token_hash<>?")
+            .run(user.id, tokenHash(token));
+          await audit(user.id, "password_changed", {});
         });
-        return send(200, { ok: true });
+        return send(200, {
+          ok: true,
+        });
       }
       if (user.must_change_password)
         throw new HttpError(
@@ -305,7 +322,7 @@ export function createApp({
       if (path === "/api/shifts" && method === "GET")
         return send(
           200,
-          db
+          await db
             .prepare(
               "SELECT * FROM shifts WHERE user_id=? ORDER BY id DESC LIMIT 100",
             )
@@ -318,8 +335,8 @@ export function createApp({
         const body = await readBody(req);
         if (!["in", "out"].includes(body.action))
           throw new HttpError(400, "Choose punch-in or punch-out.");
-        const result = transaction(() => {
-          const open = db
+        const result = await transaction(async () => {
+          const open = await db
             .prepare("SELECT * FROM shifts WHERE user_id=? AND out_at IS NULL")
             .get(user.id);
           if (body.action === "in" && open)
@@ -335,7 +352,7 @@ export function createApp({
                 radius: open.radius,
                 max_accuracy: open.max_accuracy,
               }
-            : db
+            : await db
                 .prepare("SELECT * FROM workplaces WHERE id=?")
                 .get(user.workplace_id ?? -1);
           if (!site)
@@ -349,33 +366,37 @@ export function createApp({
           let id = open?.id;
           if (body.action === "in")
             id = Number(
-              db
-                .prepare(
-                  "INSERT INTO shifts(user_id,workplace_id,workplace_name,site_latitude,site_longitude,radius,max_accuracy,in_at,in_latitude,in_longitude,in_accuracy) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                )
-                .run(
-                  user.id,
-                  site.id,
-                  site.name,
-                  site.latitude,
-                  site.longitude,
-                  site.radius,
-                  site.max_accuracy,
-                  now,
-                  latitude,
-                  longitude,
-                  accuracy,
-                ).lastInsertRowid,
+              (
+                await db
+                  .prepare(
+                    "INSERT INTO shifts(user_id,workplace_id,workplace_name,site_latitude,site_longitude,radius,max_accuracy,in_at,in_latitude,in_longitude,in_accuracy) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                  )
+                  .run(
+                    user.id,
+                    site.id,
+                    site.name,
+                    site.latitude,
+                    site.longitude,
+                    site.radius,
+                    site.max_accuracy,
+                    now,
+                    latitude,
+                    longitude,
+                    accuracy,
+                  )
+              ).lastInsertRowid,
             );
           else
-            db.prepare(
-              "UPDATE shifts SET out_at=?,out_latitude=?,out_longitude=?,out_accuracy=? WHERE id=?",
-            ).run(now, latitude, longitude, accuracy, id);
-          audit(user.id, `punch_${body.action}`, {
+            await db
+              .prepare(
+                "UPDATE shifts SET out_at=?,out_latitude=?,out_longitude=?,out_accuracy=? WHERE id=?",
+              )
+              .run(now, latitude, longitude, accuracy, id);
+          await audit(user.id, `punch_${body.action}`, {
             shiftId: id,
             workplaceId: site.id,
           });
-          return db.prepare("SELECT * FROM shifts WHERE id=?").get(id);
+          return await db.prepare("SELECT * FROM shifts WHERE id=?").get(id);
         });
         return send(200, result);
       }
@@ -386,7 +407,7 @@ export function createApp({
       if (path === "/api/admin/workplaces" && method === "GET")
         return send(
           200,
-          db.prepare("SELECT * FROM workplaces ORDER BY name").all(),
+          await db.prepare("SELECT * FROM workplaces ORDER BY name").all(),
         );
       if (path === "/api/admin/workplaces" && method === "POST") {
         const b = await readBody(req);
@@ -400,23 +421,30 @@ export function createApp({
           5,
           Math.min(radius, 100),
         );
-        const id = transaction(() => {
+        const id = await transaction(async () => {
           const id = Number(
-            db
-              .prepare(
-                "INSERT INTO workplaces(name,latitude,longitude,radius,max_accuracy) VALUES(?,?,?,?,?)",
-              )
-              .run(name, lat, lon, radius, accuracy).lastInsertRowid,
+            (
+              await db
+                .prepare(
+                  "INSERT INTO workplaces(name,latitude,longitude,radius,max_accuracy) VALUES(?,?,?,?,?)",
+                )
+                .run(name, lat, lon, radius, accuracy)
+            ).lastInsertRowid,
           );
-          audit(user.id, "workplace_created", { id, name });
+          await audit(user.id, "workplace_created", {
+            id,
+            name,
+          });
           return id;
         });
-        return send(201, { id });
+        return send(201, {
+          id,
+        });
       }
       if (path === "/api/admin/employees" && method === "GET")
         return send(
           200,
-          db
+          await db
             .prepare(
               "SELECT u.id,u.name,u.email,u.workplace_id,u.active,u.must_change_password,w.name workplace_name FROM users u LEFT JOIN workplaces w ON w.id=u.workplace_id WHERE u.role='employee' ORDER BY u.name",
             )
@@ -430,91 +458,114 @@ export function createApp({
         const siteId = integer(b.workplace_id);
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
           throw new HttpError(400, "Enter a valid email.");
-        if (!db.prepare("SELECT id FROM workplaces WHERE id=?").get(siteId))
+        if (
+          !(await db
+            .prepare("SELECT id FROM workplaces WHERE id=?")
+            .get(siteId))
+        )
           throw new HttpError(400, "Select an existing workplace.");
-        if (db.prepare("SELECT id FROM users WHERE email=?").get(email))
+        if (await db.prepare("SELECT id FROM users WHERE email=?").get(email))
           throw new HttpError(409, "That email is already registered.");
-        const id = transaction(() => {
+        const id = await transaction(async () => {
           const id = Number(
-            db
-              .prepare(
-                "INSERT INTO users(name,email,password_hash,role,workplace_id,must_change_password,created_at) VALUES(?,?,?,?,?,1,?)",
-              )
-              .run(
-                name,
-                email,
-                passwordHash(pw),
-                "employee",
-                siteId,
-                new Date().toISOString(),
-              ).lastInsertRowid,
+            (
+              await db
+                .prepare(
+                  "INSERT INTO users(name,email,password_hash,role,workplace_id,must_change_password,created_at) VALUES(?,?,?,?,?,1,?)",
+                )
+                .run(
+                  name,
+                  email,
+                  passwordHash(pw),
+                  "employee",
+                  siteId,
+                  new Date().toISOString(),
+                )
+            ).lastInsertRowid,
           );
-          audit(user.id, "employee_created", { id, name, workplaceId: siteId });
+          await audit(user.id, "employee_created", {
+            id,
+            name,
+            workplaceId: siteId,
+          });
           return id;
         });
-        return send(201, { id });
+        return send(201, {
+          id,
+        });
       }
       const employeeMatch = /^\/api\/admin\/employees\/(\d+)$/.exec(path);
       if (employeeMatch && method === "PATCH") {
         const id = integer(Number(employeeMatch[1]));
         const b = await readBody(req);
-        const employee = db
+        const employee = await db
           .prepare("SELECT * FROM users WHERE id=? AND role='employee'")
           .get(id);
         if (!employee) throw new HttpError(404, "Employee not found.");
         if (typeof b.active !== "boolean")
           throw new HttpError(400, "Active must be true or false.");
         const siteId = integer(b.workplace_id);
-        if (!db.prepare("SELECT id FROM workplaces WHERE id=?").get(siteId))
+        if (
+          !(await db
+            .prepare("SELECT id FROM workplaces WHERE id=?")
+            .get(siteId))
+        )
           throw new HttpError(400, "Select an existing workplace.");
         if (
           (!b.active || siteId !== employee.workplace_id) &&
-          db
+          (await db
             .prepare("SELECT id FROM shifts WHERE user_id=? AND out_at IS NULL")
-            .get(id)
+            .get(id))
         )
           throw new HttpError(
             409,
             "Employee must punch out before deactivation or reassignment.",
           );
         if (b.password !== undefined) password(b.password);
-        transaction(() => {
-          db.prepare("UPDATE users SET active=?,workplace_id=? WHERE id=?").run(
-            Number(b.active),
-            siteId,
-            id,
-          );
+        await transaction(async () => {
+          await db
+            .prepare("UPDATE users SET active=?,workplace_id=? WHERE id=?")
+            .run(Number(b.active), siteId, id);
           if (b.password !== undefined)
-            db.prepare(
-              "UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?",
-            ).run(passwordHash(b.password), id);
+            await db
+              .prepare(
+                "UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?",
+              )
+              .run(passwordHash(b.password), id);
           if (!b.active || b.password !== undefined)
-            db.prepare("DELETE FROM sessions WHERE user_id=?").run(id);
-          audit(user.id, "employee_updated", {
+            await db.prepare("DELETE FROM sessions WHERE user_id=?").run(id);
+          await audit(user.id, "employee_updated", {
             id,
             active: b.active,
             workplaceId: siteId,
             passwordReset: b.password !== undefined,
           });
         });
-        return send(200, { ok: true });
+        return send(200, {
+          ok: true,
+        });
       }
       if (path === "/api/admin/overview" && method === "GET") {
         const today = dayOf(new Date().toISOString());
-        const shifts = db
-          .prepare("SELECT * FROM shifts WHERE in_at>=?")
-          .all(new Date(Date.now() - 172800000).toISOString())
-          .filter((s) => dayOf(s.in_at) === today);
+        const shifts = (
+          await db
+            .prepare("SELECT * FROM shifts WHERE in_at>=?")
+            .all(new Date(Date.now() - 172800000).toISOString())
+        ).filter((s) => dayOf(s.in_at) === today);
         return send(200, {
           today,
-          employees: db
-            .prepare(
-              "SELECT COUNT(*) n FROM users WHERE role='employee' AND active=1",
-            )
-            .get().n,
-          active: db
-            .prepare("SELECT COUNT(*) n FROM shifts WHERE out_at IS NULL")
-            .get().n,
+          employees: (
+            await db
+              .prepare(
+                "SELECT COUNT(*) n FROM users WHERE role='employee' AND active=1",
+              )
+              .get()
+          ).n,
+          active: (
+            await db
+              .prepare("SELECT COUNT(*) n FROM shifts WHERE out_at IS NULL")
+              .get()
+          ).n,
           attended: new Set(shifts.map((s) => s.user_id)).size,
           hours: shifts.reduce(
             (sum, s) =>
@@ -524,7 +575,9 @@ export function createApp({
                 3600000,
             0,
           ),
-          workplaces: db.prepare("SELECT COUNT(*) n FROM workplaces").get().n,
+          workplaces: (
+            await db.prepare("SELECT COUNT(*) n FROM workplaces").get()
+          ).n,
         });
       }
       if (
@@ -548,14 +601,16 @@ export function createApp({
             400,
             "Choose a valid date range of at most 93 days.",
           );
-        const rows = db
-          .prepare(
-            "SELECT s.*,u.name employee_name,u.email FROM shifts s JOIN users u ON u.id=s.user_id WHERE s.in_at>=? AND s.in_at<? ORDER BY s.in_at DESC",
-          )
-          .all(
-            new Date(Date.parse(from) - 86400000).toISOString(),
-            new Date(Date.parse(to) + 172800000).toISOString(),
-          )
+        const rows = (
+          await db
+            .prepare(
+              "SELECT s.*,u.name employee_name,u.email FROM shifts s JOIN users u ON u.id=s.user_id WHERE s.in_at>=? AND s.in_at<? ORDER BY s.in_at DESC",
+            )
+            .all(
+              new Date(Date.parse(from) - 86400000).toISOString(),
+              new Date(Date.parse(to) + 172800000).toISOString(),
+            )
+        )
           .filter((s) => {
             const d = dayOf(s.in_at);
             return d >= from && d <= to;
@@ -600,7 +655,7 @@ export function createApp({
       if (path === "/api/admin/active" && method === "GET")
         return send(
           200,
-          db
+          await db
             .prepare(
               "SELECT s.*,u.name employee_name,u.email FROM shifts s JOIN users u ON u.id=s.user_id WHERE out_at IS NULL ORDER BY in_at DESC",
             )
@@ -609,7 +664,7 @@ export function createApp({
       if (path === "/api/admin/audit" && method === "GET")
         return send(
           200,
-          db
+          await db
             .prepare(
               "SELECT a.*,u.name actor_name FROM audit a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.id DESC LIMIT 100",
             )
@@ -625,18 +680,39 @@ export function createApp({
             : "Unexpected server error. Please retry.",
         });
     }
+  };
+  const server = http.createServer((req, res) => {
+    req.setTimeout(20000, () => req.destroy());
+    void db
+      .serialized(() => handle(req, res))
+      .catch(() => {
+        if (!res.headersSent)
+          res.writeHead(500, {
+            "Content-Type": "application/json",
+          });
+        res.end(
+          JSON.stringify({
+            error: "Unable to complete request.",
+          }),
+        );
+      });
   });
-  return { server, db };
+  return {
+    server,
+    db,
+  };
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const { server, db } = createApp();
+  const { server, db } = createApp({
+    db: await openConfiguredDatabase(),
+  });
   server.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () =>
     console.log(`HRMS listening on port ${process.env.PORT || 3000}`),
   );
   for (const signal of ["SIGTERM", "SIGINT"])
     process.on(signal, () =>
-      server.close(() => {
-        db.close();
+      server.close(async () => {
+        await db.close();
         process.exit(0);
       }),
     );

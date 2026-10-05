@@ -1,7 +1,7 @@
-import { openDatabase, createAdmin } from "./db.js";
-const db = openDatabase(process.env.DATABASE_PATH || "./data/hrms.sqlite");
+import { openConfiguredDatabase, createAdmin } from "./db.js";
+const db = await openConfiguredDatabase();
 try {
-  createAdmin(db, {
+  await createAdmin(db, {
     name: process.env.ADMIN_NAME || "Administrator",
     email: process.env.ADMIN_EMAIL,
     password: process.env.ADMIN_PASSWORD,
@@ -13,5 +13,5 @@ try {
   console.error(error.message);
   process.exitCode = 1;
 } finally {
-  db.close();
+  await db.close();
 }

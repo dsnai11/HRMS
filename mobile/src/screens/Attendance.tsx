@@ -93,7 +93,7 @@ export default function Attendance() {
         "Company server is not configured. Contact your administrator.",
       );
     const controller = new AbortController(),
-      timer = setTimeout(() => controller.abort(), 20000);
+      timer = setTimeout(() => controller.abort(), 90000);
     try {
       const response = await fetch(API + "/api" + path, {
         signal: controller.signal,
@@ -112,7 +112,7 @@ export default function Attendance() {
     } catch (e) {
       if (e instanceof Error && e.name === "AbortError")
         throw new Error(
-          "Connection timed out. Refresh attendance before retrying a punch.",
+          "The showcase server may be waking up. Refresh attendance before retrying a punch.",
         );
       throw e;
     } finally {

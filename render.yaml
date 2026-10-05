@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: laxmi-india-hrms-showcase
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 24.19.0
+      - key: NODE_ENV
+        value: production
+      - key: COMPANY_NAME
+        value: Laxmi India Finance Ltd.
+      - key: REPORT_TIMEZONE
+        value: Asia/Kolkata
+      - key: REQUIRE_POSTGRES
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
+      - key: SETUP_TOKEN
+        generateValue: true
