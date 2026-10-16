@@ -6,8 +6,13 @@ module.exports = {
     version: "1.0.0",
     orientation: "portrait",
     userInterfaceStyle: "light",
-    ios: { supportsTablet: true },
+    ios: {
+      supportsTablet: true,
+      bundleIdentifier: process.env.IOS_BUNDLE_ID || "com.laxmiindia.hrms",
+      infoPlist: { ITSAppUsesNonExemptEncryption: false },
+    },
     android: {
+      package: process.env.ANDROID_PACKAGE || "com.laxmiindia.hrms",
       blockedPermissions: [
         "android.permission.ACCESS_BACKGROUND_LOCATION",
         "android.permission.RECORD_AUDIO",
