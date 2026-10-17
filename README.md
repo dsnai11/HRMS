@@ -11,6 +11,17 @@ Attendance application with an Android/iPhone Expo client, a responsive admin po
 - Attendance history, active shifts, elapsed hours, date filters, CSV export, and an activity log are available in the portal.
 - Passwords use salted scrypt hashes. Sessions expire after 24 hours; browser sessions use HttpOnly cookies and native sessions use Expo SecureStore. Roles are enforced by the API.
 
+## Attendance integrity (anti-spoofing)
+
+Attendance can only be recorded from the company mobile app on an administrator-approved phone.
+
+- **Phone-only punching.** `/api/punch` accepts only a bearer session plus a registered device ID and secret. Browser sessions are refused, and the web portal has no punch button.
+- **One approved phone per employee.** An employee's first sign-in on a phone registers it as *pending*. An administrator approves it under **Devices** in the portal. Approving a new phone revokes the old one. The server stores only a hash of the phone's secret. A phone already registered to one account cannot be registered to another.
+- **Server-side checks on every punch.** Mock-location flag, emulator detection, impossible travel between accepted punches (over 250 km/h and 1 km), and a warning for rooted devices and for identical coordinates repeated exactly across several punches.
+- **Evidence trail.** Every refused attempt, and every accepted punch with a warning sign, is stored and shown under **Security** in the portal.
+
+**Known limit.** The mock-location, emulator and root signals are reported by the app, so a modified app or a rooted phone can lie about them. These checks raise the cost of cheating and leave a record, but they do not prove the app is genuine. Proof needs Google Play Integrity (Android) and Apple App Attest (iOS), which require Google Cloud and Apple Developer accounts and are the next step. Until then, approve a phone only after the employee confirms they have just registered it.
+
 ## Run the web portal and API
 
 Requires Node.js 24 or newer. Run `npm ci` first. The server uses the `pg` driver for hosted PostgreSQL; local development can still use SQLite.

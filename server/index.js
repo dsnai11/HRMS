@@ -11,6 +11,7 @@ import {
   tokenHash,
 } from "./db.js";
 import { checkLocation, HttpError } from "./geo.js";
+import { assessPunch, parseSignals } from "./risk.js";
 const publicDir = new URL("../public/", import.meta.url);
 const dummyHash = passwordHash("unused-password-for-timing");
 const safeUser = (u) => ({
@@ -107,6 +108,105 @@ export function createApp({
       )
       .run(actor, action, JSON.stringify(detail), new Date().toISOString());
   const transaction = (fn) => db.transaction(fn);
+
+  const deviceText = (value, max) =>
+    typeof value === "string" && value.trim()
+      ? value.trim().slice(0, max)
+      : null;
+  const secretMatches = (secret, hash) =>
+    typeof secret === "string" &&
+    secret.length <= 128 &&
+    timingSafeEqual(Buffer.from(tokenHash(secret)), Buffer.from(hash));
+  // Binds an employee's phone to their account. New phones wait for an
+  // administrator's approval before they can record attendance.
+  async function bindDevice(user, input) {
+    const id = input && typeof input === "object" ? input.id : null;
+    if (typeof id !== "string" || !/^[A-Za-z0-9-]{16,64}$/.test(id))
+      throw new HttpError(
+        400,
+        "Update the mobile app to sign in as an employee.",
+        "device_required",
+      );
+    const platform = deviceText(input.platform, 20),
+      model = deviceText(input.model, 60);
+    return await transaction(async () => {
+      const row = await db
+        .prepare("SELECT * FROM devices WHERE user_id=? AND device_id=?")
+        .get(user.id, id);
+      const now = new Date().toISOString();
+      if (!row || row.status === "revoked") {
+        if (
+          await db
+            .prepare(
+              "SELECT id FROM devices WHERE device_id=? AND user_id<>? AND status<>'revoked'",
+            )
+            .get(id, user.id)
+        ) {
+          await audit(user.id, "device_conflict", { platform, model });
+          throw new HttpError(
+            409,
+            "This phone is registered to another account. Contact your administrator.",
+            "device_conflict",
+          );
+        }
+        const secret = randomBytes(32).toString("hex");
+        if (row)
+          await db
+            .prepare(
+              "UPDATE devices SET secret_hash=?,status='pending',platform=?,model=?,registered_at=?,last_seen_at=?,decided_by=NULL,decided_at=NULL WHERE id=?",
+            )
+            .run(tokenHash(secret), platform, model, now, now, row.id);
+        else
+          await db
+            .prepare(
+              "INSERT INTO devices(user_id,device_id,platform,model,secret_hash,status,registered_at,last_seen_at) VALUES(?,?,?,?,?,'pending',?,?)",
+            )
+            .run(user.id, id, platform, model, tokenHash(secret), now, now);
+        await audit(user.id, "device_registered", { platform, model });
+        return { status: "pending", secret };
+      }
+      if (!secretMatches(input.secret, row.secret_hash))
+        throw new HttpError(
+          409,
+          "This phone's registration key is missing. Ask your administrator to remove the device so you can register it again.",
+          "device_key_missing",
+        );
+      await db
+        .prepare("UPDATE devices SET last_seen_at=? WHERE id=?")
+        .run(now, row.id);
+      return { status: row.status };
+    });
+  }
+  const deviceFromHeaders = async (user, req) => {
+    const id = req.headers["x-device-id"],
+      secret = req.headers["x-device-secret"];
+    if (typeof id !== "string" || typeof secret !== "string") return null;
+    const row = await db
+      .prepare("SELECT * FROM devices WHERE user_id=? AND device_id=?")
+      .get(user.id, id.slice(0, 64));
+    return row && secretMatches(secret, row.secret_hash) ? row : null;
+  };
+  async function recordPunchEvent(user, event) {
+    const finite = (n) => (Number.isFinite(n) ? n : null);
+    await db
+      .prepare(
+        "INSERT INTO punch_events(user_id,shift_id,action,outcome,reason,flags,device_row_id,latitude,longitude,accuracy,signals,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+      )
+      .run(
+        user.id,
+        event.shiftId ?? null,
+        event.action,
+        event.outcome,
+        event.reason ?? null,
+        JSON.stringify(event.flags || []),
+        event.deviceId ?? null,
+        finite(event.location?.latitude),
+        finite(event.location?.longitude),
+        finite(event.location?.accuracy),
+        JSON.stringify(event.signals || {}),
+        new Date().toISOString(),
+      );
+  }
   const handle = async (req, res) => {
     const headers = {
       "Cache-Control": "no-store",
@@ -223,6 +323,10 @@ export function createApp({
         const valid = passwordMatches(pw, user?.password_hash || dummyHash);
         if (!valid || !user?.active)
           throw new HttpError(401, "Email or password is incorrect.");
+        const device =
+          body.native === true && user.role === "employee"
+            ? await bindDevice(user, body.device)
+            : null;
         const token = randomBytes(32).toString("hex");
         await db
           .prepare("DELETE FROM sessions WHERE expires_at < ?")
@@ -238,6 +342,12 @@ export function createApp({
             ...(body.native === true
               ? {
                   token,
+                }
+              : {}),
+            ...(device
+              ? {
+                  device: { status: device.status },
+                  ...(device.secret ? { deviceSecret: device.secret } : {}),
                 }
               : {}),
           },
@@ -285,6 +395,9 @@ export function createApp({
                 "SELECT * FROM shifts WHERE user_id=? AND out_at IS NULL",
               )
               .get(user.id)) || null,
+          device: await deviceFromHeaders(user, req).then((d) =>
+            d ? { status: d.status } : null,
+          ),
         });
       }
       if (path === "/api/password" && method === "POST") {
@@ -335,70 +448,139 @@ export function createApp({
         const body = await readBody(req);
         if (!["in", "out"].includes(body.action))
           throw new HttpError(400, "Choose punch-in or punch-out.");
-        const result = await transaction(async () => {
-          const open = await db
-            .prepare("SELECT * FROM shifts WHERE user_id=? AND out_at IS NULL")
-            .get(user.id);
-          if (body.action === "in" && open)
-            throw new HttpError(409, "You already have an active shift.");
-          if (body.action === "out" && !open)
-            throw new HttpError(409, "There is no active shift to end.");
-          const site = open
-            ? {
-                id: open.workplace_id,
-                name: open.workplace_name,
-                latitude: open.site_latitude,
-                longitude: open.site_longitude,
-                radius: open.radius,
-                max_accuracy: open.max_accuracy,
-              }
-            : await db
-                .prepare("SELECT * FROM workplaces WHERE id=?")
-                .get(user.workplace_id ?? -1);
-          if (!site)
+        const signals = parseSignals(body.signals);
+        let device = null;
+        try {
+          if (!req.headers.authorization?.startsWith("Bearer "))
             throw new HttpError(
-              422,
-              "Ask your administrator to assign a workplace.",
+              403,
+              "Attendance can only be recorded from the company mobile app.",
+              "web_punch_blocked",
             );
-          checkLocation(body.location, site);
-          const { latitude, longitude, accuracy } = body.location;
-          const now = new Date().toISOString();
-          let id = open?.id;
-          if (body.action === "in")
-            id = Number(
-              (
-                await db
-                  .prepare(
-                    "INSERT INTO shifts(user_id,workplace_id,workplace_name,site_latitude,site_longitude,radius,max_accuracy,in_at,in_latitude,in_longitude,in_accuracy) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                  )
-                  .run(
-                    user.id,
-                    site.id,
-                    site.name,
-                    site.latitude,
-                    site.longitude,
-                    site.radius,
-                    site.max_accuracy,
-                    now,
-                    latitude,
-                    longitude,
-                    accuracy,
-                  )
-              ).lastInsertRowid,
+          device = await deviceFromHeaders(user, req);
+          if (!device)
+            throw new HttpError(
+              403,
+              "This phone is not registered. Sign in again from the company app.",
+              "device_unknown",
             );
-          else
-            await db
+          if (device.status !== "approved")
+            throw new HttpError(
+              403,
+              device.status === "pending"
+                ? "Your phone is waiting for administrator approval."
+                : "This phone is no longer authorised. Contact your administrator.",
+              `device_${device.status}`,
+            );
+          const result = await transaction(async () => {
+            const open = await db
               .prepare(
-                "UPDATE shifts SET out_at=?,out_latitude=?,out_longitude=?,out_accuracy=? WHERE id=?",
+                "SELECT * FROM shifts WHERE user_id=? AND out_at IS NULL",
               )
-              .run(now, latitude, longitude, accuracy, id);
-          await audit(user.id, `punch_${body.action}`, {
-            shiftId: id,
-            workplaceId: site.id,
+              .get(user.id);
+            if (body.action === "in" && open)
+              throw new HttpError(409, "You already have an active shift.");
+            if (body.action === "out" && !open)
+              throw new HttpError(409, "There is no active shift to end.");
+            const site = open
+              ? {
+                  id: open.workplace_id,
+                  name: open.workplace_name,
+                  latitude: open.site_latitude,
+                  longitude: open.site_longitude,
+                  radius: open.radius,
+                  max_accuracy: open.max_accuracy,
+                }
+              : await db
+                  .prepare("SELECT * FROM workplaces WHERE id=?")
+                  .get(user.workplace_id ?? -1);
+            if (!site)
+              throw new HttpError(
+                422,
+                "Ask your administrator to assign a workplace.",
+              );
+            checkLocation(body.location, site);
+            const { latitude, longitude, accuracy } = body.location;
+            const risk = assessPunch({
+              signals,
+              location: body.location,
+              previous: await db
+                .prepare(
+                  "SELECT latitude,longitude,created_at FROM punch_events WHERE user_id=? AND outcome='accepted' ORDER BY id DESC LIMIT 3",
+                )
+                .all(user.id),
+            });
+            if (risk.reject)
+              throw Object.assign(
+                new HttpError(422, risk.reject, risk.flags[0]),
+                {
+                  flags: risk.flags,
+                },
+              );
+            const now = new Date().toISOString();
+            let id = open?.id;
+            if (body.action === "in")
+              id = Number(
+                (
+                  await db
+                    .prepare(
+                      "INSERT INTO shifts(user_id,workplace_id,workplace_name,site_latitude,site_longitude,radius,max_accuracy,in_at,in_latitude,in_longitude,in_accuracy) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    )
+                    .run(
+                      user.id,
+                      site.id,
+                      site.name,
+                      site.latitude,
+                      site.longitude,
+                      site.radius,
+                      site.max_accuracy,
+                      now,
+                      latitude,
+                      longitude,
+                      accuracy,
+                    )
+                ).lastInsertRowid,
+              );
+            else
+              await db
+                .prepare(
+                  "UPDATE shifts SET out_at=?,out_latitude=?,out_longitude=?,out_accuracy=? WHERE id=?",
+                )
+                .run(now, latitude, longitude, accuracy, id);
+            await recordPunchEvent(user, {
+              action: body.action,
+              outcome: "accepted",
+              shiftId: id,
+              flags: risk.flags,
+              deviceId: device.id,
+              location: body.location,
+              signals,
+            });
+            await db
+              .prepare("UPDATE devices SET last_seen_at=? WHERE id=?")
+              .run(now, device.id);
+            await audit(user.id, `punch_${body.action}`, {
+              shiftId: id,
+              workplaceId: site.id,
+              flags: risk.flags,
+            });
+            return await db.prepare("SELECT * FROM shifts WHERE id=?").get(id);
           });
-          return await db.prepare("SELECT * FROM shifts WHERE id=?").get(id);
-        });
-        return send(200, result);
+          return send(200, result);
+        } catch (e) {
+          // Keep evidence of refused attempts; conflicts are ordinary state errors.
+          if (e instanceof HttpError && [400, 403, 422].includes(e.status))
+            await recordPunchEvent(user, {
+              action: body.action,
+              outcome: "rejected",
+              reason: e.message,
+              flags: e.flags || (e.code ? [e.code] : []),
+              deviceId: device?.id,
+              location: body.location,
+              signals,
+            }).catch((err) => console.error(err));
+          throw e;
+        }
       }
       if (!path.startsWith("/api/admin/"))
         throw new HttpError(404, "Not found.");
@@ -667,6 +849,54 @@ export function createApp({
           await db
             .prepare(
               "SELECT a.*,u.name actor_name FROM audit a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.id DESC LIMIT 100",
+            )
+            .all(),
+        );
+      if (path === "/api/admin/devices" && method === "GET")
+        return send(
+          200,
+          await db
+            .prepare(
+              "SELECT d.id,d.user_id,u.name employee_name,u.email,d.platform,d.model,d.status,d.registered_at,d.last_seen_at FROM devices d JOIN users u ON u.id=d.user_id ORDER BY CASE d.status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END, d.id DESC",
+            )
+            .all(),
+        );
+      const deviceMatch = /^\/api\/admin\/devices\/(\d+)$/.exec(path);
+      if (deviceMatch && method === "PATCH") {
+        const id = integer(Number(deviceMatch[1]));
+        const b = await readBody(req);
+        if (!["approved", "revoked"].includes(b.status))
+          throw new HttpError(400, "Status must be approved or revoked.");
+        const row = await db
+          .prepare("SELECT * FROM devices WHERE id=?")
+          .get(id);
+        if (!row) throw new HttpError(404, "Device not found.");
+        await transaction(async () => {
+          const now = new Date().toISOString();
+          if (b.status === "approved")
+            await db
+              .prepare(
+                "UPDATE devices SET status='revoked',decided_by=?,decided_at=? WHERE user_id=? AND status='approved' AND id<>?",
+              )
+              .run(user.id, now, row.user_id, id);
+          await db
+            .prepare(
+              "UPDATE devices SET status=?,decided_by=?,decided_at=? WHERE id=?",
+            )
+            .run(b.status, user.id, now, id);
+          await audit(user.id, `device_${b.status}`, {
+            deviceId: id,
+            employeeId: row.user_id,
+          });
+        });
+        return send(200, { ok: true });
+      }
+      if (path === "/api/admin/security-events" && method === "GET")
+        return send(
+          200,
+          await db
+            .prepare(
+              "SELECT e.id,e.action,e.outcome,e.reason,e.flags,e.latitude,e.longitude,e.accuracy,e.created_at,u.name employee_name FROM punch_events e JOIN users u ON u.id=e.user_id WHERE e.outcome='rejected' OR e.flags<>'[]' ORDER BY e.id DESC LIMIT 100",
             )
             .all(),
         );

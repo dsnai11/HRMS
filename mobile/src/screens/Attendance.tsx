@@ -17,6 +17,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import * as Location from "expo-location";
 import * as SecureStore from "expo-secure-store";
+import * as Device from "expo-device";
+import * as Crypto from "expo-crypto";
+import Constants from "expo-constants";
 type User = { name: string; role: string; must_change_password: boolean };
 type Shift = {
   id: number;
@@ -28,9 +31,13 @@ type Profile = {
   user: User;
   workplace: { name: string; radius: number } | null;
   openShift: Shift | null;
+  device: { status: "pending" | "approved" | "revoked" } | null;
 };
 const API = (process.env.EXPO_PUBLIC_API_URL || "").replace(/\/$/, "");
 const KEY = "laxmi.hrms.session";
+const DEVICE_ID_KEY = "laxmi.hrms.device-id";
+const DEVICE_SECRET_KEY = "laxmi.hrms.device-secret";
+type Identity = { id: string; secret: string | null };
 function Button({
   title,
   onPress,
@@ -58,7 +65,8 @@ function Button({
 export default function Attendance() {
   const [token, setToken] = useState<string | null>(null),
     sessionRef = useRef<string | null>(null),
-    locked = useRef(false);
+    locked = useRef(false),
+    identity = useRef<Identity | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null),
     [shifts, setShifts] = useState<Shift[]>([]);
   const [busy, setBusy] = useState(false),
@@ -71,6 +79,21 @@ export default function Attendance() {
     [message, setMessage] = useState(""),
     [timezone, setTimezone] = useState("Asia/Kolkata"),
     [history, setHistory] = useState(false);
+  // The phone's identity survives sign-out: the administrator approves this
+  // specific phone once, and the secret proves later requests come from it.
+  async function loadIdentity(): Promise<Identity> {
+    if (identity.current) return identity.current;
+    let id = await SecureStore.getItemAsync(DEVICE_ID_KEY);
+    if (!id) {
+      id = Crypto.randomUUID();
+      await SecureStore.setItemAsync(DEVICE_ID_KEY, id);
+    }
+    identity.current = {
+      id,
+      secret: await SecureStore.getItemAsync(DEVICE_SECRET_KEY),
+    };
+    return identity.current;
+  }
   async function clearSession() {
     sessionRef.current = null;
     setToken(null);
@@ -100,6 +123,12 @@ export default function Attendance() {
         headers: {
           "Content-Type": "application/json",
           ...(session ? { Authorization: "Bearer " + session } : {}),
+          ...(identity.current?.secret
+            ? {
+                "X-Device-Id": identity.current.id,
+                "X-Device-Secret": identity.current.secret,
+              }
+            : {}),
         },
         ...(body ? { method: "POST", body: JSON.stringify(body) } : {}),
       });
@@ -147,6 +176,7 @@ export default function Attendance() {
     let mounted = true;
     (async () => {
       try {
+        await loadIdentity();
         const saved = await SecureStore.getItemAsync(KEY);
         if (!mounted) return;
         sessionRef.current = saved;
@@ -187,11 +217,26 @@ export default function Attendance() {
     }).format(new Date(value));
   const login = () =>
     run(async () => {
-      const result = await api<{ token: string }>(
+      const device = await loadIdentity();
+      const result = await api<{ token: string; deviceSecret?: string }>(
         "/login",
-        { email: email.trim(), password, native: true },
+        {
+          email: email.trim(),
+          password,
+          native: true,
+          device: {
+            id: device.id,
+            platform: Platform.OS,
+            model: Device.modelName ?? undefined,
+            secret: device.secret ?? undefined,
+          },
+        },
         null,
       );
+      if (result.deviceSecret) {
+        await SecureStore.setItemAsync(DEVICE_SECRET_KEY, result.deviceSecret);
+        device.secret = result.deviceSecret;
+      }
       await SecureStore.setItemAsync(KEY, result.token);
       sessionRef.current = result.token;
       setToken(result.token);
@@ -222,6 +267,12 @@ export default function Attendance() {
       if (Boolean(current.openShift) !== Boolean(profile?.openShift))
         throw new Error(
           "Attendance changed on another device. Review your status and tap again.",
+        );
+      if (current.device?.status !== "approved")
+        throw new Error(
+          current.device?.status === "pending"
+            ? "Your phone is waiting for administrator approval."
+            : "This phone is not authorised. Ask your administrator.",
         );
       const permission = await Location.requestForegroundPermissionsAsync();
       if (permission.status !== "granted")
@@ -262,6 +313,13 @@ export default function Attendance() {
             accuracy: position.coords.accuracy,
             timestamp: position.timestamp,
             mocked: position.mocked === true,
+          },
+          signals: {
+            emulator: !Device.isDevice,
+            rooted: await Device.isRootedExperimentalAsync().catch(() => null),
+            platform: Platform.OS,
+            osVersion: Device.osVersion ?? undefined,
+            appVersion: Constants.expoConfig?.version,
           },
         });
       } catch (e) {
@@ -464,6 +522,15 @@ export default function Attendance() {
                         (profile.workplace?.radius || "—") +
                         " m boundary."}
                   </Text>
+                  {profile.device?.status !== "approved" && (
+                    <View style={s.callout}>
+                      <Text style={s.note}>
+                        {profile.device?.status === "pending"
+                          ? "This phone is waiting for your administrator to approve it. Pull down to refresh once approved."
+                          : "This phone is not registered for attendance. Sign out and sign in again, or contact your administrator."}
+                      </Text>
+                    </View>
+                  )}
                   <View style={s.callout}>
                     <Text style={s.note}>
                       We check a fresh GPS reading when you tap below. Enable
@@ -479,7 +546,11 @@ export default function Attendance() {
                           : "Punch in →"
                     }
                     onPress={punch}
-                    disabled={busy || (!open && !profile.workplace)}
+                    disabled={
+                      busy ||
+                      profile.device?.status !== "approved" ||
+                      (!open && !profile.workplace)
+                    }
                   />
                 </View>
               ) : (

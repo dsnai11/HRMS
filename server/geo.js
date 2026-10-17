@@ -1,7 +1,8 @@
 export class HttpError extends Error {
-  constructor(status, message) {
+  constructor(status, message, code) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 export function distanceMeters(lat1, lon1, lat2, lon2) {
@@ -33,6 +34,7 @@ export function checkLocation(location, site, now = Date.now()) {
     throw new HttpError(
       422,
       `GPS accuracy must be within ${site.max_accuracy} m. Move outdoors and try again.`,
+      "gps_accuracy",
     );
   if (
     typeof location.timestamp !== "number" ||
@@ -43,9 +45,14 @@ export function checkLocation(location, site, now = Date.now()) {
     throw new HttpError(
       422,
       "Location is stale. Obtain a fresh GPS reading and retry.",
+      "stale_location",
     );
   if (location.mocked === true)
-    throw new HttpError(422, "Mock locations cannot be used for attendance.");
+    throw new HttpError(
+      422,
+      "Mock locations cannot be used for attendance.",
+      "mock_location",
+    );
   const distance = distanceMeters(
     location.latitude,
     location.longitude,
@@ -56,6 +63,7 @@ export function checkLocation(location, site, now = Date.now()) {
     throw new HttpError(
       422,
       `You are about ${Math.round(distance)} m from ${site.name}. Move inside its ${site.radius} m boundary; GPS uncertainty must also fit inside it.`,
+      "outside_geofence",
     );
   return distance;
 }

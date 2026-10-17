@@ -115,6 +115,8 @@ function shell() {
           ["employees", "♙", "Employees"],
           ["attendance", "▤", "Attendance"],
           ["workplaces", "◎", "Workplaces"],
+          ["devices", "▣", "Devices"],
+          ["security", "⚠", "Security"],
           ["audit", "≡", "Activity log"],
         ]
       : [["attendance", "◎", "My attendance"]];
@@ -255,6 +257,83 @@ async function render() {
         window.location.href = `/api/admin/export?${query}`;
       };
       await load();
+    } else if (page === "devices") {
+      const devices = await api("/admin/devices");
+      if (id !== renderId) return;
+      const pendingCount = devices.filter((d) => d.status === "pending").length;
+      document.querySelector("#content").innerHTML =
+        heading(
+          "Registered phones",
+          "Each employee can record attendance from one approved phone. Approve a phone only after confirming the employee just registered it.",
+        ) +
+        `<div class="card"><div class="card-head"><div><h2>Phones</h2><p class="muted">Approving a new phone replaces the employee's current one.</p></div><span class="pill ${pendingCount ? "" : "neutral"}">${pendingCount} awaiting approval</span></div>${
+          devices.length
+            ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Phone</th><th>Registered</th><th>Last used</th><th>Status</th><th></th></tr></thead><tbody>${devices
+                .map(
+                  (d) =>
+                    `<tr><td>${esc(d.employee_name)}<br><small>${esc(d.email)}</small></td><td>${esc([d.platform, d.model].filter(Boolean).join(" · "))}</td><td>${time(d.registered_at)}</td><td>${time(d.last_seen_at)}</td><td><span class="pill ${d.status === "approved" ? "" : "neutral"}">${esc(d.status)}</span></td><td>${d.status !== "approved" ? `<button class="secondary" data-device="${d.id}" data-status="approved">Approve</button> ` : ""}${d.status !== "revoked" ? `<button class="ghost" data-device="${d.id}" data-status="revoked">Remove</button>` : ""}</td></tr>`,
+                )
+                .join("")}</tbody></table></div>`
+            : empty(
+                "No phones registered",
+                "Phones appear here when employees sign in to the mobile app.",
+              )
+        }</div>`;
+      document.querySelectorAll("[data-device]").forEach(
+        (b) =>
+          (b.onclick = () =>
+            busy(b, async () => {
+              await api(
+                `/admin/devices/${b.dataset.device}`,
+                { status: b.dataset.status },
+                "PATCH",
+              );
+              notice(
+                b.dataset.status === "approved"
+                  ? "Phone approved."
+                  : "Phone removed.",
+              );
+              await render();
+            })),
+      );
+    } else if (page === "security") {
+      const events = await api("/admin/security-events");
+      if (id !== renderId) return;
+      const labels = {
+        mock_location: "Mock location",
+        emulator: "Emulator",
+        rooted_device: "Rooted device",
+        impossible_travel: "Impossible travel",
+        repeated_exact_coordinates: "Identical coordinates",
+        web_punch_blocked: "Web punch attempt",
+        device_unknown: "Unknown phone",
+        device_pending: "Unapproved phone",
+        device_revoked: "Removed phone",
+        outside_geofence: "Outside workplace",
+        gps_accuracy: "Weak GPS",
+        stale_location: "Stale location",
+      };
+      document.querySelector("#content").innerHTML =
+        heading(
+          "Security events",
+          "Refused punch attempts and punches with warning signs. Review anything unusual with the employee.",
+        ) +
+        `<div class="card">${
+          events.length
+            ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Employee</th><th>Action</th><th>Result</th><th>Signals</th><th>Detail</th></tr></thead><tbody>${events
+                .map(
+                  (e) =>
+                    `<tr><td>${time(e.created_at)}</td><td>${esc(e.employee_name)}</td><td>${esc(e.action ?? "—")}</td><td><span class="pill ${e.outcome === "accepted" ? "neutral" : ""}">${esc(e.outcome)}</span></td><td>${JSON.parse(
+                      e.flags,
+                    )
+                      .map((f) => esc(labels[f] || f))
+                      .join(
+                        ", ",
+                      )}</td><td><small>${esc(e.reason ?? "")}</small></td></tr>`,
+                )
+                .join("")}</tbody></table></div>`
+            : empty("Nothing to review", "No refused or flagged punches yet.")
+        }</div>`;
     } else {
       const logs = await api("/admin/audit");
       if (id !== renderId) return;
@@ -373,14 +452,7 @@ async function employeeView(id) {
   const open = profile.openShift;
   document.querySelector("#content").innerHTML =
     heading(`Hello, ${me.name.split(" ")[0]}`, "Your workday, in one place.") +
-    `<div class="card punch-card"><span class="pill ${open ? "" : "neutral"}">${open ? "You are working" : "Not punched in"}</span><div class="big-clock">${open ? "Your shift is in progress" : "Ready for your day?"}</div><h2>${esc(open?.workplace_name || profile.workplace?.name || "No workplace assigned")}</h2><p class="muted">${open ? `Started ${time(open.in_at)}. Punch out at the same workplace.` : `Punch in within ${profile.workplace?.radius || "—"} metres of your assigned workplace.`}</p><div class="callout">Your location is requested only when you tap the button. Keep GPS enabled and use a clear signal.</div><button class="punch-button" id="punch" ${!profile.workplace && !open ? "disabled" : ""}>${open ? "Punch out" : "Punch in"} →</button></div><div class="card"><h2>My recent attendance</h2>${table(shifts)}</div>`;
-  document.querySelector("#punch").onclick = (e) =>
-    busy(e.target, async () => {
-      const location = await getLocation();
-      await api("/punch", { action: open ? "out" : "in", location });
-      notice(open ? "Punch-out recorded." : "Punch-in recorded.");
-      await render();
-    });
+    `<div class="card punch-card"><span class="pill ${open ? "" : "neutral"}">${open ? "You are working" : "Not punched in"}</span><div class="big-clock">${open ? "Your shift is in progress" : "Ready for your day?"}</div><h2>${esc(open?.workplace_name || profile.workplace?.name || "No workplace assigned")}</h2><p class="muted">${open ? `Started ${time(open.in_at)}. Punch out at the same workplace.` : `Punch in within ${profile.workplace?.radius || "—"} metres of your assigned workplace.`}</p><div class="callout">Attendance is recorded only from the company mobile app, at your assigned workplace.</div></div><div class="card"><h2>My recent attendance</h2>${table(shifts)}</div>`;
 }
 (async () => {
   try {
