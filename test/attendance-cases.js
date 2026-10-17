@@ -387,6 +387,14 @@ export function attendanceCases(openTestDatabase) {
     assert.equal(inPunch.status, 200);
     assert.equal((await punch(phone, "out")).status, 200);
 
+    // Move the finished shift to yesterday so a new day's punch-in is possible.
+    await db
+      .prepare("UPDATE shifts SET in_at=?,out_at=? WHERE user_id=?")
+      .run(
+        new Date(Date.now() - 86400000 * 1.5).toISOString(),
+        new Date(Date.now() - 86400000 * 1.4).toISOString(),
+        one.id,
+      );
     // Impossible travel: reassigned to a city ~240 km away, punching moments later.
     await db
       .prepare("UPDATE users SET workplace_id=? WHERE id=?")
@@ -688,6 +696,161 @@ export function attendanceCases(openTestDatabase) {
     ).data;
     assert.equal(report.filter((r) => r.day_type === "half_day").length, 2);
     assert.equal(report.filter((r) => r.day_type === "full_day").length, 2);
+  });
+  test("one shift per day: later punch-out replaces the earlier one and a second punch-in is refused", async (t) => {
+    let nowMs = Date.parse("2026-10-19T09:30:00+05:30");
+    const db = await openTestDatabase();
+    await createAdmin(db, {
+      name: "Admin",
+      email: "admin@example.test",
+      password: "Admin-password-123",
+    });
+    const { server } = createApp({ db, clock: () => nowMs });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    t.after(
+      () =>
+        new Promise((resolve) => {
+          server.close(async () => {
+            await db.close();
+            resolve();
+          });
+          server.closeAllConnections();
+        }),
+    );
+    const base = `http://127.0.0.1:${server.address().port}/api`;
+    const call = async (path, body, token, headers = {}, method = "POST") => {
+      const res = await fetch(base + path, {
+        method: body === undefined ? "GET" : method,
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...headers,
+        },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      });
+      return { status: res.status, data: await res.json() };
+    };
+    const admin = (
+      await call("/login", {
+        email: "admin@example.test",
+        password: "Admin-password-123",
+        native: true,
+      })
+    ).data.token;
+    const site = (
+      await call(
+        "/admin/workplaces",
+        {
+          name: "Office",
+          latitude: 26.9124,
+          longitude: 75.7873,
+          radius: 150,
+          max_accuracy: 50,
+        },
+        admin,
+      )
+    ).data.id;
+    const id = (
+      await call(
+        "/admin/employees",
+        {
+          name: "Daily",
+          email: "daily@example.test",
+          password: "Temporary-pass-123",
+          workplace_id: site,
+        },
+        admin,
+      )
+    ).data.id;
+    await db
+      .prepare("UPDATE users SET must_change_password=0 WHERE id=?")
+      .run(id);
+    const device = {
+      id: "daily-device-00000001",
+      platform: "android",
+      model: "Pixel",
+    };
+    const reg = await call("/login", {
+      email: "daily@example.test",
+      password: "Temporary-pass-123",
+      native: true,
+      device,
+    });
+    const row = (await call("/admin/devices", undefined, admin)).data[0];
+    await call(
+      `/admin/devices/${row.id}`,
+      { status: "approved" },
+      admin,
+      {},
+      "PATCH",
+    );
+    const headers = {
+      "X-Device-Id": device.id,
+      "X-Device-Secret": reg.data.deviceSecret,
+    };
+    const punch = (action, local, extra = {}) => {
+      nowMs = Date.parse(local);
+      return call(
+        "/punch",
+        {
+          action,
+          location: loc({ timestamp: nowMs, ...extra }),
+          signals: { emulator: false, rooted: false },
+        },
+        reg.data.token,
+        headers,
+      );
+    };
+    const me = () => call("/me", undefined, reg.data.token, headers);
+
+    assert.equal((await punch("in", "2026-10-19T09:30:00+05:30")).status, 200);
+    assert.equal((await me()).data.todayShift, null);
+    // Clicked by mistake at 3 pm: half day, shift closed.
+    const mistake = await punch("out", "2026-10-19T15:00:00+05:30");
+    assert.equal(mistake.data.day_type, "half_day");
+    assert.equal((await me()).data.todayShift.id, mistake.data.id);
+    // No second shift today, even moments later or in the evening.
+    for (const t of [
+      "2026-10-19T15:00:30+05:30",
+      "2026-10-19T17:00:00+05:30",
+    ]) {
+      const second = await punch("in", t);
+      assert.equal(second.status, 409);
+      assert.match(second.data.error, /one shift per day/);
+    }
+    // The real punch-out later replaces the mistaken one and fixes the day type.
+    const real = await punch("out", "2026-10-19T18:35:00+05:30");
+    assert.equal(real.status, 200);
+    assert.equal(real.data.id, mistake.data.id);
+    assert.equal(
+      new Date(real.data.out_at).getTime(),
+      Date.parse("2026-10-19T18:35:00+05:30"),
+    );
+    assert.equal(real.data.day_type, "full_day");
+    assert.deepEqual(JSON.parse(real.data.half_day_reasons), []);
+    // Still one shift, and a replacement punch-out must still be at the workplace.
+    assert.equal(
+      (await call("/shifts", undefined, reg.data.token, headers)).data.length,
+      1,
+    );
+    const away = await punch("out", "2026-10-19T18:40:00+05:30", {
+      latitude: 28,
+      longitude: 77,
+    });
+    assert.equal(away.status, 422);
+    assert.equal(
+      new Date(
+        (await call("/shifts", undefined, reg.data.token, headers)).data[0]
+          .out_at,
+      ).getTime(),
+      Date.parse("2026-10-19T18:35:00+05:30"),
+    );
+    // The next day starts a fresh shift, and an old shift cannot be extended.
+    assert.equal((await punch("out", "2026-10-20T09:00:00+05:30")).status, 409);
+    const nextDay = await punch("in", "2026-10-20T09:31:00+05:30");
+    assert.equal(nextDay.status, 200);
+    assert.equal((await me()).data.openShift.id, nextDay.data.id);
+    assert.equal((await me()).data.todayShift, null);
   });
   test("attendance API enforces roles, assignment, same-site punch-out, sessions and reports", async (t) => {
     const db = await openTestDatabase();
@@ -996,6 +1159,7 @@ export function attendanceCases(openTestDatabase) {
       ).status,
       200,
     );
+    // A second punch-out the same day replaces the first; a new punch-in is refused.
     assert.equal(
       (
         await request(
@@ -1007,8 +1171,15 @@ export function attendanceCases(openTestDatabase) {
           session,
         )
       ).status,
-      409,
+      200,
     );
+    const again = await request(
+      "/punch",
+      { action: "in", location: loc() },
+      session,
+    );
+    assert.equal(again.status, 409);
+    assert.match(again.data.error, /one shift per day/);
     const shifts = (await request("/shifts", undefined, session)).data;
     assert.equal(shifts.length, 1);
     assert.ok(shifts[0].out_at);

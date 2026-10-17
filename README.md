@@ -29,6 +29,7 @@ Rules apply in the report timezone (Asia/Kolkata by default) and are stored on e
 - **On time:** punch in at or before 09:45 (09:30 start plus a 15-minute grace). A punch-in at 09:46 or later makes the day a **half day**.
 - **Required punch-out:** punch-in time plus 9 hours, but never earlier than 18:30. Punching in at 09:32 means 18:32; punching in at 09:00 still means 18:30.
 - **Leaving early:** punching out before the required time makes the day a half day. The app asks the employee to confirm first.
+- **One shift per day.** After punching out, an employee cannot punch in again the same day. If punch-out was tapped by mistake, punching out again at the workplace replaces the earlier punch-out time (the latest one is kept) and the day type is recalculated. The next calendar day starts a new shift.
 - **Both rules missed** still records one half day, with both reasons kept.
 - The portal's attendance table and the CSV export include the day type, reasons and required punch-out time. Shifts recorded before this feature have no day type.
 

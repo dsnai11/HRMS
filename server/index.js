@@ -111,6 +111,17 @@ export function createApp({
       )
       .run(actor, action, JSON.stringify(detail), new Date().toISOString());
   const transaction = (fn) => db.transaction(fn);
+  // One shift per local day: the most recent finished shift that started today.
+  async function finishedToday(userId, nowMs) {
+    const last = await db
+      .prepare(
+        "SELECT * FROM shifts WHERE user_id=? AND out_at IS NOT NULL AND in_at>=? ORDER BY id DESC LIMIT 1",
+      )
+      .get(userId, new Date(nowMs - 172800000).toISOString());
+    return last && dayOf(last.in_at) === dayOf(new Date(nowMs).toISOString())
+      ? last
+      : null;
+  }
 
   const deviceText = (value, max) =>
     typeof value === "string" && value.trim()
@@ -398,6 +409,7 @@ export function createApp({
                 "SELECT * FROM shifts WHERE user_id=? AND out_at IS NULL",
               )
               .get(user.id)) || null,
+          todayShift: await finishedToday(user.id, clock()),
           device: await deviceFromHeaders(user, req).then((d) =>
             d ? { status: d.status } : null,
           ),
@@ -476,23 +488,32 @@ export function createApp({
               `device_${device.status}`,
             );
           const result = await transaction(async () => {
+            const nowMs = clock();
             const open = await db
               .prepare(
                 "SELECT * FROM shifts WHERE user_id=? AND out_at IS NULL",
               )
               .get(user.id);
+            const done = open ? null : await finishedToday(user.id, nowMs);
             if (body.action === "in" && open)
               throw new HttpError(409, "You already have an active shift.");
-            if (body.action === "out" && !open)
+            if (body.action === "in" && done)
+              throw new HttpError(
+                409,
+                "Today's shift is already complete. Attendance is one shift per day.",
+              );
+            // A second punch-out on the same day replaces the earlier one.
+            const target = open || (body.action === "out" ? done : null);
+            if (body.action === "out" && !target)
               throw new HttpError(409, "There is no active shift to end.");
-            const site = open
+            const site = target
               ? {
-                  id: open.workplace_id,
-                  name: open.workplace_name,
-                  latitude: open.site_latitude,
-                  longitude: open.site_longitude,
-                  radius: open.radius,
-                  max_accuracy: open.max_accuracy,
+                  id: target.workplace_id,
+                  name: target.workplace_name,
+                  latitude: target.site_latitude,
+                  longitude: target.site_longitude,
+                  radius: target.radius,
+                  max_accuracy: target.max_accuracy,
                 }
               : await db
                   .prepare("SELECT * FROM workplaces WHERE id=?")
@@ -502,7 +523,6 @@ export function createApp({
                 422,
                 "Ask your administrator to assign a workplace.",
               );
-            const nowMs = clock();
             checkLocation(body.location, site, nowMs);
             const { latitude, longitude, accuracy } = body.location;
             const risk = assessPunch({
@@ -523,7 +543,7 @@ export function createApp({
                 },
               );
             const now = new Date(nowMs).toISOString();
-            let id = open?.id;
+            let id = target?.id;
             const rules =
               body.action === "in"
                 ? evaluatePunchIn(policy, nowMs, timezone)
@@ -560,10 +580,10 @@ export function createApp({
               );
             else {
               const reasons = halfDayReasons({
-                late: JSON.parse(open.half_day_reasons || "[]").includes(
+                late: JSON.parse(target.half_day_reasons || "[]").includes(
                   "late_in",
                 ),
-                requiredOutAt: open.required_out_at || open.in_at,
+                requiredOutAt: target.required_out_at || target.in_at,
                 outMs: nowMs,
               });
               await db

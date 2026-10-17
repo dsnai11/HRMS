@@ -34,6 +34,7 @@ type Profile = {
   user: User;
   workplace: { name: string; radius: number } | null;
   openShift: Shift | null;
+  todayShift: Shift | null;
   device: { status: "pending" | "approved" | "revoked" } | null;
 };
 const API = (process.env.EXPO_PUBLIC_API_URL || "").replace(/\/$/, "");
@@ -267,7 +268,10 @@ export default function Attendance() {
     run(async () => {
       const current = await api<Profile>("/me");
       setProfile(current);
-      if (Boolean(current.openShift) !== Boolean(profile?.openShift))
+      if (
+        current.openShift?.id !== profile?.openShift?.id ||
+        current.todayShift?.id !== profile?.todayShift?.id
+      )
         throw new Error(
           "Attendance changed on another device. Review your status and tap again.",
         );
@@ -277,9 +281,10 @@ export default function Attendance() {
             ? "Your phone is waiting for administrator approval."
             : "This phone is not authorised. Ask your administrator.",
         );
-      const required = current.openShift?.required_out_at;
+      const ending = current.openShift ?? current.todayShift;
+      const required = ending?.required_out_at;
       if (
-        current.openShift &&
+        ending &&
         required &&
         Date.now() < Date.parse(required) &&
         !(await new Promise<boolean>((resolve) =>
@@ -330,7 +335,7 @@ export default function Attendance() {
       }
       if (AppState.currentState !== "active")
         throw new Error("Keep the app open while recording attendance.");
-      const action = current.openShift ? "out" : "in";
+      const action = ending ? "out" : "in";
       try {
         await api("/punch", {
           action,
@@ -361,7 +366,8 @@ export default function Attendance() {
           : "You are punched out. Your working hours are saved.",
       );
     });
-  const open = profile?.openShift;
+  const open = profile?.openShift,
+    done = profile?.todayShift;
   const passwordScreen = profile?.user.must_change_password || changing;
   return (
     <SafeAreaView style={s.safe}>
@@ -530,13 +536,22 @@ export default function Attendance() {
               {!history ? (
                 <View style={s.card}>
                   <Text style={s.badge}>
-                    {open ? "● WORKING NOW" : "○ NOT PUNCHED IN"}
+                    {open
+                      ? "● WORKING NOW"
+                      : done
+                        ? "✓ PUNCHED OUT"
+                        : "○ NOT PUNCHED IN"}
                   </Text>
                   <Text style={s.heading}>
-                    {open ? "Your shift is in progress" : "Ready to begin?"}
+                    {open
+                      ? "Your shift is in progress"
+                      : done
+                        ? "Today's shift is recorded"
+                        : "Ready to begin?"}
                   </Text>
                   <Text style={s.siteName}>
                     {open?.workplace_name ||
+                      done?.workplace_name ||
                       profile.workplace?.name ||
                       "No workplace assigned"}
                   </Text>
@@ -550,9 +565,14 @@ export default function Attendance() {
                             time(open.required_out_at) +
                             " for a full day."
                           : ".")
-                      : "You must be inside your assigned " +
-                        (profile.workplace?.radius || "—") +
-                        " m boundary."}
+                      : done
+                        ? "Punched out at " +
+                          time(done.out_at ?? done.in_at) +
+                          (done.day_type === "half_day" ? " · half day" : "") +
+                          ". Punched out by mistake? Tap below at the workplace to replace it with the latest time."
+                        : "You must be inside your assigned " +
+                          (profile.workplace?.radius || "—") +
+                          " m boundary."}
                   </Text>
                   {profile.device?.status !== "approved" && (
                     <View style={s.callout}>
@@ -575,13 +595,15 @@ export default function Attendance() {
                         ? "Checking attendance…"
                         : open
                           ? "Punch out →"
-                          : "Punch in →"
+                          : done
+                            ? "Update punch-out →"
+                            : "Punch in →"
                     }
                     onPress={punch}
                     disabled={
                       busy ||
                       profile.device?.status !== "approved" ||
-                      (!open && !profile.workplace)
+                      (!open && !done && !profile.workplace)
                     }
                   />
                 </View>
