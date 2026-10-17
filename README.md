@@ -22,6 +22,18 @@ Attendance can only be recorded from the company mobile app on an administrator-
 
 **Known limit.** The mock-location, emulator and root signals are reported by the app, so a modified app or a rooted phone can lie about them. These checks raise the cost of cheating and leave a record, but they do not prove the app is genuine. Proof needs Google Play Integrity (Android) and Apple App Attest (iOS), which require Google Cloud and Apple Developer accounts and are the next step. Until then, approve a phone only after the employee confirms they have just registered it.
 
+## Shift rules (full day and half day)
+
+Rules apply in the report timezone (Asia/Kolkata by default) and are stored on each shift at punch-in.
+
+- **On time:** punch in at or before 09:45 (09:30 start plus a 15-minute grace). A punch-in at 09:46 or later makes the day a **half day**.
+- **Required punch-out:** punch-in time plus 9 hours, but never earlier than 18:30. Punching in at 09:32 means 18:32; punching in at 09:00 still means 18:30.
+- **Leaving early:** punching out before the required time makes the day a half day. The app asks the employee to confirm first.
+- **Both rules missed** still records one half day, with both reasons kept.
+- The portal's attendance table and the CSV export include the day type, reasons and required punch-out time. Shifts recorded before this feature have no day type.
+
+Defaults can be changed with the environment variables `SHIFT_START` (`09:30`), `LATE_GRACE_MINUTES` (`15`), `SHIFT_HOURS` (`9`) and `EARLIEST_OUT` (`18:30`). One policy applies to everyone for now.
+
 ## Run the web portal and API
 
 Requires Node.js 24 or newer. Run `npm ci` first. The server uses the `pg` driver for hosted PostgreSQL; local development can still use SQLite.

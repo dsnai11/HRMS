@@ -26,6 +26,9 @@ type Shift = {
   workplace_name: string;
   in_at: string;
   out_at: string | null;
+  required_out_at?: string | null;
+  day_type?: "full_day" | "half_day" | null;
+  half_day_reasons?: string;
 };
 type Profile = {
   user: User;
@@ -274,6 +277,30 @@ export default function Attendance() {
             ? "Your phone is waiting for administrator approval."
             : "This phone is not authorised. Ask your administrator.",
         );
+      const required = current.openShift?.required_out_at;
+      if (
+        current.openShift &&
+        required &&
+        Date.now() < Date.parse(required) &&
+        !(await new Promise<boolean>((resolve) =>
+          Alert.alert(
+            "Punch out early?",
+            "Your full day completes at " +
+              time(required) +
+              ". Punching out now marks this day as a half day.",
+            [
+              { text: "Stay", style: "cancel", onPress: () => resolve(false) },
+              {
+                text: "Punch out",
+                style: "destructive",
+                onPress: () => resolve(true),
+              },
+            ],
+            { cancelable: true, onDismiss: () => resolve(false) },
+          ),
+        ))
+      )
+        return;
       const permission = await Location.requestForegroundPermissionsAsync();
       if (permission.status !== "granted")
         throw new Error(
@@ -517,7 +544,12 @@ export default function Attendance() {
                     {open
                       ? "Started " +
                         time(open.in_at) +
-                        ". End your shift at this same workplace."
+                        ". End your shift at this same workplace" +
+                        (open.required_out_at
+                          ? " after " +
+                            time(open.required_out_at) +
+                            " for a full day."
+                          : ".")
                       : "You must be inside your assigned " +
                         (profile.workplace?.radius || "—") +
                         " m boundary."}
@@ -570,6 +602,19 @@ export default function Attendance() {
                           Out:{" "}
                           {shift.out_at ? time(shift.out_at) : "Still working"}
                         </Text>
+                        {shift.day_type && (
+                          <Text style={s.note}>
+                            {shift.day_type === "half_day"
+                              ? "Half day (" +
+                                JSON.parse(shift.half_day_reasons || "[]")
+                                  .map((r: string) =>
+                                    r === "late_in" ? "late in" : "left early",
+                                  )
+                                  .join(", ") +
+                                ")"
+                              : "Full day"}
+                          </Text>
+                        )}
                         <Text style={s.siteName}>
                           {(
                             ((shift.out_at

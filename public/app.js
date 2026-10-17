@@ -139,9 +139,22 @@ function shell() {
 function heading(title, subtitle, action = "") {
   return `<div class="heading"><div><div class="eyebrow">People operations</div><h1>${esc(title)}</h1><p class="muted">${esc(subtitle)}</p></div>${action}</div>`;
 }
+const reasonLabels = { late_in: "late in", early_out: "left early" };
+function dayCell(s) {
+  const reasons = JSON.parse(s.half_day_reasons || "[]")
+    .map((r) => reasonLabels[r] || r)
+    .join(", ");
+  if (s.day_type === "half_day")
+    return `<span class="pill">Half day</span><small>${esc(reasons)}${s.out_at ? "" : " · still working"}</small>`;
+  if (s.day_type === "full_day")
+    return `<span class="pill neutral">Full day</span>`;
+  return s.required_out_at
+    ? `<small>Out after ${time(s.required_out_at)} for a full day</small>`
+    : "—";
+}
 function table(rows) {
   return rows.length
-    ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Workplace</th><th>Punch in</th><th>Punch out</th><th>Hours</th><th>Status</th><th>GPS records</th></tr></thead><tbody>${rows.map((s) => `<tr><td><div class="person"><span class="avatar">${initials(s.employee_name || me.name)}</span><div>${esc(s.employee_name || me.name)}<small>${esc(s.email || me.email)}</small></div></div></td><td>${esc(s.workplace_name)}</td><td>${time(s.in_at)}</td><td>${time(s.out_at)}</td><td>${(((s.out_at ? Date.parse(s.out_at) : Date.now()) - Date.parse(s.in_at)) / 3600000).toFixed(2)}</td><td><span class="pill ${s.out_at ? "neutral" : ""}">${s.out_at ? "Completed" : "Working"}</span></td><td><a href="https://www.google.com/maps?q=${s.in_latitude},${s.in_longitude}" target="_blank" rel="noreferrer">In · ±${Math.round(s.in_accuracy)}m ↗</a>${s.out_at ? `<small><a href="https://www.google.com/maps?q=${s.out_latitude},${s.out_longitude}" target="_blank" rel="noreferrer">Out · ±${Math.round(s.out_accuracy)}m ↗</a></small>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+    ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Workplace</th><th>Punch in</th><th>Punch out</th><th>Hours</th><th>Status</th><th>Day</th><th>GPS records</th></tr></thead><tbody>${rows.map((s) => `<tr><td><div class="person"><span class="avatar">${initials(s.employee_name || me.name)}</span><div>${esc(s.employee_name || me.name)}<small>${esc(s.email || me.email)}</small></div></div></td><td>${esc(s.workplace_name)}</td><td>${time(s.in_at)}</td><td>${time(s.out_at)}</td><td>${(((s.out_at ? Date.parse(s.out_at) : Date.now()) - Date.parse(s.in_at)) / 3600000).toFixed(2)}</td><td><span class="pill ${s.out_at ? "neutral" : ""}">${s.out_at ? "Completed" : "Working"}</span></td><td>${dayCell(s)}</td><td><a href="https://www.google.com/maps?q=${s.in_latitude},${s.in_longitude}" target="_blank" rel="noreferrer">In · ±${Math.round(s.in_accuracy)}m ↗</a>${s.out_at ? `<small><a href="https://www.google.com/maps?q=${s.out_latitude},${s.out_longitude}" target="_blank" rel="noreferrer">Out · ±${Math.round(s.out_accuracy)}m ↗</a></small>` : ""}</td></tr>`).join("")}</tbody></table></div>`
     : empty("No attendance records yet", "Recorded punches will appear here.");
 }
 let renderId = 0;
@@ -452,7 +465,7 @@ async function employeeView(id) {
   const open = profile.openShift;
   document.querySelector("#content").innerHTML =
     heading(`Hello, ${me.name.split(" ")[0]}`, "Your workday, in one place.") +
-    `<div class="card punch-card"><span class="pill ${open ? "" : "neutral"}">${open ? "You are working" : "Not punched in"}</span><div class="big-clock">${open ? "Your shift is in progress" : "Ready for your day?"}</div><h2>${esc(open?.workplace_name || profile.workplace?.name || "No workplace assigned")}</h2><p class="muted">${open ? `Started ${time(open.in_at)}. Punch out at the same workplace.` : `Punch in within ${profile.workplace?.radius || "—"} metres of your assigned workplace.`}</p><div class="callout">Attendance is recorded only from the company mobile app, at your assigned workplace.</div></div><div class="card"><h2>My recent attendance</h2>${table(shifts)}</div>`;
+    `<div class="card punch-card"><span class="pill ${open ? "" : "neutral"}">${open ? "You are working" : "Not punched in"}</span><div class="big-clock">${open ? "Your shift is in progress" : "Ready for your day?"}</div><h2>${esc(open?.workplace_name || profile.workplace?.name || "No workplace assigned")}</h2><p class="muted">${open ? `Started ${time(open.in_at)}. Punch out at the same workplace${open.required_out_at ? ` after ${time(open.required_out_at)} for a full day` : ""}.` : `Punch in within ${profile.workplace?.radius || "—"} metres of your assigned workplace.`}</p><div class="callout">Attendance is recorded only from the company mobile app, at your assigned workplace.</div></div><div class="card"><h2>My recent attendance</h2>${table(shifts)}</div>`;
 }
 (async () => {
   try {

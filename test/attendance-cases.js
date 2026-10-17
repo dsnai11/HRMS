@@ -4,6 +4,12 @@ import { createAdmin } from "../server/db.js";
 import { createApp } from "../server/index.js";
 import { checkLocation, distanceMeters } from "../server/geo.js";
 import { assessPunch, parseSignals } from "../server/risk.js";
+import {
+  DEFAULT_POLICY,
+  evaluatePunchIn,
+  halfDayReasons,
+  loadPolicy,
+} from "../server/policy.js";
 export function attendanceCases(openTestDatabase) {
   test("first administrator setup requires a private code and can only be used once", async (t) => {
     const original = process.env.SETUP_TOKEN;
@@ -452,6 +458,236 @@ export function attendanceCases(openTestDatabase) {
       ).status,
       403,
     );
+  });
+  test("shift rules: grace until 9:45, nine hours, never out before 6:30 pm", () => {
+    const at = (hhmmss) => Date.parse(`2026-10-19T${hhmmss}+05:30`);
+    const rule = (hhmmss) =>
+      evaluatePunchIn(DEFAULT_POLICY, at(hhmmss), "Asia/Kolkata");
+    const outLocal = (r) =>
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+      }).format(new Date(r.requiredOutAt));
+    assert.deepEqual(
+      [rule("09:30:00").late, outLocal(rule("09:30:00"))],
+      [false, "18:30:00"],
+    );
+    assert.deepEqual(
+      [rule("09:32:00").late, outLocal(rule("09:32:00"))],
+      [false, "18:32:00"],
+    );
+    assert.equal(rule("09:45:59").late, false);
+    assert.equal(rule("09:46:00").late, true);
+    // Arriving early gives no earlier exit.
+    assert.equal(outLocal(rule("09:00:00")), "18:30:00");
+    assert.equal(outLocal(rule("08:10:00")), "18:30:00");
+    assert.equal(outLocal(rule("11:00:00")), "20:00:00");
+    const required = rule("09:32:00").requiredOutAt;
+    assert.deepEqual(
+      halfDayReasons({
+        late: false,
+        requiredOutAt: required,
+        outMs: at("18:31:59"),
+      }),
+      ["early_out"],
+    );
+    assert.deepEqual(
+      halfDayReasons({
+        late: false,
+        requiredOutAt: required,
+        outMs: at("18:32:00"),
+      }),
+      [],
+    );
+    assert.deepEqual(
+      halfDayReasons({
+        late: true,
+        requiredOutAt: required,
+        outMs: at("19:00:00"),
+      }),
+      ["late_in"],
+    );
+    assert.deepEqual(
+      halfDayReasons({
+        late: true,
+        requiredOutAt: required,
+        outMs: at("17:00:00"),
+      }),
+      ["late_in", "early_out"],
+    );
+    const custom = loadPolicy({
+      SHIFT_START: "10:00",
+      LATE_GRACE_MINUTES: "10",
+      SHIFT_HOURS: "8",
+      EARLIEST_OUT: "17:00",
+    });
+    assert.equal(
+      evaluatePunchIn(custom, at("10:10:59"), "Asia/Kolkata").late,
+      false,
+    );
+    assert.equal(
+      evaluatePunchIn(custom, at("10:11:00"), "Asia/Kolkata").late,
+      true,
+    );
+    assert.throws(() => loadPolicy({ SHIFT_START: "9:30am" }));
+  });
+  test("punches are marked full or half day by the shift rules", async (t) => {
+    let nowMs = Date.parse("2026-10-19T09:00:00+05:30");
+    const db = await openTestDatabase();
+    await createAdmin(db, {
+      name: "Admin",
+      email: "admin@example.test",
+      password: "Admin-password-123",
+    });
+    const { server } = createApp({ db, clock: () => nowMs });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    t.after(
+      () =>
+        new Promise((resolve) => {
+          server.close(async () => {
+            await db.close();
+            resolve();
+          });
+          server.closeAllConnections();
+        }),
+    );
+    const base = `http://127.0.0.1:${server.address().port}/api`;
+    const call = async (path, body, token, headers = {}, method = "POST") => {
+      const res = await fetch(base + path, {
+        method: body === undefined ? "GET" : method,
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...headers,
+        },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      });
+      return { status: res.status, data: await res.json() };
+    };
+    const admin = (
+      await call("/login", {
+        email: "admin@example.test",
+        password: "Admin-password-123",
+        native: true,
+      })
+    ).data.token;
+    const site = (
+      await call(
+        "/admin/workplaces",
+        {
+          name: "Office",
+          latitude: 26.9124,
+          longitude: 75.7873,
+          radius: 150,
+          max_accuracy: 50,
+        },
+        admin,
+      )
+    ).data.id;
+    async function employee(n) {
+      const email = `shift${n}@example.test`;
+      const id = (
+        await call(
+          "/admin/employees",
+          {
+            name: `Shift ${n}`,
+            email,
+            password: "Temporary-pass-123",
+            workplace_id: site,
+          },
+          admin,
+        )
+      ).data.id;
+      await db
+        .prepare("UPDATE users SET must_change_password=0 WHERE id=?")
+        .run(id);
+      const device = {
+        id: `shift-device-${String(n).padStart(8, "0")}`,
+        platform: "ios",
+        model: "iPhone",
+      };
+      const reg = await call("/login", {
+        email,
+        password: "Temporary-pass-123",
+        native: true,
+        device,
+      });
+      const row = (await call("/admin/devices", undefined, admin)).data.find(
+        (d) => d.user_id === id,
+      );
+      await call(
+        `/admin/devices/${row.id}`,
+        { status: "approved" },
+        admin,
+        {},
+        "PATCH",
+      );
+      const headers = {
+        "X-Device-Id": device.id,
+        "X-Device-Secret": reg.data.deviceSecret,
+      };
+      return (action, local) => {
+        nowMs = Date.parse(`2026-10-19T${local}+05:30`);
+        return call(
+          "/punch",
+          {
+            action,
+            location: loc({ timestamp: nowMs }),
+            signals: { emulator: false, rooted: false },
+          },
+          reg.data.token,
+          headers,
+        );
+      };
+    }
+    const onTime = await employee(1);
+    const inA = await onTime("in", "09:32:00");
+    assert.equal(inA.status, 200);
+    assert.equal(inA.data.day_type, null);
+    assert.equal(
+      new Date(inA.data.required_out_at).getTime(),
+      Date.parse("2026-10-19T18:32:00+05:30"),
+    );
+    const early = await onTime("out", "18:31:00");
+    assert.equal(early.data.day_type, "half_day");
+    assert.deepEqual(JSON.parse(early.data.half_day_reasons), ["early_out"]);
+
+    const grace = await employee(2);
+    assert.equal((await grace("in", "09:45:59")).data.day_type, null);
+    const full = await grace("out", "18:46:00");
+    assert.equal(full.data.day_type, "full_day");
+
+    const late = await employee(3);
+    const lateIn = await late("in", "09:46:00");
+    assert.equal(lateIn.data.day_type, "half_day");
+    assert.deepEqual(JSON.parse(lateIn.data.half_day_reasons), ["late_in"]);
+    const lateOut = await late("out", "19:30:00");
+    assert.equal(lateOut.data.day_type, "half_day");
+    assert.deepEqual(JSON.parse(lateOut.data.half_day_reasons), ["late_in"]);
+
+    const earlyBird = await employee(4);
+    const birdIn = await earlyBird("in", "09:00:00");
+    assert.equal(
+      new Date(birdIn.data.required_out_at).getTime(),
+      Date.parse("2026-10-19T18:30:00+05:30"),
+    );
+    assert.equal(
+      (await earlyBird("out", "18:30:00")).data.day_type,
+      "full_day",
+    );
+
+    const report = (
+      await call(
+        "/admin/attendance?from=2026-10-19&to=2026-10-19",
+        undefined,
+        admin,
+      )
+    ).data;
+    assert.equal(report.filter((r) => r.day_type === "half_day").length, 2);
+    assert.equal(report.filter((r) => r.day_type === "full_day").length, 2);
   });
   test("attendance API enforces roles, assignment, same-site punch-out, sessions and reports", async (t) => {
     const db = await openTestDatabase();

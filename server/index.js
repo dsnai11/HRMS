@@ -12,6 +12,7 @@ import {
 } from "./db.js";
 import { checkLocation, HttpError } from "./geo.js";
 import { assessPunch, parseSignals } from "./risk.js";
+import { loadPolicy, evaluatePunchIn, halfDayReasons } from "./policy.js";
 const publicDir = new URL("../public/", import.meta.url);
 const dummyHash = passwordHash("unused-password-for-timing");
 const safeUser = (u) => ({
@@ -77,6 +78,8 @@ export function createApp({
   production = process.env.NODE_ENV === "production",
   company = process.env.COMPANY_NAME || "Laxmi India Finance Ltd.",
   timezone = process.env.REPORT_TIMEZONE || "Asia/Kolkata",
+  policy = loadPolicy(),
+  clock = Date.now,
 } = {}) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
@@ -204,7 +207,7 @@ export function createApp({
         finite(event.location?.longitude),
         finite(event.location?.accuracy),
         JSON.stringify(event.signals || {}),
-        new Date().toISOString(),
+        new Date(clock()).toISOString(),
       );
   }
   const handle = async (req, res) => {
@@ -499,11 +502,13 @@ export function createApp({
                 422,
                 "Ask your administrator to assign a workplace.",
               );
-            checkLocation(body.location, site);
+            const nowMs = clock();
+            checkLocation(body.location, site, nowMs);
             const { latitude, longitude, accuracy } = body.location;
             const risk = assessPunch({
               signals,
               location: body.location,
+              now: nowMs,
               previous: await db
                 .prepare(
                   "SELECT latitude,longitude,created_at FROM punch_events WHERE user_id=? AND outcome='accepted' ORDER BY id DESC LIMIT 3",
@@ -517,14 +522,18 @@ export function createApp({
                   flags: risk.flags,
                 },
               );
-            const now = new Date().toISOString();
+            const now = new Date(nowMs).toISOString();
             let id = open?.id;
+            const rules =
+              body.action === "in"
+                ? evaluatePunchIn(policy, nowMs, timezone)
+                : null;
             if (body.action === "in")
               id = Number(
                 (
                   await db
                     .prepare(
-                      "INSERT INTO shifts(user_id,workplace_id,workplace_name,site_latitude,site_longitude,radius,max_accuracy,in_at,in_latitude,in_longitude,in_accuracy) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                      "INSERT INTO shifts(user_id,workplace_id,workplace_name,site_latitude,site_longitude,radius,max_accuracy,in_at,in_latitude,in_longitude,in_accuracy,required_out_at,day_type,half_day_reasons) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     )
                     .run(
                       user.id,
@@ -538,15 +547,39 @@ export function createApp({
                       latitude,
                       longitude,
                       accuracy,
+                      rules.requiredOutAt,
+                      rules.late ? "half_day" : null,
+                      JSON.stringify(
+                        halfDayReasons({
+                          late: rules.late,
+                          requiredOutAt: rules.requiredOutAt,
+                        }),
+                      ),
                     )
                 ).lastInsertRowid,
               );
-            else
+            else {
+              const reasons = halfDayReasons({
+                late: JSON.parse(open.half_day_reasons || "[]").includes(
+                  "late_in",
+                ),
+                requiredOutAt: open.required_out_at || open.in_at,
+                outMs: nowMs,
+              });
               await db
                 .prepare(
-                  "UPDATE shifts SET out_at=?,out_latitude=?,out_longitude=?,out_accuracy=? WHERE id=?",
+                  "UPDATE shifts SET out_at=?,out_latitude=?,out_longitude=?,out_accuracy=?,day_type=?,half_day_reasons=? WHERE id=?",
                 )
-                .run(now, latitude, longitude, accuracy, id);
+                .run(
+                  now,
+                  latitude,
+                  longitude,
+                  accuracy,
+                  reasons.length ? "half_day" : "full_day",
+                  JSON.stringify(reasons),
+                  id,
+                );
+            }
             await recordPunchEvent(user, {
               action: body.action,
               outcome: "accepted",
@@ -812,6 +845,9 @@ export function createApp({
             "in_at",
             "out_at",
             "hours",
+            "day_type",
+            "half_day_reasons",
+            "required_out_at",
             "in_latitude",
             "in_longitude",
             "in_accuracy",

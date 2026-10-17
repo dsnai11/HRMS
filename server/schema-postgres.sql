@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS workplaces (
       workplace_id INTEGER NOT NULL REFERENCES workplaces(id), workplace_name TEXT NOT NULL,
       site_latitude DOUBLE PRECISION NOT NULL, site_longitude DOUBLE PRECISION NOT NULL, radius DOUBLE PRECISION NOT NULL, max_accuracy DOUBLE PRECISION NOT NULL,
       in_at TEXT NOT NULL, in_latitude DOUBLE PRECISION NOT NULL, in_longitude DOUBLE PRECISION NOT NULL, in_accuracy DOUBLE PRECISION NOT NULL,
-      out_at TEXT, out_latitude DOUBLE PRECISION, out_longitude DOUBLE PRECISION, out_accuracy DOUBLE PRECISION
+      out_at TEXT, out_latitude DOUBLE PRECISION, out_longitude DOUBLE PRECISION, out_accuracy DOUBLE PRECISION,
+      required_out_at TEXT, day_type TEXT, half_day_reasons TEXT NOT NULL DEFAULT '[]'
     );
     CREATE UNIQUE INDEX IF NOT EXISTS one_open_shift ON shifts(user_id) WHERE out_at IS NULL;
     CREATE TABLE IF NOT EXISTS audit (
@@ -38,3 +39,6 @@ CREATE TABLE IF NOT EXISTS workplaces (
       latitude DOUBLE PRECISION, longitude DOUBLE PRECISION, accuracy DOUBLE PRECISION, signals TEXT, created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS punch_events_user ON punch_events(user_id, id);
+    ALTER TABLE shifts ADD COLUMN IF NOT EXISTS required_out_at TEXT;
+    ALTER TABLE shifts ADD COLUMN IF NOT EXISTS day_type TEXT;
+    ALTER TABLE shifts ADD COLUMN IF NOT EXISTS half_day_reasons TEXT NOT NULL DEFAULT '[]';
