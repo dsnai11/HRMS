@@ -9,6 +9,7 @@ import { HttpError, string, password, email, clientIp } from "../http.js";
 import { permissionsFor } from "../rbac.js";
 import { bindDevice, deviceFromHeaders } from "../devices.js";
 import { finishedToday } from "./attendance.js";
+import { pendingApprovals } from "../approval.js";
 
 const dummyHash = passwordHash("unused-password-for-timing");
 // Roles that record attendance from a phone must register it.
@@ -159,6 +160,7 @@ export function registerAuth(router, app) {
             )
             .get(user.id),
         ),
+        approvals_pending: await pendingApprovals(app, user),
         workplace: user.workplace_id
           ? await db
               .prepare("SELECT * FROM workplaces WHERE id=?")

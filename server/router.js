@@ -20,6 +20,7 @@ export function createRouter() {
     get: add("GET"),
     post: add("POST"),
     patch: add("PATCH"),
+    delete: add("DELETE"),
     match(method, path) {
       let pathMatched = false;
       for (const r of routes) {

@@ -678,3 +678,109 @@ dialog h2 {
   max-width: 190px;
   padding: 6px 10px;
 }
+
+/* Time off */
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.cal .dow,
+.cal .grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+.cal .dow {
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.day {
+  min-height: 62px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.day b {
+  font-size: 13px;
+}
+.day small {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.2;
+}
+.day.blank {
+  border: 0;
+  background: transparent;
+}
+.day.present {
+  background: #e3f4ec;
+}
+.day.half_day,
+.day.half_day_and_leave,
+.day.half_leave {
+  background: #fff3d6;
+}
+.day.leave {
+  background: #e1ecfb;
+}
+.day.holiday {
+  background: #efe6fa;
+}
+.day.weekly_off,
+.day.future,
+.day.not_joined,
+.day.not_started {
+  background: #f1f3f2;
+}
+.day.absent {
+  background: #fbe4e1;
+}
+.day.pending {
+  border-color: var(--green);
+}
+.checks {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.check input {
+  width: auto;
+}
+textarea {
+  font: inherit;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+label.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+@media (max-width: 700px) {
+  .day {
+    min-height: 48px;
+    padding: 4px;
+  }
+  .day small {
+    display: none;
+  }
+}

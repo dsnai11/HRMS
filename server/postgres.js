@@ -36,7 +36,7 @@ export function createPostgresStore(pool) {
         },
         async run(...params) {
           const returning =
-            /^INSERT\s+INTO\s+(users|workplaces|shifts|audit|devices|punch_events|companies|branches|departments|designations)\b/i.test(
+            /^INSERT\s+INTO\s+(users|workplaces|shifts|audit|devices|punch_events|companies|branches|departments|designations|holidays|leave_types|leave_ledger|leave_requests|leave_days|regularizations)\b/i.test(
               statement,
             );
           const result = await query(

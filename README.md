@@ -20,6 +20,18 @@ Attendance application with an Android/iPhone Expo client, a responsive admin po
 - **Employee profile.** Employee code (auto-generated `E0001…` or set by HR), job details (department, designation, branch, workplace, manager, employment type, joining date), personal details and an emergency contact. Employees edit only their contact details under **My profile**.
 - **Server layout.** `server/routes/*` hold the API by area, `server/rbac.js` the roles, `server/migrations/*.sql` the schema. Bank, PAN and Aadhaar data are deliberately not stored yet; they arrive with payroll and its protections.
 
+## Time off
+
+- **Leave types** are per company (**Leave & holidays → Leave types**). "Add standard Indian types" creates Casual (12), Sick (7), Earned (15, carry forward up to 30), Maternity (182, women only) and unpaid Leave Without Pay (unlimited). Each type sets paid or unpaid, yearly quota, monthly or yearly accrual, carry-forward limit, half-day permission, gender and a per-request maximum.
+- **Accrual** is computed when balances are read or HR runs "accrue", and is safe to repeat. Monthly accrual is rounded cumulatively, so a year always totals its quota exactly. Joiners accrue from their joining month. Accrual starts in the leave year in which leave was first set up; earlier years are never back-filled, so enter opening balances as adjustments. The leave year can start in any month (January or April) and cannot change once balances exist.
+- **Calendar.** Weekly offs (any weekdays, plus chosen Saturdays such as the 2nd and 4th) and company or branch holidays are not deducted from leave.
+- **Applying.** Employees apply for full or half days. A request is checked for balance (pending requests are reserved), overlapping leave (also enforced by the database), holidays, leave-year boundaries and gender rules. Approved leave is a ledger entry; cancelling returns the days.
+- **Approvals.** A person's manager (anyone above them in the reporting line) or HR/admin decides; nobody decides their own. Managers and HR have an **Approvals** inbox with a pending count. Started leave can only be cancelled by HR.
+- **Attendance corrections.** Missed or wrong punch, on duty and work from home. Allowed for today or the last N days (default 7) and at most N per month (default 5), both set by HR. Approval creates or completes that day's shift, marked *corrected*, *on duty* or *work from home*; late arrival or early leave still makes a half day, while on duty and work from home count as full days. A day with leave cannot also be corrected.
+- **Monthly muster** (HR) and **Time off** calendar (everyone): each day is present, half day, leave, holiday, weekly off or absent, giving payable days and loss-of-pay days for payroll. Days before the company started using the system (or before a person joined) are not counted; HR can set "counted from". Today is not counted until it has attendance or leave. Export as CSV.
+
+Not yet included: shifts or weekly offs per branch or employee, a per-company timezone, multi-level approval chains, comp-off, leave encashment and optional holidays. See `docs/ROADMAP.md`.
+
 ## Attendance integrity (anti-spoofing)
 
 Attendance can only be recorded from the company mobile app on an administrator-approved phone.

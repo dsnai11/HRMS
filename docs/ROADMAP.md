@@ -16,12 +16,18 @@ Geofenced mobile punching, device binding, anti-spoofing checks, shift rules (gr
 - Manager views: my team and their attendance.
 - Modular server (routes per area) so later modules have a home.
 
-## Stage 2 — Time off and attendance policy
-- Holiday calendars per company or branch; weekly offs.
-- Leave types, accrual, balances, carry-forward; apply, approve, reject, cancel.
-- Attendance regularization requests with approval.
+## Stage 2 — Time off and attendance policy (in progress)
+Done:
+- Holiday calendars per company or branch; weekly offs including chosen Saturdays.
+- Leave types, accrual (monthly or yearly), balances ledger, carry-forward, adjustments; apply, approve, reject, cancel.
+- Attendance regularization (missed or wrong punch, on duty, work from home) with approval, window and monthly limit.
+- Approvals inbox for managers and HR; monthly muster with payable and loss-of-pay days; employee calendar.
+
+Still to do:
 - Shift and policy per branch or employee (replacing the single global policy); per-company timezone.
-- Approval workflows with manager and HR chains.
+- Multi-level approval chains (manager then HR); delegation when an approver is away.
+- Comp-off, leave encashment, optional holidays, sandwich-leave rule.
+- Leave in the mobile app.
 
 ## Stage 3 — Payroll
 - Salary structures and components, revisions, arrears.

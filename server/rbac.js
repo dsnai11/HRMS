@@ -10,6 +10,9 @@ const HR = [
   "attendance.read",
   "devices.manage",
   "security.read",
+  "leave.manage",
+  "leave.approve",
+  "leave.read",
 ];
 const ADMIN = [...HR, "workplaces.manage", "audit.read", "roles.assign"];
 const PERMISSIONS = {

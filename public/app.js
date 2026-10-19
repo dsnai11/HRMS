@@ -53,7 +53,8 @@ const today = () =>
   }).format(new Date());
 async function api(path, body, method = "POST") {
   const res = await fetch(`/api${path}`, {
-    ...(body !== undefined ? { method, body: JSON.stringify(body) } : {}),
+    ...(body !== undefined || method !== "POST" ? { method } : {}),
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     headers: {
       "Content-Type": "application/json",
       ...(activeCompany ? { "X-Company-Id": String(activeCompany) } : {}),
@@ -143,10 +144,20 @@ function shell() {
     has("org.read") && ["organization", "▦", "Organization"],
     has("attendance.read") && ["attendance", "▤", "Attendance"],
     has("org.read") && ["workplaces", "◎", "Workplaces"],
+    has("attendance.read") && ["muster", "▥", "Monthly muster"],
+    has("leave.manage") && ["leaveadmin", "❖", "Leave & holidays"],
     has("devices.manage") && ["devices", "▣", "Devices"],
     has("security.read") && ["security", "⚠", "Security"],
     has("audit.read") && ["audit", "≡", "Activity log"],
+    (me.is_manager || has("leave.approve")) && [
+      "approvals",
+      "✓",
+      me.approvals_pending
+        ? `Approvals (${me.approvals_pending})`
+        : "Approvals",
+    ],
     me.is_manager && ["team", "☷", "My team"],
+    me.role !== "super_admin" && ["timeoff", "☼", "Time off"],
     me.role !== "super_admin" && ["mine", "◎", "My attendance"],
     ["profile", "☺", "My profile"],
   ].filter(Boolean);
@@ -189,6 +200,13 @@ function dayCell(s) {
   const reasons = JSON.parse(s.half_day_reasons || "[]")
     .map((r) => reasonLabels[r] || r)
     .join(", ");
+  const origin = {
+    regularized: "corrected",
+    on_duty: "on duty",
+    work_from_home: "work from home",
+  }[s.source];
+  if (origin && s.day_type)
+    return `<span class="pill ${s.day_type === "half_day" ? "" : "neutral"}">${s.day_type === "half_day" ? "Half day" : "Full day"}</span><small>${origin}</small>`;
   if (s.day_type === "half_day")
     return `<span class="pill">Half day</span><small>${esc(reasons)}${s.out_at ? "" : " · still working"}</small>`;
   if (s.day_type === "full_day")
@@ -220,6 +238,10 @@ async function render() {
     if (page === "mine") return await employeeView(id);
     if (page === "profile") return await profileView(id);
     if (page === "team") return await teamView(id);
+    if (page === "timeoff") return await timeOffPage(id);
+    if (page === "approvals") return await approvalsPage(id);
+    if (page === "leaveadmin") return await leaveAdminPage(id);
+    if (page === "muster") return await musterPage(id);
     if (page === "overview") {
       const [stats, active, sites] = await Promise.all([
         api("/admin/overview"),

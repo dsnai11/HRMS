@@ -13,11 +13,15 @@ import { registerEmployees } from "./routes/employees.js";
 import { registerReports } from "./routes/reports.js";
 import { registerAdmin } from "./routes/admin.js";
 import { registerTeam } from "./routes/team.js";
+import { registerLeave } from "./routes/leave.js";
+import { registerRegularization } from "./routes/regularization.js";
+import { registerSummary } from "./routes/summary.js";
 
 const publicDir = new URL("../public/", import.meta.url);
 const STATIC = {
   "/": ["index.html", "text/html"],
   "/app.js": ["app.js", "text/javascript"],
+  "/timeoff.js": ["timeoff.js", "text/javascript"],
   "/styles.css": ["styles.css", "text/css"],
 };
 
@@ -82,6 +86,9 @@ export function createApp({
     registerReports,
     registerAdmin,
     registerTeam,
+    registerLeave,
+    registerRegularization,
+    registerSummary,
   ])
     register(router, app);
 
@@ -150,7 +157,7 @@ export function createApp({
         });
         return res.end(content);
       }
-      if (!["GET", "POST", "PATCH"].includes(method))
+      if (!["GET", "POST", "PATCH", "DELETE"].includes(method))
         throw new HttpError(405, "Method not allowed.");
       // Browser requests must be same-origin. Native requests do not carry Origin.
       if (req.headers.origin) {
@@ -162,6 +169,7 @@ export function createApp({
       }
       if (
         method !== "GET" &&
+        method !== "DELETE" &&
         !req.headers["content-type"]?.startsWith("application/json")
       )
         throw new HttpError(415, "Use application/json.");
