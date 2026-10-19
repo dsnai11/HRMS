@@ -739,6 +739,7 @@ dialog h2 {
 .day.weekly_off,
 .day.future,
 .day.not_joined,
+.day.exited,
 .day.not_started {
   background: #f1f3f2;
 }

@@ -349,7 +349,9 @@ test("a candidate moves from opening to hired employee with an onboarding checkl
   assert.equal(tasks.length, 9);
   assert.equal(tasks[0].due_date, "2026-12-01");
   // The new joiner completes only their own tasks; their manager the manager's.
-  await w.db.prepare("UPDATE users SET must_change_password=0 WHERE id=?").run(hire.data.user_id);
+  await w.db
+    .prepare("UPDATE users SET must_change_password=0 WHERE id=?")
+    .run(hire.data.user_id);
   const joiner = await w.signIn("asha@example.test");
   const own = (await call("/onboarding/mine", undefined, joiner)).data;
   const byOwner = (o) => own.find((x) => x.owner === o);

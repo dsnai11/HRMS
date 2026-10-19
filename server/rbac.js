@@ -15,6 +15,7 @@ const HR = [
   "leave.read",
   "recruitment.manage",
   "assets.manage",
+  "exit.manage",
 ];
 const PAYROLL = ["payroll.manage", "payroll.read"];
 const ADMIN = [

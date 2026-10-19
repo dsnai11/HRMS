@@ -39,7 +39,7 @@ export async function computeMuster(
     }
   const people = await db
     .prepare(
-      `SELECT u.id,u.name,u.employee_code,u.branch_id,u.date_of_joining,d.name department_name FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE ${where.join(" AND ")} ORDER BY u.name,u.id`,
+      `SELECT u.id,u.name,u.employee_code,u.branch_id,u.date_of_joining,u.exit_date,d.name department_name FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE ${where.join(" AND ")} ORDER BY u.name,u.id`,
     )
     .all(...params);
   if (!people.length) return { month, from, to, people: [] };
@@ -105,6 +105,10 @@ export async function computeMuster(
       }
       if (p.date_of_joining && date < p.date_of_joining) {
         days.push({ date, status: "not_joined" });
+        continue;
+      }
+      if (p.exit_date && date > p.exit_date) {
+        days.push({ date, status: "exited" });
         continue;
       }
       const s = shiftOf.get(`${p.id}|${date}`);
