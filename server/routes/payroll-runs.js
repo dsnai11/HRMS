@@ -71,6 +71,16 @@ export function registerPayrollRuns(router, app) {
          FROM reimbursement_claims c JOIN claim_types t ON t.id=c.claim_type_id WHERE c.company_id=? AND c.status='approved'`,
       )
       .all(companyId);
+    const lwfRules = (
+      await db
+        .prepare("SELECT * FROM lwf_rules WHERE company_id=?")
+        .all(companyId)
+    ).filter((r) =>
+      r.months
+        .split(",")
+        .map(Number)
+        .includes(Number(month.slice(5, 7))),
+    );
     const slabs = await db
       .prepare("SELECT * FROM pt_slabs WHERE company_id=?")
       .all(companyId);
@@ -157,6 +167,20 @@ export function registerPayrollRuns(router, app) {
           declared_deductions: salary.declared_deductions,
         },
         person: { gender: p.gender, date_of_birth: p.date_of_birth },
+        lwf: (() => {
+          const r = lwfRules.find(
+            (x) =>
+              p.branch_state &&
+              x.state.toLowerCase() === p.branch_state.trim().toLowerCase(),
+          );
+          return r
+            ? {
+                employee: r.employee_amount,
+                employer: r.employer_amount,
+                max_wage: r.max_wage,
+              }
+            : null;
+        })(),
         ptSlabs: slabs.filter(
           (s) =>
             p.branch_state &&
@@ -556,6 +580,7 @@ export function registerPayrollRuns(router, app) {
           ["pf", "PF (employee)"],
           ["esi", "ESI (employee)"],
           ["pt", "Professional tax"],
+          ["lwf", "Labour welfare fund"],
           ["tds", "TDS"],
           ["other", "Other deductions"],
           ["net", "Net pay"],
@@ -571,6 +596,7 @@ export function registerPayrollRuns(router, app) {
           pf: dedAmount(r, "PF"),
           esi: dedAmount(r, "ESI"),
           pt: dedAmount(r, "PT"),
+          lwf: dedAmount(r, "LWF"),
           tds: dedAmount(r, "TDS"),
           other: dedAmount(r, "ADJ"),
           net: r.net_pay,
@@ -670,9 +696,84 @@ export function registerPayrollRuns(router, app) {
           month: run.month,
           rows: out.length,
         });
+      } else if (type === "lwf") {
+        header = [
+          ["code", "Employee code"],
+          ["name", "Name"],
+          ["gross", "Gross"],
+          ["employee", "Employee share"],
+          ["employer", "Employer share"],
+        ];
+        out = rows
+          .filter((r) => dedAmount(r, "LWF") || r.employer?.lwf)
+          .map((r) => ({
+            code: r.employee.employee_code,
+            name: r.employee.name,
+            gross: r.gross_earnings,
+            employee: dedAmount(r, "LWF"),
+            employer: r.employer?.lwf ?? 0,
+          }));
+      } else if (type === "esi_challan" || type === "pf_challan") {
+        // One-row summaries for paying the contribution on the portals; due by the 15th of the next month.
+        const [y, m] = run.month.split("-").map(Number);
+        const due = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}-15`;
+        if (type === "esi_challan") {
+          const covered = rows.filter(
+            (x) => x.esi && (x.esi.employee || x.esi.employer),
+          );
+          const sum = (k) => covered.reduce((t, x) => t + x.esi[k], 0);
+          header = [
+            ["period", "Contribution period"],
+            ["ips", "Insured persons"],
+            ["wages", "Total ESI wages"],
+            ["employee", "Employee contribution"],
+            ["employer", "Employer contribution"],
+            ["total", "Total payable"],
+            ["due", "Due date"],
+          ];
+          out = [
+            {
+              period: run.month,
+              ips: covered.length,
+              wages: sum("wages"),
+              employee: sum("employee"),
+              employer: sum("employer"),
+              total: sum("employee") + sum("employer"),
+              due,
+            },
+          ];
+        } else {
+          const members = rows.filter((x) => x.pf);
+          const sum = (k) => members.reduce((t, x) => t + x.pf[k], 0);
+          const ac1 = sum("employee") + sum("employerEpf");
+          header = [
+            ["period", "Contribution period"],
+            ["members", "Members"],
+            ["wages", "Total EPF wages"],
+            ["ac01", "A/c 01 (EPF: employee + employer share)"],
+            ["ac10", "A/c 10 (EPS)"],
+            ["ac21", "A/c 21 (EDLI)"],
+            ["ac02", "A/c 02 (admin charges)"],
+            ["total", "Total payable"],
+            ["due", "Due date"],
+          ];
+          out = [
+            {
+              period: run.month,
+              members: members.length,
+              wages: sum("wages"),
+              ac01: ac1,
+              ac10: sum("employerEps"),
+              ac21: sum("edli"),
+              ac02: sum("admin"),
+              total: ac1 + sum("employerEps") + sum("edli") + sum("admin"),
+              due,
+            },
+          ];
+        }
       } else throw new HttpError(400, "Unknown export type.");
       // PF and ESI files carry identity numbers that were stored encrypted.
-      if (type === "pf" || type === "esi" || type === "esic")
+      if (["pf", "esi", "esic", "pf_challan", "esi_challan"].includes(type))
         await audit("statutory_file_exported", {
           id: run.id,
           month: run.month,

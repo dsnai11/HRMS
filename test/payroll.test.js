@@ -1719,3 +1719,157 @@ test("leave encashment, statutory bonus, gratuity and the statutory files", asyn
   assert.equal(liability.rows.find((r) => r.name === "E1").payable, 155769);
   assert.equal(liability.rows.find((r) => r.name === "E4").error, undefined);
 });
+
+test("PF and ESI challan summaries add up the run", async (t) => {
+  const w = await prepared(t);
+  const { call, people } = w;
+  const pay = people.pay.token;
+  const run = (await call("/admin/payroll/runs", { month: "2026-10" }, pay))
+    .data.id;
+  const csvOf = async (type) =>
+    (
+      await call(
+        `/admin/payroll/runs/${run}/export?type=${type}`,
+        undefined,
+        pay,
+      )
+    ).data
+      .replace(/^﻿/, "")
+      .split("\r\n")
+      .map((l) => l.split(",").map((c) => c.replaceAll('"', "")));
+  const esi = await csvOf("esi_challan");
+  const pf = await csvOf("pf_challan");
+  assert.deepEqual(esi[1], [
+    "2026-10",
+    "1",
+    "15484",
+    "117",
+    "504",
+    "621",
+    "2026-11-15",
+  ]);
+  assert.deepEqual(pf[1], [
+    "2026-10",
+    "3",
+    "137742",
+    "9047",
+    "4811",
+    "289",
+    "289",
+    "14436",
+    "2026-11-15",
+  ]);
+});
+
+test("labour welfare fund applies in the months the state's rule names", async (t) => {
+  const w = await prepared(t);
+  const { call, people } = w;
+  const pay = people.pay.token;
+  // Karnataka branch. A rule for ₹20 from the employee and ₹40 from the employer, paid in June and December only.
+  assert.equal(
+    (
+      await call(
+        "/admin/payroll/lwf-rules",
+        {
+          state: "Karnataka",
+          employee_amount: 20,
+          employer_amount: 40,
+          months: "6, 12",
+        },
+        people.hr.token,
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await call(
+        "/admin/payroll/lwf-rules",
+        {
+          state: "Karnataka",
+          employee_amount: 20,
+          employer_amount: 40,
+          months: "13",
+        },
+        pay,
+      )
+    ).status,
+    400,
+  );
+  const rule = await call(
+    "/admin/payroll/lwf-rules",
+    {
+      state: "karnataka",
+      employee_amount: 20,
+      employer_amount: 40,
+      months: "6, 12",
+      max_wage: 100000,
+    },
+    pay,
+  );
+  assert.equal(rule.status, 201, JSON.stringify(rule.data));
+  assert.equal(
+    (
+      await call(
+        "/admin/payroll/lwf-rules",
+        { state: "KARNATAKA", employee_amount: 1, months: "6" },
+        pay,
+      )
+    ).status,
+    409,
+    "one rule per state",
+  );
+  // October is not a deduction month.
+  const oct = (await call("/admin/payroll/runs", { month: "2026-10" }, pay))
+    .data.id;
+  const e1 = await itemOf(w, pay, oct, "e1");
+  assert.equal(
+    e1.deductions.some((d) => d.code === "LWF"),
+    false,
+  );
+  assert.equal(e1.employer.lwf, 0);
+  // Switch the rule to October and recompute: e1 (60,000) pays; e4 (200,000) is over the wage limit.
+  await w.db.prepare("UPDATE lwf_rules SET months='10'").run();
+  assert.equal(
+    (await call(`/admin/payroll/runs/${oct}/recompute`, {}, pay)).status,
+    200,
+  );
+  const e1b = await itemOf(w, pay, oct, "e1");
+  assert.deepEqual(
+    e1b.deductions.filter((d) => d.code === "LWF").map((d) => d.amount),
+    [20],
+  );
+  assert.equal(e1b.employer.lwf, 40);
+  assert.equal(
+    e1b.employer_cost,
+    e1b.gross_earnings +
+      e1b.employer.pf_epf +
+      e1b.employer.pf_eps +
+      e1b.employer.edli +
+      e1b.employer.pf_admin +
+      e1b.employer.esi +
+      40,
+  );
+  assert.equal(
+    (await itemOf(w, pay, oct, "e4")).deductions.some((d) => d.code === "LWF"),
+    false,
+    "above the wage limit",
+  );
+  const report = (
+    await call(`/admin/payroll/runs/${oct}/export?type=lwf`, undefined, pay)
+  ).data
+    .replace(/^﻿/, "")
+    .split("\r\n");
+  assert.equal(report.length, 3, "header plus two covered employees");
+  assert.equal(
+    (
+      await call(
+        `/admin/payroll/lwf-rules/${rule.data.id}`,
+        undefined,
+        pay,
+        "DELETE",
+      )
+    ).status,
+    200,
+  );
+});

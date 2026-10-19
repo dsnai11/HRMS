@@ -155,6 +155,9 @@ async function payrollRunHtml(runId) {
     ["ecr", "PF ECR upload file"],
     ["esi", "ESI"],
     ["esic", "ESIC upload file"],
+    ["pf_challan", "PF challan summary"],
+    ["lwf", "Labour welfare fund"],
+    ["esi_challan", "ESI challan summary"],
     ["pt", "Professional tax"],
     ...(run.status !== "draft" ? [["bank", "Bank file"]] : []),
   ];

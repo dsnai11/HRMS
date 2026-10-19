@@ -162,10 +162,11 @@ const MORE_TABS = {
   yearend: {
     async html() {
       const year = taxYearStart();
-      const [bonus, liability, settings] = await Promise.all([
+      const [bonus, liability, settings, lwf] = await Promise.all([
         api(`/admin/payroll/bonus?year=${year}`),
         api("/admin/payroll/gratuity-liability"),
         api("/admin/payroll/settings"),
+        api("/admin/payroll/lwf-rules"),
       ]);
       const label = `${year}-${String(year + 1).slice(2)}`;
       return `<div class="card"><div class="card-head"><div><h2>Statutory bonus ${label}</h2><p class="muted">Eligible: wages up to ₹21,000 a month and at least 30 days worked. Calculated on wages capped at the higher of ₹7,000 or the minimum wage, at ${bonus.rate}% (allowed range 8.33%–20%), from approved payroll runs of this financial year.</p></div><div class="actions"><button class="secondary" id="bonus-settings">Rate & minimum wage</button>${has("payroll.manage") && bonus.total ? '<button id="apply-bonus">Add to payroll</button>' : ""}</div></div>${
@@ -182,7 +183,7 @@ const MORE_TABS = {
               "No employees",
               "Gratuity is worked out for active employees.",
             )
-      }</div><div class="card"><div class="card-head"><div><h2>Leave encashment</h2><p class="muted">Pay out balance of leave types marked "Can be paid out" in Leave & holidays. Rate = ${settings.leaveEncashment.basis === "gross" ? "gross" : "basic"} ÷ ${settings.leaveEncashment.divisor}.</p></div><div class="actions"><button class="secondary" id="enc-settings">Encashment rate</button>${has("payroll.manage") ? '<button id="encash">Encash leave</button>' : ""}</div></div></div><div class="card"><div class="card-head"><div><h2>Tax forms (Form 130 and Form 138)</h2><p class="muted">Employee-wise salary and tax data for the financial year, and the quarterly deduction data, from approved runs and opening balances. File through the Income-tax utilities with this data.</p></div></div><div class="actions"><button class="secondary" data-form="130">↓ Form 130 data, ${label}</button>${[1, 2, 3, 4].map((q) => `<button class="secondary" data-form="138" data-q="${q}">↓ Form 138, Q${q}</button>`).join("")}</div></div>`;
+      }</div><div class="card"><div class="card-head"><div><h2>Leave encashment</h2><p class="muted">Pay out balance of leave types marked "Can be paid out" in Leave & holidays. Rate = ${settings.leaveEncashment.basis === "gross" ? "gross" : "basic"} ÷ ${settings.leaveEncashment.divisor}.</p></div><div class="actions"><button class="secondary" id="enc-settings">Encashment rate</button>${has("payroll.manage") ? '<button id="encash">Encash leave</button>' : ""}</div></div></div><div class="card"><div class="card-head"><div><h2>Labour welfare fund</h2><p class="muted">Set the state's rule: amounts from employee and employer, the months it is paid (for example 6,12) and an optional wage limit. Take the figures from your state's current notification; they change. A state is matched from the employee's branch.</p></div>${has("payroll.manage") ? '<button id="new-lwf">Add a state rule</button>' : ""}</div>${lwf.length ? `<div class="table-wrap"><table><thead><tr><th>State</th><th>Employee</th><th>Employer</th><th>Months</th><th>Wage limit</th><th></th></tr></thead><tbody>${lwf.map((r) => `<tr><td>${esc(r.state)}</td><td>${inr(r.employee_amount)}</td><td>${inr(r.employer_amount)}</td><td>${esc(r.months)}</td><td>${r.max_wage ? inr(r.max_wage) : "None"}</td><td>${has("payroll.manage") ? `<button class="ghost" data-del-lwf="${r.id}">Remove</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : empty("No rules", "Labour welfare fund is not deducted until you add a rule.")}</div><div class="card"><div class="card-head"><div><h2>Tax forms (Form 130 and Form 138)</h2><p class="muted">Employee-wise salary and tax data for the financial year, and the quarterly deduction data, from approved runs and opening balances. File through the Income-tax utilities with this data.</p></div></div><div class="actions"><button class="secondary" data-form="130">↓ Form 130 data, ${label}</button>${[1, 2, 3, 4].map((q) => `<button class="secondary" data-form="138" data-q="${q}">↓ Form 138, Q${q}</button>`).join("")}</div></div>`;
     },
     wire() {
       const year = taxYearStart();
@@ -198,6 +199,34 @@ const MORE_TABS = {
                 ),
               )),
         );
+      document.querySelector("#new-lwf")?.addEventListener("click", () =>
+        dialog(
+          "Add a labour welfare fund rule",
+          `${input("state", "State", "", "required maxlength=60")}${input("employee_amount", "Employee amount (₹)", 0, 'type="number" min="0" step="0.5"')}${input("employer_amount", "Employer amount (₹)", 0, 'type="number" min="0" step="0.5"')}${input("months", "Months paid (e.g. 6,12)", "6,12", "required")}${input("max_wage", "Wage limit (₹, optional)", "", 'type="number" min="1"')}`,
+          async (b) => {
+            await api("/admin/payroll/lwf-rules", {
+              state: b.state,
+              employee_amount: Number(b.employee_amount),
+              employer_amount: Number(b.employer_amount),
+              months: b.months,
+              max_wage: b.max_wage ? Number(b.max_wage) : undefined,
+            });
+            notice("Saved. It applies to runs in those months.");
+          },
+        ),
+      );
+      document.querySelectorAll("[data-del-lwf]").forEach(
+        (b) =>
+          (b.onclick = () =>
+            busy(b, async () => {
+              await api(
+                `/admin/payroll/lwf-rules/${b.dataset.delLwf}`,
+                undefined,
+                "DELETE",
+              );
+              render();
+            })),
+      );
       document.querySelector("#apply-bonus")?.addEventListener("click", () =>
         dialog(
           "Add bonus to payroll",

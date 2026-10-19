@@ -187,14 +187,16 @@ async function securityCard(id) {
 
 // ---- performance ---------------------------------------------------------------------------------------
 let perfTab = "mine";
+const perfCache = {};
 async function performancePage(id) {
   const manage = has("performance.manage");
   const tabs = {
     mine: "My goals & reviews",
     ...(me.is_manager ? { team: "My team's reviews" } : {}),
+    feedback: "Feedback",
     training: "Training",
     ...(manage
-      ? { cycles: "Review cycles", trainings: "Manage training" }
+      ? { cycles: "Review cycles", trainings: "Manage training", kras: "KRAs" }
       : {}),
   };
   if (!tabs[perfTab]) perfTab = "mine";
@@ -231,6 +233,23 @@ async function perfHtml(tab) {
   if (tab === "team") {
     const rows = await api("/reviews/team");
     return `<div class="card"><h2>Reviews waiting for you</h2>${rows.length ? rows.map((r) => `<div class="activity"><strong>${esc(r.employee_name)}</strong> · ${esc(r.cycle_name)}<br><small>Self-rating ${r.self_rating}/5 · ${esc(r.self_comment || "")}</small> <button data-mgr="${r.id}" data-name="${esc(r.employee_name)}">Review</button> <button class="ghost" data-goals-of="${r.user_id}" data-name="${esc(r.employee_name)}">See goals</button></div>`).join("") : empty("Nothing waiting", "Self-reviews from your team appear here.")}</div>`;
+  }
+  if (tab === "feedback") {
+    const [got, given] = await Promise.all([
+      api("/feedback/received"),
+      api("/feedback/given"),
+    ]);
+    const fb = (f, who) =>
+      `<div class="activity"><strong>${esc(who)}</strong> · <span class="pill ${f.kind === "improve" ? "neutral" : ""}">${{ praise: "Praise", improve: "To improve", note: "Note" }[f.kind]}</span>${f.shared ? "" : ' <span class="pill neutral">Private</span>'}<br>${esc(f.body)}<br><small>${time(f.created_at)}</small></div>`;
+    return `<div class="card"><div class="card-head"><div><h2>Feedback for me</h2></div><button id="give-fb">Give feedback</button></div>${got.length ? got.map((f) => fb(f, f.from_name)).join("") : empty("Nothing yet", "Feedback from colleagues and managers appears here.")}</div><div class="card"><h2>Feedback I gave</h2>${given.length ? given.map((f) => fb(f, `To ${f.to_name}`)).join("") : empty("Nothing yet", "Recognise a colleague or help them improve.")}</div>`;
+  }
+  if (tab === "kras") {
+    const [rows, org] = await Promise.all([
+      api("/admin/kras"),
+      api("/admin/org"),
+    ]);
+    perfCache.org = org;
+    return `<div class="card"><div class="card-head"><div><h2>KRAs by designation</h2><p class="muted">Key result areas for a role. Apply them to someone to create their goals.</p></div><div class="actions"><button class="secondary" id="apply-kra">Apply to an employee</button><button id="new-kra">Add a KRA</button></div></div>${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Designation</th><th>KRA</th><th>Weight</th><th></th></tr></thead><tbody>${rows.map((k) => `<tr><td>${esc(k.designation_name)}</td><td>${esc(k.title)}${k.description ? `<small>${esc(k.description)}</small>` : ""}</td><td>${k.weight}%</td><td><button class="ghost" data-del-kra="${k.id}">Remove</button></td></tr>`).join("")}</tbody></table></div>` : empty("No KRAs", "Add the key result areas for each designation.")}</div>`;
   }
   if (tab === "training") {
     const rows = await api("/trainings/mine");
@@ -319,6 +338,63 @@ function perfWire(tab) {
   each("[data-goals-of]", async (b) => {
     const goals = await api(`/goals?user_id=${b.dataset.goalsOf}`);
     viewDialog(`${b.dataset.name}'s goals`, goalRows(goals, false));
+  });
+  on("#give-fb", async () => {
+    const people = (await api("/directory")).filter((p) => p.id !== me.id);
+    dialog(
+      "Give feedback",
+      `<label>To<select name="to_user">${people.map((p) => `<option value="${p.id}">${esc(p.name)}${p.designation_name ? ` (${esc(p.designation_name)})` : ""}</option>`).join("")}</select></label>${sel(
+        "kind",
+        "Type",
+        [
+          ["praise", "Praise"],
+          ["improve", "Something to improve"],
+          ["note", "Note"],
+        ],
+      )}<label class="full">Feedback<textarea name="body" rows="4" maxlength="1500" required></textarea></label><label class="check"><input type="checkbox" name="private"> Private: only their managers and HR see it, not them</label>`,
+      async (b) => {
+        await api("/feedback", {
+          to_user: Number(b.to_user),
+          kind: b.kind,
+          body: b.body,
+          shared: !("private" in b),
+        });
+        notice("Sent.");
+      },
+    );
+  });
+  on("#new-kra", () =>
+    dialog(
+      "Add a KRA",
+      `<label>Designation<select name="designation_id">${options(perfCache.org.designations, null, "—")}</select></label>${input("title", "Key result area", "", "required maxlength=150")}<label class="full">Details<input name="description" maxlength="1000"></label>${input("weight", "Weight (%)", 20, 'type="number" min="0" max="100"')}`,
+      async (b) => {
+        if (!b.designation_id) throw new Error("Choose a designation.");
+        await api("/admin/kras", {
+          designation_id: Number(b.designation_id),
+          title: b.title,
+          description: b.description || undefined,
+          weight: Number(b.weight),
+        });
+        notice("Added.");
+      },
+    ),
+  );
+  each("[data-del-kra]", (b) =>
+    busy(b, async () => {
+      await api(`/admin/kras/${b.dataset.delKra}`, undefined, "DELETE");
+      render();
+    }),
+  );
+  on("#apply-kra", async () => {
+    const people = (await api("/admin/employees?limit=200&active=1")).items;
+    dialog(
+      "Apply KRAs",
+      `<label>Employee<select name="user_id">${people.map((p) => `<option value="${p.id}">${esc(p.name)}${p.designation_name ? ` (${esc(p.designation_name)})` : ""}</option>`).join("")}</select></label><p class="full muted">Creates goals from the KRAs of their designation, skipping any they already have.</p>`,
+      async (b) => {
+        const r = await api(`/admin/employees/${b.user_id}/apply-kras`, {});
+        notice(`${r.added} goal(s) created, ${r.skipped} already existed.`);
+      },
+    );
   });
   each("[data-done-train]", (b) =>
     busy(b, async () => {

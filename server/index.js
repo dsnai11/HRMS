@@ -24,6 +24,8 @@ import { registerExit } from "./routes/exit.js";
 import { registerDocuments } from "./routes/documents.js";
 import { registerPerformance } from "./routes/performance.js";
 import { registerShiftPolicies } from "./routes/shift-policies.js";
+import { registerAttendanceImport } from "./routes/attendance-import.js";
+import { registerPerformanceExtras } from "./routes/performance-extras.js";
 import { registerPeople } from "./routes/people.js";
 import { registerSecurity } from "./routes/security.js";
 import { registerEngagement } from "./routes/engagement.js";
@@ -137,6 +139,8 @@ export function createApp({
     registerEngagement,
     registerSecurity,
     registerPeople,
+    registerPerformanceExtras,
+    registerAttendanceImport,
     registerShiftPolicies,
     registerDocuments,
     registerPerformance,
@@ -200,6 +204,10 @@ export function createApp({
       }
       if (!path.startsWith("/api/")) {
         if (method !== "GET") throw new HttpError(405, "Method not allowed.");
+        if (path === "/favicon.ico") {
+          res.writeHead(204, headers);
+          return res.end();
+        }
         if (!STATIC[path]) throw new HttpError(404, "Not found.");
         const [file, type] = STATIC[path];
         const content = await readFile(new URL(file, publicDir));

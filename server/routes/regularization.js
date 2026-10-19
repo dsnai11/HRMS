@@ -175,7 +175,7 @@ export function registerRegularization(router, app) {
         422,
         "Assign this employee a workplace before approving.",
       );
-    const policy = await app.policyFor(person);
+    const policy = await app.policyFor(person, r.date);
     const inMs = localToUtcMs(
       r.date,
       r.in_time || hhmm(policy.startMinutes),

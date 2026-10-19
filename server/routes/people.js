@@ -496,7 +496,9 @@ export function registerPeople(router, app) {
       send(
         200,
         await db
-          .prepare("SELECT require_selfie FROM companies WHERE id=?")
+          .prepare(
+            "SELECT require_selfie,min_app_version FROM companies WHERE id=?",
+          )
           .get(companyId),
       ),
   );
@@ -505,11 +507,35 @@ export function registerPeople(router, app) {
     { perm: "org.manage" },
     async ({ companyId, body, send, audit }) => {
       const b = await body();
+      const row = await db
+        .prepare(
+          "SELECT require_selfie,min_app_version FROM companies WHERE id=?",
+        )
+        .get(companyId);
+      const min =
+        b.min_app_version === undefined
+          ? row.min_app_version
+          : b.min_app_version
+            ? String(b.min_app_version).trim()
+            : null;
+      if (min && !/^\d+(\.\d+){0,2}$/.test(min))
+        throw new HttpError(400, "Version must look like 1.2.0.");
       await db
-        .prepare("UPDATE companies SET require_selfie=? WHERE id=?")
-        .run(b.require_selfie ? 1 : 0, companyId);
+        .prepare(
+          "UPDATE companies SET require_selfie=?,min_app_version=? WHERE id=?",
+        )
+        .run(
+          b.require_selfie === undefined
+            ? row.require_selfie
+            : b.require_selfie
+              ? 1
+              : 0,
+          min,
+          companyId,
+        );
       await audit("attendance_settings_updated", {
-        require_selfie: Boolean(b.require_selfie),
+        require_selfie: b.require_selfie ?? null,
+        min_app_version: min,
       });
       return send(200, { ok: true });
     },

@@ -85,11 +85,14 @@ See `docs/COMPARISON.md` for how this lines up with Addetto HRMS.
 
 - **Phone app.** Besides punching (Today, History): **Leave** (balances, apply, cancel, upcoming holidays), **Payslips**, **Requests** (missed punch, on duty, work from home), **Directory** (with referrals), **Helpdesk**, **Alerts** and **Profile**. It uses the same API, rules and approvals as the web portal. Dates are typed as YYYY-MM-DD (no date picker yet). The app needs a new APK/IPA build to get these screens.
 - **Selfie at punch.** Turn on under Workplaces; the phone then asks for a front-camera selfie with every punch. HR sees it in Attendance records (each view is logged). Selfies are deleted after `PHOTO_RETENTION_DAYS` (default 90); the punch itself stays.
-- **Shift rules.** Start time, grace, shift hours and earliest punch-out per company, branch or employee (Workplaces page). Without one, the server default applies.
+- **Shift rules.** Start time, grace, shift hours and earliest punch-out per company, branch or employee (Workplaces page). Without one, the server default applies. A **roster** (Workplaces page) gives people a different shift, or a rest day, on particular dates; it beats the standing rule and the weekly off, a rostered working Sunday counts as a working day, and employees see their next two weeks under My employment.
 - **Directory** for everyone; **Refer a candidate** creates a candidate tagged with the referrer and tells HR.
 - **Career changes** (Hiring & exits → Career changes): promotion, transfer, increment and confirmation with an effective date. Applying updates the profile, creates the salary revision for increments (keeping the person's PF setting; ESI is switched off above ₹21,000), notifies the employee and gives a printable letter.
 - **Forgot password.** Emails a one-hour link (needs `RESEND_API_KEY`, `MAIL_FROM` and `APP_URL`); the answer never reveals whether an address has an account. Without email, HR resets passwords.
 - **Annual tax statement** for each employee on the Payslips page.
+- **Attendance import** from a biometric machine or another system (Workplaces → Import attendance): CSV with a dry run, skips days that already have attendance, applies the late and early rules. **Minimum app version** to refuse punches from old apps.
+- **Challan summaries** for PF (A/c 01, 02, 10, 21) and ESI, a **Labour Welfare Fund** rule per state (you enter the state's current figures and months), shown on the payroll register.
+- **KRAs by designation** applied as goals, and **continuous feedback** (praise, improve, private to managers and HR) under Performance.
 
 ## Attendance integrity (anti-spoofing)
 
