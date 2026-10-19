@@ -140,7 +140,9 @@ h3 {
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh;
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
 }
@@ -155,7 +157,8 @@ h3 {
 }
 .nav {
   display: grid;
-  gap: 9px;
+  gap: 3px;
+  flex-shrink: 0;
 }
 .nav button {
   text-align: left;
@@ -163,8 +166,9 @@ h3 {
   color: #adc1b8;
   font-weight: 500;
   display: flex;
-  gap: 14px;
-  padding: 14px;
+  gap: 12px;
+  padding: 9px 12px;
+  font-size: 14px;
 }
 .nav button.selected {
   background: #2c4a40;
@@ -175,6 +179,7 @@ h3 {
   text-align: center;
 }
 .sidebar-foot {
+  flex-shrink: 0;
   margin-top: auto;
   border-top: 1px solid #355047;
   padding-top: 22px;
