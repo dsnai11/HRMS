@@ -623,3 +623,196 @@ test("old punch selfies are purged but the punch stays", async (t) => {
   );
   assert.equal((await db.prepare("SELECT COUNT(*) n FROM shifts").get()).n, 1);
 });
+
+test("shift policies apply per employee, then branch, then company", async (t) => {
+  const w = await world(t);
+  const { call, people, db } = w;
+  const hr = people.hr.token;
+  const login = async (key) => {
+    const device = `policy-device-${key}`.padEnd(20, "0");
+    const secret = "p".repeat(32);
+    await db
+      .prepare(
+        "INSERT INTO devices(user_id,device_id,platform,model,secret_hash,status,registered_at) VALUES(?,?,?,?,?,'approved',?)",
+      )
+      .run(
+        people[key].id,
+        device,
+        "android",
+        "Pixel",
+        sha(secret),
+        new Date().toISOString(),
+      );
+    const r = await call("/login", {
+      email: `${key}@example.test`,
+      password: PW,
+      native: true,
+      device: { id: device, platform: "android", model: "Pixel", secret },
+    });
+    return {
+      token: r.data.token,
+      headers: { "X-Device-Id": device, "X-Device-Secret": secret },
+    };
+  };
+  const punchIn = async (s) => {
+    const res = await fetch(`${w.base}/punch`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${s.token}`,
+        ...s.headers,
+      },
+      body: JSON.stringify({
+        action: "in",
+        location: {
+          latitude: 26.9,
+          longitude: 75.8,
+          accuracy: 10,
+          timestamp: Date.parse("2026-11-05T10:00:00+05:30"),
+        },
+        signals: { emulator: false, rooted: false },
+      }),
+    });
+    return { status: res.status, data: await res.json() };
+  };
+  // The clock is 10:00 IST. The server default (09:30 + 15 minutes) calls that late.
+  assert.equal(
+    (await call("/my-shift", undefined, people.mgr.token)).data.start,
+    "09:30",
+  );
+  const late = await punchIn(await login("mgr"));
+  assert.deepEqual([late.status, late.data.day_type], [200, "half_day"]);
+
+  // Validation, permissions.
+  assert.equal(
+    (
+      await call(
+        "/admin/shift-policies",
+        { name: "Bad", start_time: "9:30", earliest_out: "18:30" },
+        hr,
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await call(
+        "/admin/shift-policies",
+        { name: "Late shift", start_time: "10:00", earliest_out: "19:00" },
+        people.emp.token,
+      )
+    ).status,
+    403,
+  );
+  const policy = await call(
+    "/admin/shift-policies",
+    {
+      name: "Late shift",
+      start_time: "10:00",
+      grace_minutes: 15,
+      hours: 9,
+      earliest_out: "19:00",
+    },
+    hr,
+  );
+  assert.equal(policy.status, 201, JSON.stringify(policy.data));
+  assert.equal(
+    (
+      await call(
+        "/admin/shift-policies",
+        { name: "late SHIFT", start_time: "10:00", earliest_out: "19:00" },
+        hr,
+      )
+    ).status,
+    409,
+    "names are unique",
+  );
+
+  // Assigned to one employee: the same punch is now on time and the out time follows the policy.
+  assert.equal(
+    (
+      await call(
+        "/admin/shift-policies/assign",
+        { target: "employee", id: people.emp.id, policy_id: policy.data.id },
+        hr,
+      )
+    ).status,
+    200,
+  );
+  assert.deepEqual(
+    (await call("/my-shift", undefined, people.emp.token)).data,
+    { start: "10:00", grace_minutes: 15, hours: 9, earliest_out: "19:00" },
+  );
+  const onTime = await punchIn(await login("emp"));
+  assert.equal(onTime.status, 200, JSON.stringify(onTime.data));
+  assert.equal(onTime.data.day_type, null);
+  assert.equal(
+    onTime.data.required_out_at,
+    new Date("2026-11-05T19:00:00+05:30").toISOString(),
+  );
+
+  // Company default and branch levels follow the order; unassigning returns to the server default.
+  const branch = (await call("/admin/branches", { name: "Jaipur" }, hr)).data
+    .id;
+  await db
+    .prepare("UPDATE users SET branch_id=? WHERE id=?")
+    .run(branch, people.pay.id);
+  assert.equal(
+    (
+      await call(
+        "/admin/shift-policies/assign",
+        { target: "company", policy_id: policy.data.id },
+        hr,
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    (await call("/my-shift", undefined, people.pay.token)).data.start,
+    "10:00",
+    "company default",
+  );
+  const early = (
+    await call(
+      "/admin/shift-policies",
+      { name: "Early", start_time: "08:00", earliest_out: "16:00", hours: 8 },
+      hr,
+    )
+  ).data.id;
+  await call(
+    "/admin/shift-policies/assign",
+    { target: "branch", id: branch, policy_id: early },
+    hr,
+  );
+  assert.equal(
+    (await call("/my-shift", undefined, people.pay.token)).data.start,
+    "08:00",
+    "branch beats company",
+  );
+  await call(
+    "/admin/shift-policies/assign",
+    { target: "employee", id: people.emp.id, policy_id: null },
+    hr,
+  );
+  await call(
+    "/admin/shift-policies/assign",
+    { target: "company", policy_id: null },
+    hr,
+  );
+  assert.equal(
+    (await call("/my-shift", undefined, people.emp.token)).data.start,
+    "09:30",
+  );
+  const list = (await call("/admin/shift-policies", undefined, hr)).data;
+  assert.equal(list.find((p) => p.name === "Early").branches, 1);
+  assert.equal(
+    (await call(`/admin/shift-policies/${early}`, undefined, hr, "DELETE"))
+      .status,
+    200,
+  );
+  assert.equal(
+    (await call("/my-shift", undefined, people.pay.token)).data.start,
+    "09:30",
+    "deleting a policy falls back",
+  );
+});

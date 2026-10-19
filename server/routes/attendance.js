@@ -40,7 +40,7 @@ async function recordPunchEvent(app, user, event) {
 }
 
 export function registerAttendance(router, app) {
-  const { db, transaction, rateLimit, clock, policy, timezone } = app;
+  const { db, transaction, rateLimit, clock, timezone } = app;
 
   router.get("/api/shifts", async ({ user, send }) =>
     send(
@@ -158,7 +158,9 @@ export function registerAttendance(router, app) {
         const now = new Date(nowMs).toISOString();
         let id = target?.id;
         const rules =
-          b.action === "in" ? evaluatePunchIn(policy, nowMs, timezone) : null;
+          b.action === "in"
+            ? evaluatePunchIn(await app.policyFor(user), nowMs, timezone)
+            : null;
         if (b.action === "in")
           id = Number(
             (

@@ -344,6 +344,7 @@ async function render() {
         .querySelector("#add")
         ?.addEventListener("click", () => workplaceDialog());
       await selfieSettingCard(id);
+      await shiftPolicyCard(id);
     } else if (page === "attendance") {
       document.querySelector("#content").innerHTML =
         heading(
