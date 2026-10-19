@@ -25,6 +25,7 @@ import { registerDocuments } from "./routes/documents.js";
 import { registerPerformance } from "./routes/performance.js";
 import { registerShiftPolicies } from "./routes/shift-policies.js";
 import { registerAttendanceImport } from "./routes/attendance-import.js";
+import { registerPerformanceExtras } from "./routes/performance-extras.js";
 import { registerPeople } from "./routes/people.js";
 import { registerSecurity } from "./routes/security.js";
 import { registerEngagement } from "./routes/engagement.js";
@@ -138,6 +139,7 @@ export function createApp({
     registerEngagement,
     registerSecurity,
     registerPeople,
+    registerPerformanceExtras,
     registerAttendanceImport,
     registerShiftPolicies,
     registerDocuments,

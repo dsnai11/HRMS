@@ -168,6 +168,7 @@ export function computePayslip({
   flags,
   person = {},
   ptSlabs = [],
+  lwf = null,
   ytd = {},
 }) {
   const dim = daysInMonth(month);
@@ -224,6 +225,11 @@ export function computePayslip({
         })
       : 0;
 
+  // Labour welfare fund, in the months and for the wages the state's rule names.
+  const lwfOn = lwf && (lwf.max_wage == null || regularGross <= lwf.max_wage);
+  const lwfEmployee = lwfOn ? round(lwf.employee) : 0;
+  const lwfEmployer = lwfOn ? round(lwf.employer) : 0;
+
   // Income tax (TDS): annual projection, less what has been deducted so far.
   const taxable = (list) =>
     list.filter((e) => e.taxable).reduce((s, e) => s + e.amount, 0);
@@ -277,6 +283,11 @@ export function computePayslip({
         amount: esi.employee,
       },
     ptAmount && { code: "PT", name: "Professional tax", amount: ptAmount },
+    lwfEmployee && {
+      code: "LWF",
+      name: "Labour welfare fund",
+      amount: lwfEmployee,
+    },
     tdsAmount && { code: "TDS", name: "Income tax (TDS)", amount: tdsAmount },
     ...oneOffDeductions.map((a) => ({
       code: "ADJ",
@@ -292,6 +303,7 @@ export function computePayslip({
     edli: pf?.edli ?? 0,
     pf_admin: pf?.admin ?? 0,
     esi: esi?.employer ?? 0,
+    lwf: lwfEmployer,
   };
   const employerContributions = Object.values(employer).reduce(
     (a, b) => a + b,

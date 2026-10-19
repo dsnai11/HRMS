@@ -994,3 +994,145 @@ test("attendance can be imported from another system, and old app versions can b
   );
   assert.equal((await punch("1.2.0")).status, 200);
 });
+
+test("KRAs become goals, and feedback is private to the right people", async (t) => {
+  const w = await world(t);
+  const { call, people, db } = w;
+  const hr = people.hr.token,
+    emp = people.emp.token,
+    mgr = people.mgr.token,
+    pay = people.pay.token;
+  await db
+    .prepare("UPDATE users SET manager_id=? WHERE id=?")
+    .run(people.mgr.id, people.emp.id);
+  const g = (await call("/admin/designations", { name: "Loan Officer" }, hr))
+    .data.id;
+  await db
+    .prepare("UPDATE users SET designation_id=? WHERE id=?")
+    .run(g, people.emp.id);
+  assert.equal(
+    (
+      await call(
+        "/admin/kras",
+        { designation_id: g, title: "Disburse 20 loans", weight: 60 },
+        emp,
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await call(
+        "/admin/kras",
+        {
+          designation_id: g,
+          title: "Disburse 20 loans",
+          description: "Per month",
+          weight: 60,
+        },
+        hr,
+      )
+    ).status,
+    201,
+  );
+  assert.equal(
+    (
+      await call(
+        "/admin/kras",
+        { designation_id: g, title: "Keep NPA under 2%", weight: 40 },
+        hr,
+      )
+    ).status,
+    201,
+  );
+  const applied = (
+    await call(`/admin/employees/${people.emp.id}/apply-kras`, {}, hr)
+  ).data;
+  assert.deepEqual(applied, { added: 2, skipped: 0 });
+  assert.deepEqual(
+    (await call("/goals", undefined, emp)).data
+      .map((x) => [x.title, x.weight])
+      .sort(),
+    [
+      ["Disburse 20 loans", 60],
+      ["Keep NPA under 2%", 40],
+    ],
+  );
+  assert.deepEqual(
+    (await call(`/admin/employees/${people.emp.id}/apply-kras`, {}, hr)).data,
+    { added: 0, skipped: 2 },
+    "not twice",
+  );
+  assert.equal(
+    (await call(`/admin/employees/${people.mgr.id}/apply-kras`, {}, hr)).status,
+    409,
+    "no designation",
+  );
+
+  // Feedback: a colleague praises; a private note goes to managers and HR only.
+  assert.equal(
+    (
+      await call(
+        "/feedback",
+        {
+          to_user: people.emp.id,
+          kind: "praise",
+          body: "Great customer handling",
+        },
+        pay,
+      )
+    ).status,
+    201,
+  );
+  assert.equal(
+    (
+      await call(
+        "/feedback",
+        {
+          to_user: people.emp.id,
+          kind: "improve",
+          body: "Needs to document calls",
+          shared: false,
+        },
+        mgr,
+      )
+    ).status,
+    201,
+  );
+  assert.equal(
+    (await call("/feedback", { to_user: people.emp.id, body: "x" }, emp))
+      .status,
+    400,
+    "not to yourself",
+  );
+  assert.deepEqual(
+    (await call("/feedback/received", undefined, emp)).data.map((f) => f.body),
+    ["Great customer handling"],
+  );
+  assert.match(
+    (await call("/notifications", undefined, emp)).data.items[0].title,
+    /PAY shared feedback/,
+  );
+  assert.deepEqual(
+    (await call(`/feedback/about/${people.emp.id}`, undefined, mgr)).data
+      .length,
+    2,
+    "the manager sees both",
+  );
+  assert.equal(
+    (await call(`/feedback/about/${people.emp.id}`, undefined, hr)).data.length,
+    2,
+  );
+  assert.equal(
+    (await call(`/feedback/about/${people.emp.id}`, undefined, pay)).status,
+    403,
+    "a peer cannot read what others said",
+  );
+  assert.equal(
+    (await call(`/feedback/about/${people.emp.id}`, undefined, emp)).data
+      .length,
+    1,
+    "shared only",
+  );
+  assert.equal((await call("/feedback/given", undefined, mgr)).data.length, 1);
+});

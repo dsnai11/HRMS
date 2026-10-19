@@ -71,6 +71,16 @@ export function registerPayrollRuns(router, app) {
          FROM reimbursement_claims c JOIN claim_types t ON t.id=c.claim_type_id WHERE c.company_id=? AND c.status='approved'`,
       )
       .all(companyId);
+    const lwfRules = (
+      await db
+        .prepare("SELECT * FROM lwf_rules WHERE company_id=?")
+        .all(companyId)
+    ).filter((r) =>
+      r.months
+        .split(",")
+        .map(Number)
+        .includes(Number(month.slice(5, 7))),
+    );
     const slabs = await db
       .prepare("SELECT * FROM pt_slabs WHERE company_id=?")
       .all(companyId);
@@ -157,6 +167,20 @@ export function registerPayrollRuns(router, app) {
           declared_deductions: salary.declared_deductions,
         },
         person: { gender: p.gender, date_of_birth: p.date_of_birth },
+        lwf: (() => {
+          const r = lwfRules.find(
+            (x) =>
+              p.branch_state &&
+              x.state.toLowerCase() === p.branch_state.trim().toLowerCase(),
+          );
+          return r
+            ? {
+                employee: r.employee_amount,
+                employer: r.employer_amount,
+                max_wage: r.max_wage,
+              }
+            : null;
+        })(),
         ptSlabs: slabs.filter(
           (s) =>
             p.branch_state &&
@@ -556,6 +580,7 @@ export function registerPayrollRuns(router, app) {
           ["pf", "PF (employee)"],
           ["esi", "ESI (employee)"],
           ["pt", "Professional tax"],
+          ["lwf", "Labour welfare fund"],
           ["tds", "TDS"],
           ["other", "Other deductions"],
           ["net", "Net pay"],
@@ -571,6 +596,7 @@ export function registerPayrollRuns(router, app) {
           pf: dedAmount(r, "PF"),
           esi: dedAmount(r, "ESI"),
           pt: dedAmount(r, "PT"),
+          lwf: dedAmount(r, "LWF"),
           tds: dedAmount(r, "TDS"),
           other: dedAmount(r, "ADJ"),
           net: r.net_pay,
@@ -670,6 +696,23 @@ export function registerPayrollRuns(router, app) {
           month: run.month,
           rows: out.length,
         });
+      } else if (type === "lwf") {
+        header = [
+          ["code", "Employee code"],
+          ["name", "Name"],
+          ["gross", "Gross"],
+          ["employee", "Employee share"],
+          ["employer", "Employer share"],
+        ];
+        out = rows
+          .filter((r) => dedAmount(r, "LWF") || r.employer?.lwf)
+          .map((r) => ({
+            code: r.employee.employee_code,
+            name: r.employee.name,
+            gross: r.gross_earnings,
+            employee: dedAmount(r, "LWF"),
+            employer: r.employer?.lwf ?? 0,
+          }));
       } else if (type === "esi_challan" || type === "pf_challan") {
         // One-row summaries for paying the contribution on the portals; due by the 15th of the next month.
         const [y, m] = run.month.split("-").map(Number);
