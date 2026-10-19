@@ -37,7 +37,7 @@ A short trial with real people before everyone moves over. Suggested: **one bran
 - You have tried restoring a backup (`docs/OPERATIONS.md`).
 - Phones and passwords are handled for everyone in the pilot branch.
 
-Then roll out one branch at a time using the same imports.
+Then roll out one branch at a time using the same imports. Moves, new managers and designation changes can be done the same way with the "update existing people" option.
 
 ## If you need to start over
 

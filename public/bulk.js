@@ -69,7 +69,14 @@ async function sendChunks(path, rows, extra, size, onProgress) {
     // Line numbers continue across chunks.
     part.report.forEach((r) => merged.report.push({ ...r, line: r.line + i }));
     merged.credentials.push(...(part.credentials ?? []));
-    for (const k of ["created", "failed", "ok", "would_create"])
+    for (const k of [
+      "created",
+      "updated",
+      "failed",
+      "ok",
+      "would_create",
+      "would_update",
+    ])
       merged[k] = (merged[k] ?? 0) + (part[k] ?? 0);
     onProgress?.(Math.min(i + size, rows.length), rows.length);
   }
@@ -97,66 +104,78 @@ async function importPeopleCard(id) {
     try {
       const rows = await csvRows(f);
       if (!rows.length) return notice("The file has no rows.", true);
-      const dry = await sendChunks(
-        "/admin/employees/import",
-        rows,
-        { dry_run: true, create_missing: true },
-        150,
-      );
-      const cols = [
-        ["name", "Name"],
-        ["email", "Email"],
-      ];
       viewDialog(
-        "Check before importing",
-        `<p><strong>${dry.would_create}</strong> people will be created. <strong>${dry.failed}</strong> rows have problems and will be skipped.</p><label class="check"><input type="checkbox" id="create-missing" checked> Create departments, designations and branches that do not exist yet</label>${reportTable(dry.report, cols)}${dry.would_create ? '<div class="actions"><button id="go-import">Import now</button></div>' : ""}`,
+        "Import options",
+        `<p>${rows.length} rows in <strong>${esc(f.name)}</strong>.</p><label class="check"><input type="checkbox" id="create-missing" checked> Create departments, designations and branches that do not exist yet</label><label class="check"><input type="checkbox" id="update-existing"> Update people who already exist (matched by employee code or email) instead of skipping them. Only the columns you fill in change.</label><div class="actions"><button id="check-file">Check the file</button></div>`,
       );
-      document
-        .querySelector("dialog #go-import")
-        ?.addEventListener("click", (e) =>
-          busy(e.target, async () => {
-            const create = document.querySelector(
-              "dialog #create-missing",
-            ).checked;
-            const done = await sendChunks(
-              "/admin/employees/import",
-              rows,
-              { create_missing: create },
-              100,
-              (n, total) =>
-                (e.target.textContent = `Importing ${n} of ${total}…`),
-            );
-            const csv =
-              "﻿employee_code,name,email,temporary_password\r\n" +
-              done.credentials
-                .map((c) =>
-                  [c.employee_code, c.name, c.email, c.temp_password]
-                    .map(csvField)
-                    .join(","),
-                )
-                .join("\r\n");
-            viewDialog(
-              "Import finished",
-              `<p><strong>${done.created}</strong> created, <strong>${done.failed}</strong> skipped.</p>${done.created ? '<div class="callout">The temporary passwords are shown only now. Download them and hand them to each person; they must change it at first sign-in.</div><div class="actions"><button id="dl-creds">Download passwords (CSV)</button></div>' : ""}${reportTable(
-                done.report.filter((r) => r.status === "failed" || r.reason),
-                cols,
-              )}`,
-            );
-            document
-              .querySelector("dialog #dl-creds")
-              ?.addEventListener("click", () => {
-                const url = URL.createObjectURL(
-                  new Blob([csv], { type: "text/csv" }),
+      document.querySelector("dialog #check-file").onclick = (e) =>
+        busy(e.target, async () => {
+          const options = {
+            create_missing: document.querySelector("dialog #create-missing")
+              .checked,
+            update_existing: document.querySelector("dialog #update-existing")
+              .checked,
+          };
+          const dry = await sendChunks(
+            "/admin/employees/import",
+            rows,
+            { ...options, dry_run: true },
+            150,
+          );
+          const cols = [
+            ["name", "Name"],
+            ["email", "Email"],
+          ];
+          const total = dry.would_create + dry.would_update;
+          viewDialog(
+            "Check before importing",
+            `<p><strong>${dry.would_create}</strong> people will be created${options.update_existing ? ` and <strong>${dry.would_update}</strong> updated` : ""}. <strong>${dry.failed}</strong> rows have problems and will be skipped.</p>${reportTable(dry.report, cols)}${total ? '<div class="actions"><button id="go-import">Import now</button></div>' : ""}`,
+          );
+          document
+            .querySelector("dialog #go-import")
+            ?.addEventListener("click", (e2) =>
+              busy(e2.target, async () => {
+                const done = await sendChunks(
+                  "/admin/employees/import",
+                  rows,
+                  options,
+                  100,
+                  (n, t) => (e2.target.textContent = `Importing ${n} of ${t}…`),
                 );
-                Object.assign(document.createElement("a"), {
-                  href: url,
-                  download: "temporary-passwords.csv",
-                }).click();
-                URL.revokeObjectURL(url);
-              });
-            render();
-          }),
-        );
+                const csv =
+                  "\uFEFFemployee_code,name,email,temporary_password\r\n" +
+                  done.credentials
+                    .map((c) =>
+                      [c.employee_code, c.name, c.email, c.temp_password]
+                        .map(csvField)
+                        .join(","),
+                    )
+                    .join("\r\n");
+                viewDialog(
+                  "Import finished",
+                  `<p><strong>${done.created}</strong> created, <strong>${done.updated}</strong> updated, <strong>${done.failed}</strong> skipped.</p>${done.created ? '<div class="callout">The temporary passwords are shown only now. Download them and hand them to each person; they must change it at first sign-in.</div><div class="actions"><button id="dl-creds">Download passwords (CSV)</button></div>' : ""}${reportTable(
+                    done.report.filter(
+                      (r) => r.status === "failed" || r.reason,
+                    ),
+                    cols,
+                  )}`,
+                );
+                document
+                  .querySelector("dialog #dl-creds")
+                  ?.addEventListener("click", () => {
+                    const url = URL.createObjectURL(
+                      new Blob([csv], { type: "text/csv" }),
+                    );
+                    Object.assign(document.createElement("a"), {
+                      href: url,
+                      download: "temporary-passwords.csv",
+                    }).click();
+                    URL.revokeObjectURL(url);
+                  });
+                render();
+              }),
+            );
+        });
     } catch (e) {
       notice(e.message, true);
     }

@@ -1548,3 +1548,103 @@ test("employees and salaries can be loaded in bulk, with a dry run first", async
     [60000, false, "old"],
   );
 });
+
+test("an import can update existing people, changing only the columns it fills", async (t) => {
+  const w = await world(t);
+  const { call, people, db } = w;
+  const hr = people.hr.token;
+  await db
+    .prepare("UPDATE users SET employee_code='U001',phone='111111' WHERE id=?")
+    .run(people.emp.id);
+  await db
+    .prepare("UPDATE users SET employee_code='U002' WHERE id=?")
+    .run(people.mgr.id);
+  const rows = [
+    {
+      employee_code: "U001",
+      designation: "Senior Executive",
+      branch: "Pune",
+      manager_code: "U002",
+    },
+    {
+      email: "mgr@example.test",
+      phone: "222222",
+      date_of_joining: "2022-02-02",
+    },
+    { employee_code: "U002", email: "emp@example.test" },
+    { employee_code: "NOBODY" },
+    { employee_code: "U001", phone: "again" },
+  ];
+  // Without update mode the same rows are all new-person rows and fail.
+  assert.equal(
+    (await call("/admin/employees/import", { rows, dry_run: true }, hr)).data
+      .would_create,
+    0,
+  );
+  const dry = (
+    await call(
+      "/admin/employees/import",
+      { rows, dry_run: true, update_existing: true, create_missing: true },
+      hr,
+    )
+  ).data;
+  assert.deepEqual([dry.would_update, dry.failed], [2, 3]);
+  const done = (
+    await call(
+      "/admin/employees/import",
+      { rows, update_existing: true, create_missing: true },
+      hr,
+    )
+  ).data;
+  assert.deepEqual(
+    [done.created, done.updated, done.failed, done.credentials.length],
+    [0, 2, 3, 0],
+  );
+  assert.deepEqual(
+    done.report
+      .filter((r) => r.status === "failed")
+      .map((r) => r.reason)
+      .sort(),
+    [
+      "Employee code and email belong to different people",
+      "No existing employee matches this code or email",
+      "This person appears twice in the file",
+    ],
+  );
+  const emp = (await call(`/admin/employees/${people.emp.id}`, undefined, hr))
+    .data;
+  assert.deepEqual(
+    [
+      emp.designation_name,
+      emp.branch_name,
+      emp.manager_id,
+      emp.phone,
+      emp.name,
+    ],
+    ["Senior Executive", "Pune", people.mgr.id, "111111", "EMP"],
+    "unfilled columns stay as they were",
+  );
+  const mgr = (await call(`/admin/employees/${people.mgr.id}`, undefined, hr))
+    .data;
+  assert.deepEqual([mgr.phone, mgr.date_of_joining], ["222222", "2022-02-02"]);
+  // Reporting lines still cannot loop: U002 -> U001 would be circular.
+  const loop = (
+    await call(
+      "/admin/employees/import",
+      {
+        rows: [{ employee_code: "U002", manager_code: "U001" }],
+        update_existing: true,
+      },
+      hr,
+    )
+  ).data;
+  assert.equal(
+    loop.report.find((r) => r.reason)?.reason,
+    "Manager not set: it would make the reporting line circular",
+  );
+  assert.equal(
+    (await call(`/admin/employees/${people.mgr.id}`, undefined, hr)).data
+      .manager_id,
+    null,
+  );
+});
