@@ -1003,3 +1003,20 @@ textarea {
   border-radius: 2px;
   margin-right: 6px;
 }
+
+code.secret {
+  display: block;
+  padding: 10px 12px;
+  background: #f1f3f2;
+  border-radius: 8px;
+  font-size: 16px;
+  letter-spacing: 1px;
+  word-break: break-all;
+}
+.codes code {
+  display: inline-block;
+  margin: 4px 6px 4px 0;
+  padding: 4px 8px;
+  background: #f1f3f2;
+  border-radius: 6px;
+}

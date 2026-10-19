@@ -67,6 +67,18 @@ Under **Hiring & exits** (HR and admin); employees see **My employment**.
 - **Full and final settlement.** Calculated and posted into the final month's payroll as one-off lines, so tax and net pay come from the normal run: notice shortfall recovery on resignation (gross ÷ 30 a day, can be waived), leave encashment (tax-exempt up to ₹25 lakh on resignation or retirement only), gratuity, and the remaining loan instalments recovered in the same run; approved claims are paid with it. HR can add one-off lines or leave a line out, and the settlement can be voided until the run is approved.
 - **Completing the exit** needs every clearance item done, the settlement posted, the pay-in month's run approved, no assets still held and the last day reached. It then closes the login and revokes the phone, and relieving and experience letters become available.
 
+## Insight, engagement and security
+
+- **Insights** (HR and admin): headcount by department, branch and type; joiners and leavers by month and 12-month attrition; today's attendance and the last 14 days; leave taken and pending; hiring pipeline; open helpdesk tickets; payroll cost for the last approved months (admin and payroll access only).
+- **Notifications.** A bell in the portal lists updates: leave, correction, claim and resignation decisions, interviews scheduled, payslips ready, announcements, policies, helpdesk replies, review cycles and training. Email is sent for the important ones when `RESEND_API_KEY` and `MAIL_FROM` are set on the server (sent through the Resend HTTPS API, recorded in an outbox with its result). Without them the bell works and nothing is emailed.
+- **Announcements** to everyone, a branch or a department, optionally pinned, expiring or emailed.
+- **Helpdesk.** Employees open tickets (payroll, leave, attendance, IT, policy); HR replies, adds internal notes the employee cannot see, assigns, resolves and closes. A reply from the employee reopens a resolved ticket.
+- **Policies** with versions: changing the text asks everyone to acknowledge again; HR sees who is pending.
+- **Documents.** Employees and HR upload PDF, JPG or PNG files up to 2 MB (checked against the file's real header), kept in the database. Visible only to the owner and HR; each HR view is logged; HR verifies; a report lists who is missing ID, address or PAN proof.
+- **Performance.** Goals with weight and progress (set by the person or their manager); review cycles that give every employee a self-review, then a manager review; the manager's rating stays hidden from the employee until HR releases it. Training with mandatory courses confirmed by a manager or HR, and completion records.
+- **Two-factor login** (browser sign-in) with any authenticator app and eight one-time recovery codes; a code cannot be reused; admin can reset it for someone who lost their phone. Phones are protected by device binding instead. Needs `DATA_ENCRYPTION_KEY` (the secret is stored encrypted).
+- **Sessions.** See where you are signed in and sign out one or all other sessions.
+
 ## Attendance integrity (anti-spoofing)
 
 Attendance can only be recorded from the company mobile app on an administrator-approved phone.
