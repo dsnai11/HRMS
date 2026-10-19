@@ -185,7 +185,7 @@ export function createApp({
       "Referrer-Policy": "no-referrer",
       "Permissions-Policy": "geolocation=(self)",
       "Content-Security-Policy":
-        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'",
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; object-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'",
     };
     if (production) headers["Strict-Transport-Security"] = "max-age=31536000";
     const send = (status, data, extra = {}) => {

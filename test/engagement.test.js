@@ -669,3 +669,16 @@ test("Insights layout is saved per person, and celebrations show dates without b
     null,
   );
 });
+
+test("the page policy allows images made in the browser (selfie previews) and nothing remote", async (t) => {
+  const w = await world(t);
+  const res = await fetch(w.base.replace("/api", "/"));
+  const csp = res.headers.get("content-security-policy");
+  assert.match(csp, /img-src 'self' data: blob:/);
+  assert.match(csp, /default-src 'self'/);
+  assert.doesNotMatch(
+    csp,
+    /unsafe-inline|unsafe-eval|https?:\/\//,
+    "no inline code and no remote hosts",
+  );
+});
