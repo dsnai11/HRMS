@@ -2,7 +2,7 @@ import { HttpError, integer, oneOf, string } from "../http.js";
 import { requireOwned } from "../scope.js";
 import { can } from "../rbac.js";
 
-const KINDS = [
+export const KINDS = [
   "id_proof",
   "address_proof",
   "pan",
@@ -12,12 +12,35 @@ const KINDS = [
   "offer_letter",
   "other",
 ];
-const TYPES = {
+export const TYPES = {
   "application/pdf": "pdf",
   "image/jpeg": "jpg",
   "image/png": "png",
 };
 const MAX_BYTES = 2 * 1024 * 1024;
+
+/** Validates an uploaded file body {mime,data}; returns the decoded bytes. */
+export function checkFile(b) {
+  const mime = oneOf(b.mime, "File type", Object.keys(TYPES));
+  const data = string(b.data, "File", 3_000_000);
+  if (!/^[A-Za-z0-9+/=]+$/.test(data))
+    throw new HttpError(400, "The file is not valid.");
+  const bytes = Buffer.from(data, "base64");
+  if (bytes.length > MAX_BYTES)
+    throw new HttpError(413, "Files can be up to 2 MB.");
+  // The first bytes must match the declared type.
+  const magic = {
+    "application/pdf": "%PDF",
+    "image/jpeg": "\xff\xd8\xff",
+    "image/png": "\x89PNG",
+  }[mime];
+  if (bytes.subarray(0, magic.length).toString("latin1") !== magic)
+    throw new HttpError(
+      400,
+      "The file does not look like a " + TYPES[mime].toUpperCase() + ".",
+    );
+  return { mime, data, bytes };
+}
 
 // Files are kept in the database as base64 text, so no separate file storage is needed;
 // the limit keeps the database small. Large scans should be compressed before upload.
@@ -57,24 +80,7 @@ export function registerDocuments(router, app) {
       .prepare("SELECT id FROM users WHERE id=? AND company_id=?")
       .get(target, user.company_id);
     if (!owner) throw new HttpError(404, "Employee not found.");
-    const mime = oneOf(b.mime, "File type", Object.keys(TYPES));
-    const data = string(b.data, "File", 3_000_000);
-    if (!/^[A-Za-z0-9+/=]+$/.test(data))
-      throw new HttpError(400, "The file is not valid.");
-    const bytes = Buffer.from(data, "base64");
-    if (bytes.length > MAX_BYTES)
-      throw new HttpError(413, "Files can be up to 2 MB.");
-    // The first bytes must match the declared type.
-    const magic = {
-      "application/pdf": "%PDF",
-      "image/jpeg": "\xff\xd8\xff",
-      "image/png": "\x89PNG",
-    }[mime];
-    if (bytes.subarray(0, magic.length).toString("latin1") !== magic)
-      throw new HttpError(
-        400,
-        "The file does not look like a " + TYPES[mime].toUpperCase() + ".",
-      );
+    const { mime, data, bytes } = checkFile(b);
     if (
       (
         await db

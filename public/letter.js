@@ -24,5 +24,6 @@ const esc = (v) =>
   }
   const d = await res.json();
   document.title = `${d.title} · ${d.to}`;
-  box.innerHTML = `<article class="slip letter"><header><div><h1>${esc(d.company)}</h1></div><button class="no-print" onclick="print()">Print / save as PDF</button></header><p class="letter-date">${esc(d.date)}</p><h2>${esc(d.title)}</h2><p><strong>${esc(d.to)}</strong></p>${d.paragraphs.map((p) => `<p>${esc(p)}</p>`).join("")}<p class="letter-sign">${esc(d.signoff)}<br><br><br>Authorised signatory</p></article>`;
+  box.innerHTML = `<article class="slip letter"><header><div><h1>${esc(d.company)}</h1></div><button class="no-print" id="print">Print / save as PDF</button></header><p class="letter-date">${esc(d.date)}</p><h2>${esc(d.title)}</h2><p><strong>${esc(d.to)}</strong></p>${d.paragraphs.map((p) => `<p>${esc(p)}</p>`).join("")}<p class="letter-sign">${esc(d.signoff)}<br><br><br>Authorised signatory</p></article>`;
+  box.querySelector("#print")?.addEventListener("click", () => print());
 })();
