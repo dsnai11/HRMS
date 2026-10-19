@@ -184,6 +184,7 @@ export function registerLeave(router, app) {
       allow_half_day: pick("allow_half_day", (v) =>
         Number(bool(v, "Half days")),
       ),
+      encashable: pick("encashable", (v) => Number(bool(v, "Encashable"))),
       applicable_gender: pick("applicable_gender", (v) =>
         v === null || v === ""
           ? null
@@ -236,6 +237,7 @@ export function registerLeave(router, app) {
         accrual: "monthly",
         carry_forward_max: 0,
         allow_half_day: true,
+        encashable: false,
         applicable_gender: null,
         max_days_per_request: null,
         active: true,
@@ -246,7 +248,7 @@ export function registerLeave(router, app) {
           (
             await db
               .prepare(
-                "INSERT INTO leave_types(company_id,name,code,paid,unlimited,quota_per_year,accrual,carry_forward_max,allow_half_day,applicable_gender,max_days_per_request,active,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO leave_types(company_id,name,code,paid,unlimited,quota_per_year,accrual,carry_forward_max,allow_half_day,applicable_gender,max_days_per_request,active,encashable,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
               )
               .run(
                 companyId,
@@ -261,6 +263,7 @@ export function registerLeave(router, app) {
                 t.applicable_gender,
                 t.max_days_per_request,
                 t.active,
+                t.encashable,
                 now(app),
               )
           ).lastInsertRowid,
@@ -288,7 +291,7 @@ export function registerLeave(router, app) {
       await transaction(async () => {
         await db
           .prepare(
-            "UPDATE leave_types SET name=?,paid=?,unlimited=?,quota_per_year=?,accrual=?,carry_forward_max=?,allow_half_day=?,applicable_gender=?,max_days_per_request=?,active=? WHERE id=?",
+            "UPDATE leave_types SET name=?,paid=?,unlimited=?,quota_per_year=?,accrual=?,carry_forward_max=?,allow_half_day=?,applicable_gender=?,max_days_per_request=?,active=?,encashable=? WHERE id=?",
           )
           .run(
             t.name,
@@ -301,6 +304,7 @@ export function registerLeave(router, app) {
             t.applicable_gender,
             t.max_days_per_request,
             t.active,
+            t.encashable,
             id,
           );
         await audit("leave_type_updated", { id, ...t });

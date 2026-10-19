@@ -21,6 +21,9 @@ const PAYROLL_TABS = {
   structure: "Salary structure",
   statutory: "Statutory & settings",
   adjustments: "Adjustments",
+  loans: "Loans & advances",
+  claims: "Reimbursements",
+  yearend: "Bonus, gratuity & tax forms",
 };
 
 function viewDialog(title, html) {
@@ -65,6 +68,7 @@ async function payrollPage(id) {
 
 const payrollCache = {};
 async function payrollTabHtml(tab) {
+  if (MORE_TABS[tab]) return await MORE_TABS[tab].html();
   if (tab === "runs") {
     const runs = await api("/admin/payroll/runs");
     return `<div class="card"><div class="card-head"><div><h2>Payroll runs</h2><p class="muted">Run a month after it has ended. Attendance and approved leave feed pay days.</p></div>${has("payroll.manage") ? `<div class="actions"><input type="month" id="run-month" value="${shiftMonth(thisMonth(), -1)}"><button id="new-run">Run payroll</button></div>` : ""}</div>${
@@ -148,7 +152,9 @@ async function payrollRunHtml(runId) {
   const exports = [
     ["register", "Payroll register"],
     ["pf", "PF (ECR data)"],
+    ["ecr", "PF ECR upload file"],
     ["esi", "ESI"],
+    ["esic", "ESIC upload file"],
     ["pt", "Professional tax"],
     ...(run.status !== "draft" ? [["bank", "Bank file"]] : []),
   ];
@@ -193,6 +199,7 @@ async function payrollWire(tab) {
   const on = (s, fn) =>
     document.querySelector(s)?.addEventListener("click", fn);
   const reload = async () => render();
+  if (MORE_TABS[tab]) return MORE_TABS[tab].wire();
   if (tab === "runs" && payrollRun) {
     const run = payrollCache.run.run;
     on("#back-runs", () => ((payrollRun = null), render()));
@@ -245,7 +252,7 @@ async function payrollWire(tab) {
             busy(b, () =>
               download(
                 `/admin/payroll/runs/${run.id}/export?type=${b.dataset.export}`,
-                `payroll-${b.dataset.export}-${run.month}.csv`,
+                `payroll-${b.dataset.export}-${run.month}.${b.dataset.export === "ecr" ? "txt" : "csv"}`,
               ),
             )),
       );

@@ -57,6 +57,20 @@ export function registerPayrollRuns(router, app) {
         "SELECT * FROM payroll_adjustments WHERE company_id=? AND month=?",
       )
       .all(companyId, month);
+    // Loan instalments due and approved reimbursement claims join the run as
+    // adjustments; their ids are kept so approval can mark them settled.
+    const dueLoans = await db
+      .prepare(
+        `SELECT s.id,s.amount,s.month,l.user_id,l.kind FROM payroll_loan_schedule s JOIN payroll_loans l ON l.id=s.loan_id
+         WHERE l.company_id=? AND l.status='active' AND s.status='pending' AND s.month<=?`,
+      )
+      .all(companyId, month);
+    const dueClaims = await db
+      .prepare(
+        `SELECT c.id,c.user_id,COALESCE(c.approved_amount,c.amount) amount,t.name type_name,t.taxable
+         FROM reimbursement_claims c JOIN claim_types t ON t.id=c.claim_type_id WHERE c.company_id=? AND c.status='approved'`,
+      )
+      .all(companyId);
     const slabs = await db
       .prepare("SELECT * FROM pt_slabs WHERE company_id=?")
       .all(companyId);
@@ -97,14 +111,30 @@ export function registerPayrollRuns(router, app) {
       const m = musterOf.get(p.id);
       const o = opening.get(p.id) ?? {};
       const pr = prior.get(p.id) ?? {};
-      const mine = adjustments
-        .filter((a) => a.user_id === p.id)
-        .map((a) => ({
-          kind: a.kind,
-          name: a.name,
-          amount: a.amount,
-          taxable: Boolean(a.taxable),
-        }));
+      const myLoans = dueLoans.filter((l) => l.user_id === p.id);
+      const myClaims = dueClaims.filter((c) => c.user_id === p.id);
+      const mine = [
+        ...adjustments
+          .filter((a) => a.user_id === p.id)
+          .map((a) => ({
+            kind: a.kind,
+            name: a.name,
+            amount: a.amount,
+            taxable: Boolean(a.taxable),
+          })),
+        ...myLoans.map((l) => ({
+          kind: "deduction",
+          name: `${l.kind === "advance" ? "Advance" : "Loan"} recovery${l.month < month ? ` (${monthName(l.month)})` : ""}`,
+          amount: l.amount,
+          taxable: false,
+        })),
+        ...myClaims.map((c) => ({
+          kind: "earning",
+          name: `Reimbursement: ${c.type_name}`,
+          amount: c.amount,
+          taxable: Boolean(c.taxable),
+        })),
+      ];
       const slip = computePayslip({
         month,
         config,
@@ -145,10 +175,18 @@ export function registerPayrollRuns(router, app) {
       if (!m) slip.warnings.push("no_attendance");
       if (config.pt.enabled && salary.pt_applicable && !p.branch_state)
         slip.warnings.push("no_branch_state_for_pt");
-      items.push({ person: p, slip, salary });
+      items.push({
+        person: p,
+        slip,
+        salary,
+        settles: {
+          loan_schedule_ids: myLoans.map((l) => l.id),
+          claim_ids: myClaims.map((c) => c.id),
+        },
+      });
     }
     await db.prepare("DELETE FROM payroll_items WHERE run_id=?").run(run.id);
-    for (const { person, slip } of items)
+    for (const { person, slip, settles } of items)
       await db
         .prepare(
           "INSERT INTO payroll_items(run_id,company_id,user_id,gross,deductions,net,employer_cost,paid_days,lop_days,taxable_earnings,tds,pt,warnings,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -175,6 +213,7 @@ export function registerPayrollRuns(router, app) {
               designation: person.designation_name,
             },
             ...slip,
+            settles,
           }),
         );
     await db
@@ -340,6 +379,32 @@ export function registerPayrollRuns(router, app) {
             "UPDATE payroll_runs SET status='approved',approved_by=?,approved_at=? WHERE id=?",
           )
           .run(user.id, nowIso(), run.id);
+        // Settle what this run paid or recovered, and close finished loans.
+        for (const r of await db
+          .prepare("SELECT data FROM payroll_items WHERE run_id=?")
+          .all(run.id)) {
+          const { loan_schedule_ids = [], claim_ids = [] } =
+            JSON.parse(r.data).settles ?? {};
+          for (const id of loan_schedule_ids) {
+            await db
+              .prepare(
+                "UPDATE payroll_loan_schedule SET status='deducted',run_id=? WHERE id=?",
+              )
+              .run(run.id, id);
+            await db
+              .prepare(
+                `UPDATE payroll_loans SET status='closed' WHERE status='active' AND id=(SELECT loan_id FROM payroll_loan_schedule WHERE id=?)
+                 AND NOT EXISTS (SELECT 1 FROM payroll_loan_schedule x WHERE x.loan_id=payroll_loans.id AND x.status='pending')`,
+              )
+              .run(id);
+          }
+          for (const id of claim_ids)
+            await db
+              .prepare(
+                "UPDATE reimbursement_claims SET status='paid',paid_run_id=? WHERE id=?",
+              )
+              .run(run.id, id);
+        }
         await audit("payroll_run_approved", { id: run.id, month: run.month });
       });
       return send(200, { ok: true });
@@ -406,8 +471,81 @@ export function registerPayrollRuns(router, app) {
         r.deductions
           .filter((d) => d.code === code)
           .reduce((s, d) => s + d.amount, 0);
+      if (type === "ecr") {
+        // Classic EPFO ECR text upload: 11 fields per member joined with "#~#".
+        const members = rows.filter((x) => x.pf);
+        const missing = [];
+        const lines = [];
+        for (const r of members) {
+          const uan = (await readPrivate(app, r.user_id)).uan;
+          if (!uan) {
+            missing.push(r.employee.name);
+            continue;
+          }
+          lines.push(
+            [
+              uan,
+              r.employee.name
+                .replace(/[^A-Za-z ]/g, " ")
+                .replace(/ +/g, " ")
+                .trim(),
+              Math.round(r.gross_earnings),
+              r.pf.wages,
+              r.pf.eps_wages,
+              r.pf.eps_wages,
+              r.pf.employee,
+              r.pf.employerEps,
+              r.pf.employerEpf,
+              Math.max(0, Math.round(r.lop_days)),
+              0,
+            ].join("#~#"),
+          );
+        }
+        if (missing.length)
+          throw new HttpError(
+            409,
+            `UAN is missing for: ${missing.slice(0, 8).join(", ")}${missing.length > 8 ? ` and ${missing.length - 8} more` : ""}. Add it on their payroll profile first.`,
+          );
+        await audit("statutory_file_exported", {
+          id: run.id,
+          month: run.month,
+          type,
+          rows: lines.length,
+        });
+        res.writeHead(200, {
+          ...headers,
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": `attachment; filename="ecr-${run.month}.txt"`,
+        });
+        return res.end(lines.join("\r\n"));
+      }
       let header, out;
-      if (type === "register") {
+      if (type === "esic") {
+        // The six columns the ESIC portal's multi-employee upload expects. Days round up.
+        header = [
+          ["ip", "IP Number"],
+          ["name", "IP Name"],
+          ["days", "No of Days for which wages paid/payable during the month"],
+          ["wages", "Total Monthly Wages"],
+          [
+            "reason",
+            "Reason Code for Zero workings days(numeric only; leave blank if not applicable)",
+          ],
+          ["last", "Last Working Day(Format DD/MM/YYYY or DD-MM-YYYY)"],
+        ];
+        out = [];
+        for (const r of rows.filter((x) => x.esi)) {
+          const days = Math.ceil(r.paid_days);
+          out.push({
+            ip: (await readPrivate(app, r.user_id)).esi_ip ?? "MISSING",
+            name: r.employee.name,
+            days,
+            wages: r.esi.wages,
+            reason: days === 0 ? 1 : "",
+            last: "",
+          });
+        }
+      } else if (type === "register") {
         header = [
           ["code", "Employee code"],
           ["name", "Name"],
@@ -534,7 +672,7 @@ export function registerPayrollRuns(router, app) {
         });
       } else throw new HttpError(400, "Unknown export type.");
       // PF and ESI files carry identity numbers that were stored encrypted.
-      if (type === "pf" || type === "esi")
+      if (type === "pf" || type === "esi" || type === "esic")
         await audit("statutory_file_exported", {
           id: run.id,
           month: run.month,

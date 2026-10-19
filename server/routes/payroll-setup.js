@@ -17,6 +17,7 @@ import {
   decryptJson,
   mask,
 } from "../crypto-store.js";
+import { computeArrears, nextMonth } from "../payroll/arrears.js";
 
 const nowIso = (app) => new Date(app.clock()).toISOString();
 const bool = (v, label) => {
@@ -35,6 +36,8 @@ export async function loadConfig(db, companyId) {
   for (const [section, defaults] of Object.entries({
     ...DEFAULT_CONFIG,
     approval: { separateApprover: false },
+    bonus: { rate: 8.33, minimumWage: 0 },
+    leaveEncashment: { basis: "basic", divisor: 30 },
   }))
     merged[section] = { ...defaults, ...(saved[section] ?? {}) };
   return merged;
@@ -96,6 +99,30 @@ export function registerPayrollSetup(router, app) {
         tds: ["enabled"],
         approval: ["separateApprover"],
       };
+      // Numeric and choice settings for bonus and leave encashment.
+      const rate = b.bonus?.rate;
+      if (rate !== undefined)
+        current.bonus = {
+          ...current.bonus,
+          rate: number(rate, "Bonus rate", 8.33, 20),
+        };
+      const mw = b.bonus?.minimumWage;
+      if (mw !== undefined)
+        current.bonus = {
+          ...current.bonus,
+          minimumWage: number(mw, "Minimum wage", 0, 1000000),
+        };
+      const le = b.leaveEncashment ?? {};
+      if (le.basis !== undefined)
+        current.leaveEncashment = {
+          ...current.leaveEncashment,
+          basis: oneOf(le.basis, "Encashment basis", ["basic", "gross"]),
+        };
+      if (le.divisor !== undefined)
+        current.leaveEncashment = {
+          ...current.leaveEncashment,
+          divisor: number(le.divisor, "Encashment divisor", 20, 31),
+        };
       for (const [section, keys] of Object.entries(allowed))
         for (const key of keys) {
           const v = b[section]?.[key];
@@ -456,50 +483,122 @@ export function registerPayrollSetup(router, app) {
       return send(200, history);
     },
   );
+  // Reads and checks a salary request; shared by the preview and the real thing.
+  async function salarySpec(companyId, personId, b) {
+    const person = await requireOwned(
+      db,
+      "users",
+      personId,
+      companyId,
+      "employee",
+    );
+    if (person.role === "super_admin")
+      throw new HttpError(
+        400,
+        "The platform owner is not paid through payroll.",
+      );
+    const effective = isoDate(b.effective_from, "Effective from");
+    if (!effective) throw new HttpError(400, "Effective from is required.");
+    const gross = number(b.monthly_gross, "Monthly gross", 1, 10000000);
+    const flag = (k, d) => (b[k] === undefined ? d : Number(bool(b[k], k)));
+    const regime =
+      b.tax_regime === undefined
+        ? "new"
+        : oneOf(b.tax_regime, "Tax regime", ["new", "old"]);
+    const declared =
+      b.declared_deductions === undefined
+        ? 0
+        : number(b.declared_deductions, "Declared deductions", 0, 100000000);
+    const components = await listComponents(companyId);
+    let built;
+    try {
+      built = buildSalaryLines(components, gross);
+    } catch (e) {
+      throw new HttpError(422, e.message);
+    }
+    const comps = new Map(components.map((c) => [c.id, c]));
+    const flags = {
+      pf_applicable: flag("pf_applicable", 1),
+      esi_applicable: flag("esi_applicable", 0),
+      pt_applicable: flag("pt_applicable", 1),
+      eps_eligible: flag("eps_eligible", 1),
+      tax_regime: regime,
+      declared_deductions: declared,
+    };
+    const engineLines = built.map((l) => {
+      const c = comps.get(l.component_id);
+      return {
+        code: l.code,
+        name: l.name,
+        amount: l.amount,
+        is_basic: Boolean(c.is_basic),
+        taxable: Boolean(c.taxable),
+        esi_wage: Boolean(c.esi_wage),
+      };
+    });
+    return {
+      person,
+      effective,
+      gross,
+      flags,
+      built,
+      comps,
+      engineLines,
+      note: optionalString(b.note, "Note", 300),
+    };
+  }
+  const arrearsFor = async (companyId, spec, locked) =>
+    computeArrears(app, {
+      companyId,
+      userId: spec.person.id,
+      effective: spec.effective,
+      locked,
+      lines: spec.engineLines,
+      flags: {
+        ...spec.flags,
+        pf_applicable: Boolean(spec.flags.pf_applicable),
+        eps_eligible: Boolean(spec.flags.eps_eligible),
+      },
+      config: await loadConfig(db, companyId),
+    });
+
+  router.post(
+    "/api/admin/employees/:id/salary-arrears",
+    { perm: "payroll.read" },
+    async ({ params, companyId, body, send }) => {
+      const spec = await salarySpec(
+        companyId,
+        integer(Number(params.id)),
+        await body(),
+      );
+      const locked = await lastLockedMonth(companyId);
+      if (!locked || spec.effective.slice(0, 7) > locked)
+        return send(200, {
+          rows: [],
+          total_gross: 0,
+          total_pf: 0,
+          pay_in_month: null,
+        });
+      return send(200, await arrearsFor(companyId, spec, locked));
+    },
+  );
   router.post(
     "/api/admin/employees/:id/salary",
     { perm: "payroll.manage" },
     async ({ user, params, companyId, body, send, audit }) => {
-      const person = await requireOwned(
-        db,
-        "users",
-        integer(Number(params.id)),
-        companyId,
-        "employee",
-      );
-      if (person.role === "super_admin")
-        throw new HttpError(
-          400,
-          "The platform owner is not paid through payroll.",
-        );
       const b = await body();
-      const effective = isoDate(b.effective_from, "Effective from");
-      if (!effective) throw new HttpError(400, "Effective from is required.");
-      const gross = number(b.monthly_gross, "Monthly gross", 1, 10000000);
+      const spec = await salarySpec(companyId, integer(Number(params.id)), b);
       const locked = await lastLockedMonth(companyId);
-      if (locked && effective.slice(0, 7) <= locked)
+      const backdated = Boolean(locked) && spec.effective.slice(0, 7) <= locked;
+      if (backdated && b.arrears !== true)
         throw new HttpError(
           409,
-          `Payroll for ${locked} is already approved; a salary can only start after it.`,
+          `Payroll for ${locked} is already approved. To back-date this revision, confirm that the difference should be paid as arrears in ${nextMonth(locked)}.`,
         );
-      const flag = (k, d) => (b[k] === undefined ? d : Number(bool(b[k], k)));
-      const regime =
-        b.tax_regime === undefined
-          ? "new"
-          : oneOf(b.tax_regime, "Tax regime", ["new", "old"]);
-      const declared =
-        b.declared_deductions === undefined
-          ? 0
-          : number(b.declared_deductions, "Declared deductions", 0, 100000000);
-      let lines;
-      try {
-        lines = buildSalaryLines(await listComponents(companyId), gross);
-      } catch (e) {
-        throw new HttpError(422, e.message);
-      }
-      const comps = new Map(
-        (await listComponents(companyId)).map((c) => [c.id, c]),
-      );
+      const arrears = backdated
+        ? await arrearsFor(companyId, spec, locked)
+        : null;
+      const { person, effective, gross, flags, built, comps } = spec;
       const id = await transaction(async () => {
         const id = Number(
           (
@@ -512,19 +611,19 @@ export function registerPayrollSetup(router, app) {
                 person.id,
                 effective,
                 round(gross),
-                flag("pf_applicable", 1),
-                flag("esi_applicable", 0),
-                flag("pt_applicable", 1),
-                flag("eps_eligible", 1),
-                regime,
-                declared,
-                optionalString(b.note, "Note", 300),
+                flags.pf_applicable,
+                flags.esi_applicable,
+                flags.pt_applicable,
+                flags.eps_eligible,
+                flags.tax_regime,
+                flags.declared_deductions,
+                spec.note,
                 user.id,
                 nowIso(app),
               )
           ).lastInsertRowid,
         );
-        for (const l of lines) {
+        for (const l of built) {
           const c = comps.get(l.component_id);
           await db
             .prepare(
@@ -541,13 +640,61 @@ export function registerPayrollSetup(router, app) {
               c.esi_wage,
             );
         }
+        if (arrears && arrears.total_gross !== 0) {
+          const add = (kind, name, amount, source, taxable) =>
+            db
+              .prepare(
+                "INSERT INTO payroll_adjustments(company_id,user_id,month,kind,name,amount,taxable,note,created_by,created_at,source,source_ref) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+              )
+              .run(
+                companyId,
+                person.id,
+                arrears.pay_in_month,
+                kind,
+                name,
+                round(Math.abs(amount)),
+                taxable,
+                `Back-dated salary revision from ${effective}`,
+                user.id,
+                nowIso(app),
+                source,
+                id,
+              );
+          if (arrears.total_gross > 0) {
+            await add(
+              "earning",
+              arrears.label,
+              arrears.total_gross,
+              "arrears",
+              1,
+            );
+            if (arrears.total_pf > 0)
+              await add(
+                "deduction",
+                "PF on arrears (employee)",
+                arrears.total_pf,
+                "arrears_pf",
+                0,
+              );
+          } else
+            await add(
+              "deduction",
+              "Arrears recovery (salary reduced retrospectively)",
+              arrears.total_gross,
+              "arrears",
+              0,
+            );
+        }
         await audit("salary_set", {
           employeeId: person.id,
           effective_from: effective,
+          arrears: arrears
+            ? { month: arrears.pay_in_month, months: arrears.rows.length }
+            : null,
         });
         return id;
       });
-      return send(201, { id, lines });
+      return send(201, { id, lines: built, arrears });
     },
   );
   router.get(

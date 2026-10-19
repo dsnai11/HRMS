@@ -27,10 +27,10 @@ Attendance application with an Android/iPhone Expo client, a responsive admin po
 - **Calendar.** Weekly offs (any weekdays, plus chosen Saturdays such as the 2nd and 4th) and company or branch holidays are not deducted from leave.
 - **Applying.** Employees apply for full or half days. A request is checked for balance (pending requests are reserved), overlapping leave (also enforced by the database), holidays, leave-year boundaries and gender rules. Approved leave is a ledger entry; cancelling returns the days.
 - **Approvals.** A person's manager (anyone above them in the reporting line) or HR/admin decides; nobody decides their own. Managers and HR have an **Approvals** inbox with a pending count. Started leave can only be cancelled by HR.
-- **Attendance corrections.** Missed or wrong punch, on duty and work from home. Allowed for today or the last N days (default 7) and at most N per month (default 5), both set by HR. Approval creates or completes that day's shift, marked *corrected*, *on duty* or *work from home*; late arrival or early leave still makes a half day, while on duty and work from home count as full days. A day with leave cannot also be corrected.
+- **Attendance corrections.** Missed or wrong punch, on duty and work from home. Allowed for today or the last N days (default 7) and at most N per month (default 5), both set by HR. Approval creates or completes that day's shift, marked _corrected_, _on duty_ or _work from home_; late arrival or early leave still makes a half day, while on duty and work from home count as full days. A day with leave cannot also be corrected.
 - **Monthly muster** (HR) and **Time off** calendar (everyone): each day is present, half day, leave, holiday, weekly off or absent, giving payable days and loss-of-pay days for payroll. Days before the company started using the system (or before a person joined) are not counted; HR can set "counted from". Today is not counted until it has attendance or leave. Export as CSV.
 
-Not yet included: shifts or weekly offs per branch or employee, a per-company timezone, multi-level approval chains, comp-off, leave encashment and optional holidays. See `docs/ROADMAP.md`.
+Not yet included: shifts or weekly offs per branch or employee, a per-company timezone, multi-level approval chains, comp-off and optional holidays. See `docs/ROADMAP.md`.
 
 ## Payroll
 
@@ -46,14 +46,22 @@ Payroll is for payroll staff (role `payroll`) and administrators; HR does not se
 - **Payslips** open as a printable page (save as PDF from the browser) with the amount in words.
 - **Personal data.** Bank account, IFSC, PAN, UAN and ESI numbers are encrypted with AES-256-GCM using `DATA_ENCRYPTION_KEY` (generate with `openssl rand -base64 32` and set it on the server; **keep a backup, because encrypted data cannot be recovered without it**). Without the key nothing sensitive is stored. Values are masked on screen, revealing one is audited, and bank, PF and ESI exports are audited. Aadhaar is deliberately not stored.
 
-**Not included yet:** Form 16 and quarterly TDS returns, the EPFO ECR upload format, ESI return format, gratuity, leave encashment, arrears from back-dated revisions, loans, reimbursements, bonus and statutory-bonus rules, and full-and-final settlement. The statutory rules are reference values for your payroll team or CA to confirm before a real run; they are not legal advice. Parameters and their sources are in `server/payroll/statutory.js`.
+- **Arrears.** A salary revision dated in an approved month is refused unless confirmed; the confirmation previews the month-by-month difference (and PF on it) and adds it to the next run as an earning and a deduction, or as a recovery if pay fell.
+- **Loans and advances.** Interest-free, fixed instalments recovered from each month's pay; skip an instalment (it moves to the end), cancel the rest, and the loan closes itself when the last instalment is deducted. Employees see their own schedule.
+- **Reimbursement claims.** Claim types with an optional yearly limit (checked per tax year) and taxable or non-taxable treatment. Employees claim from the portal, the manager, HR or payroll approves (HR and managers see them under Approvals), and approved claims are paid with the next run and marked paid on approval.
+- **Statutory bonus.** Eligible if wages are up to ₹21,000 and at least 30 days were worked; calculated on wages capped at the higher of ₹7,000 or the minimum wage, at a configurable 8.33–20%, from approved runs of the financial year. Added to payroll once per year.
+- **Leave encashment.** For leave types marked payable: days come off the ledger and a taxable earning is added at basic (or gross) ÷ a divisor you set; deleting the line gives the days back.
+- **Gratuity.** Calculator and liability report: 15 days' wages per completed year (a part over six months counts), wages at least half of gross, ₹20 lakh cap, five years (one for fixed-term) to qualify, with the provision accruing before that.
+- **Statutory files.** EPFO ECR text upload (`#~#`-separated; blocked until every member has a UAN), ESIC upload CSV, and Form 130 (annual salary and tax) and Form 138 (quarterly deduction) data as CSV.
+
+**Not included yet:** full-and-final settlement (arrives with the exit workflow), the revamped EPFO ECR 2.0 layout and ESIC `.xls` file (the data is exported as CSV), perquisite tax on interest-free loans, investment-proof workflow for the old regime, and the official Form 130/138 e-filing files. The statutory rules are reference values for your payroll team or CA to confirm before a real run; they are not legal advice. Parameters and their sources are in `server/payroll/statutory.js` and `server/payroll/extras.js`.
 
 ## Attendance integrity (anti-spoofing)
 
 Attendance can only be recorded from the company mobile app on an administrator-approved phone.
 
 - **Phone-only punching.** `/api/punch` accepts only a bearer session plus a registered device ID and secret. Browser sessions are refused, and the web portal has no punch button.
-- **One approved phone per employee.** An employee's first sign-in on a phone registers it as *pending*. An administrator approves it under **Devices** in the portal. Approving a new phone revokes the old one. The server stores only a hash of the phone's secret. A phone already registered to one account cannot be registered to another.
+- **One approved phone per employee.** An employee's first sign-in on a phone registers it as _pending_. An administrator approves it under **Devices** in the portal. Approving a new phone revokes the old one. The server stores only a hash of the phone's secret. A phone already registered to one account cannot be registered to another.
 - **Server-side checks on every punch.** Mock-location flag, emulator detection, impossible travel between accepted punches (over 250 km/h and 1 km), and a warning for rooted devices and for identical coordinates repeated exactly across several punches.
 - **Evidence trail.** Every refused attempt, and every accepted punch with a warning sign, is stored and shown under **Security** in the portal.
 

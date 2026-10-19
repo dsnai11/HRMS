@@ -195,6 +195,7 @@ async function approvalsPage(id) {
         decideDialog(kind, row, b.dataset.act);
       }),
   );
+  await claimsApprovals(id);
 }
 
 // ---- HR: leave types, holidays, settings, requests, balances ------------------
@@ -318,6 +319,14 @@ function typeDialog(t) {
       ],
       String(t ? Boolean(t.allow_half_day) : true),
     )}${sel(
+      "encashable",
+      "Can be paid out (encashed)",
+      [
+        ["false", "No"],
+        ["true", "Yes"],
+      ],
+      String(Boolean(t?.encashable)),
+    )}${sel(
       "applicable_gender",
       "Applies to",
       [
@@ -341,7 +350,13 @@ function typeDialog(t) {
         : ""
     }`,
     async (b) => {
-      for (const k of ["paid", "unlimited", "allow_half_day", "active"])
+      for (const k of [
+        "paid",
+        "unlimited",
+        "allow_half_day",
+        "encashable",
+        "active",
+      ])
         if (k in b) b[k] = b[k] === "true";
       for (const k of ["quota_per_year", "carry_forward_max"])
         b[k] = Number(b[k]);
