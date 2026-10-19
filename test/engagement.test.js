@@ -559,3 +559,113 @@ test("phones register and unregister their push token", async (t) => {
     0,
   );
 });
+
+test("Insights layout is saved per person, and celebrations show dates without birth years", async (t) => {
+  const w = await world(t);
+  const { call, people, db } = w;
+  const hr = people.hr.token;
+  // Today in the test world is 5 Nov 2026.
+  await db
+    .prepare("UPDATE users SET date_of_birth='1990-11-12' WHERE id=?")
+    .run(people.emp.id);
+  await db
+    .prepare(
+      "UPDATE users SET date_of_birth='1985-06-01',date_of_joining='2020-11-05' WHERE id=?",
+    )
+    .run(people.mgr.id);
+  await db
+    .prepare("UPDATE users SET date_of_joining='2026-10-20' WHERE id=?")
+    .run(people.pay.id);
+  const c = (await call("/admin/insights", undefined, hr)).data.celebrations;
+  assert.deepEqual(
+    c.birthdays.map((b) => [b.name, b.date, b.in_days]),
+    [["EMP", "2026-11-12", 7]],
+  );
+  assert.equal(
+    JSON.stringify(c).includes("1990"),
+    false,
+    "no birth year leaves the server",
+  );
+  assert.deepEqual(
+    c.anniversaries.map((a) => [a.name, a.years, a.in_days]),
+    [["MGR", 6, 0]],
+  );
+  assert.deepEqual(
+    c.new_joiners.map((j) => j.name),
+    ["PAY"],
+  );
+
+  // Layout: invalid ids and duplicates are refused; each person has their own; reset removes it.
+  assert.deepEqual(
+    (await call("/dashboard-prefs", undefined, hr)).data.layout,
+    null,
+  );
+  assert.equal(
+    (
+      await call(
+        "/dashboard-prefs",
+        { layout: [{ id: "nope", visible: true }] },
+        hr,
+        "PUT",
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await call(
+        "/dashboard-prefs",
+        {
+          layout: [
+            { id: "stats", visible: true },
+            { id: "stats", visible: false },
+          ],
+        },
+        hr,
+        "PUT",
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await call(
+        "/dashboard-prefs",
+        {
+          layout: [
+            { id: "movement", visible: true },
+            { id: "stats", visible: false },
+          ],
+        },
+        hr,
+        "PUT",
+      )
+    ).status,
+    200,
+  );
+  assert.deepEqual(
+    (await call("/dashboard-prefs", undefined, hr)).data.layout,
+    [
+      { id: "movement", visible: true },
+      { id: "stats", visible: false },
+    ],
+  );
+  await w.add("boss", { role: "admin" });
+  assert.equal(
+    (await call("/dashboard-prefs", undefined, people.boss.token)).data.layout,
+    null,
+    "someone else's layout is separate",
+  );
+  assert.equal(
+    (await call("/dashboard-prefs", undefined, people.emp.token)).status,
+    403,
+  );
+  assert.equal(
+    (await call("/dashboard-prefs", undefined, hr, "DELETE")).status,
+    200,
+  );
+  assert.equal(
+    (await call("/dashboard-prefs", undefined, hr)).data.layout,
+    null,
+  );
+});

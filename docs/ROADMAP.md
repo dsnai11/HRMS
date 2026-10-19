@@ -86,4 +86,6 @@ Also done: rosters.
 
 Also done: Android push (iPhone needs a paid Apple account).
 
-Still to do: customisable dashboard, LMS content, live biometric device connection (see `docs/COMPARISON.md`).
+Also done: customisable dashboard.
+
+Still to do: LMS content, live biometric device connection (see `docs/COMPARISON.md`).

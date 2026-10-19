@@ -22,7 +22,7 @@ Addetto HRMS (Intero Software LLP) is an Indian HRMS with an employee mobile app
 | Form 16 download in app                                    | yes             | Employee tax statement; Form 130/138 data for filing. No official Form 16 file                                |
 | Performance: reviews, appraisal cycle                      | yes             | Yes: goals, self and manager review, release                                                                  |
 | KRA/KPI by role, continuous feedback                       | yes             | KRAs by designation applied as goals; praise/improve/private feedback. No KPI scoring formulas                |
-| Analytics dashboard                                        | yes             | Yes (fixed layout, not customisable)                                                                          |
+| Analytics dashboard                                        | yes             | Yes: show, hide and reorder widgets per person; includes birthdays, anniversaries and new joiners             |
 | Alerts and notifications                                   | yes             | In-app bell, email when configured, Android push (needs Firebase set up); no iPhone push with a free Apple ID |
 | Employee directory (app)                                   | yes             | Yes                                                                                                           |
 | Documents and acknowledgement                              | yes             | Yes: upload, verify, policy acknowledgement                                                                   |
@@ -35,4 +35,4 @@ Addetto HRMS (Intero Software LLP) is an Indian HRMS with an employee mobile app
 
 ## Still to build to match
 
-A customisable dashboard, LMS course content, and a live biometric device connection.
+LMS course content, and a live biometric device connection.
