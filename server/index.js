@@ -39,6 +39,7 @@ const STATIC = {
   "/hiring.js": ["hiring.js", "text/javascript"],
   "/engage.js": ["engage.js", "text/javascript"],
   "/more.js": ["more.js", "text/javascript"],
+  "/people.js": ["people.js", "text/javascript"],
   "/letter.html": ["letter.html", "text/html"],
   "/letter.js": ["letter.js", "text/javascript"],
   "/payslip.html": ["payslip.html", "text/html"],

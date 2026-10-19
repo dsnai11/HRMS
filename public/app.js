@@ -112,7 +112,8 @@ const empty = (title, description) =>
   `<div class="empty"><div class="empty-icon">◎</div><strong>${esc(title)}</strong>${esc(description)}</div>`;
 function login() {
   if (config.setupRequired) return setup();
-  app.innerHTML = `<div class="login"><section class="login-story">${brand()}<div><div class="eyebrow">${esc(config.company)}</div><h1>Every workday.<br>In the right place.</h1><p>A connected workplace starts with clarity. Attendance, people, and working hours — together in one space.</p></div><footer class="muted">Built around your people.</footer></section><section class="login-panel"><div class="eyebrow">Your workspace</div><h2>Welcome back</h2><p class="muted">Sign in with your company account.</p><form id="login"><label>Email address<input type="email" name="email" autocomplete="username" placeholder="you@company.com" required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button>Sign in →</button></form><p class="login-footer">Employees: use the credentials provided by your administrator.<br>Location is requested only when you punch in or out.</p></section></div>`;
+  app.innerHTML = `<div class="login"><section class="login-story">${brand()}<div><div class="eyebrow">${esc(config.company)}</div><h1>Every workday.<br>In the right place.</h1><p>A connected workplace starts with clarity. Attendance, people, and working hours — together in one space.</p></div><footer class="muted">Built around your people.</footer></section><section class="login-panel"><div class="eyebrow">Your workspace</div><h2>Welcome back</h2><p class="muted">Sign in with your company account.</p><form id="login"><label>Email address<input type="email" name="email" autocomplete="username" placeholder="you@company.com" required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button>Sign in →</button><a href="#" id="forgot" class="forgot">Forgot password?</a></form><p class="login-footer">Employees: use the credentials provided by your administrator.<br>Location is requested only when you punch in or out.</p></section></div>`;
+  document.querySelector("#forgot")?.addEventListener("click", forgotDialog);
   document.querySelector("#login").onsubmit = (e) => {
     e.preventDefault();
     busy(e.submitter, async () => {
@@ -187,6 +188,8 @@ function shell() {
     me.role !== "super_admin" && ["performance", "★", "Performance"],
     ["documents", "▤", "Documents"],
     me.role !== "super_admin" && ["mine", "◎", "My attendance"],
+    ["directory", "☰", "Directory"],
+    me.role !== "super_admin" && ["refer", "✚", "Refer a candidate"],
     ["helpdesk", "?", "Helpdesk"],
     ["policies", "§", "Policies"],
     ["profile", "☺", "My profile"],
@@ -248,7 +251,7 @@ function dayCell(s) {
 }
 function table(rows) {
   return rows.length
-    ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Workplace</th><th>Punch in</th><th>Punch out</th><th>Hours</th><th>Status</th><th>Day</th><th>GPS records</th></tr></thead><tbody>${rows.map((s) => `<tr><td><div class="person"><span class="avatar">${initials(s.employee_name || me.name)}</span><div>${esc(s.employee_name || me.name)}<small>${esc(s.email || me.email)}</small></div></div></td><td>${esc(s.workplace_name)}</td><td>${time(s.in_at)}</td><td>${time(s.out_at)}</td><td>${(((s.out_at ? Date.parse(s.out_at) : Date.now()) - Date.parse(s.in_at)) / 3600000).toFixed(2)}</td><td><span class="pill ${s.out_at ? "neutral" : ""}">${s.out_at ? "Completed" : "Working"}</span></td><td>${dayCell(s)}</td><td><a href="https://www.google.com/maps?q=${s.in_latitude},${s.in_longitude}" target="_blank" rel="noreferrer">In · ±${Math.round(s.in_accuracy)}m ↗</a>${s.out_at ? `<small><a href="https://www.google.com/maps?q=${s.out_latitude},${s.out_longitude}" target="_blank" rel="noreferrer">Out · ±${Math.round(s.out_accuracy)}m ↗</a></small>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+    ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Workplace</th><th>Punch in</th><th>Punch out</th><th>Hours</th><th>Status</th><th>Day</th><th>GPS records</th><th>Selfie</th></tr></thead><tbody>${rows.map((s) => `<tr><td><div class="person"><span class="avatar">${initials(s.employee_name || me.name)}</span><div>${esc(s.employee_name || me.name)}<small>${esc(s.email || me.email)}</small></div></div></td><td>${esc(s.workplace_name)}</td><td>${time(s.in_at)}</td><td>${time(s.out_at)}</td><td>${(((s.out_at ? Date.parse(s.out_at) : Date.now()) - Date.parse(s.in_at)) / 3600000).toFixed(2)}</td><td><span class="pill ${s.out_at ? "neutral" : ""}">${s.out_at ? "Completed" : "Working"}</span></td><td>${dayCell(s)}</td><td><a href="https://www.google.com/maps?q=${s.in_latitude},${s.in_longitude}" target="_blank" rel="noreferrer">In · ±${Math.round(s.in_accuracy)}m ↗</a>${s.out_at ? `<small><a href="https://www.google.com/maps?q=${s.out_latitude},${s.out_longitude}" target="_blank" rel="noreferrer">Out · ±${Math.round(s.out_accuracy)}m ↗</a></small>` : ""}</td><td>${Number(s.selfies) && has("attendance.read") && s.employee_name ? `<button class="ghost" data-selfie="${s.id}">View</button>` : "—"}</td></tr>`).join("")}</tbody></table></div>`
     : empty("No attendance records yet", "Recorded punches will appear here.");
 }
 let renderId = 0;
@@ -279,6 +282,8 @@ async function render() {
     if (page === "myemployment") return await myEmploymentPage(id);
     if (page === "insights") return await insightsPage(id);
     if (page === "performance") return await performancePage(id);
+    if (page === "directory") return await directoryPage(id);
+    if (page === "refer") return await referPage(id);
     if (page === "documents") return await documentsPage(id);
     if (page === "announcements") return await announcementsPage(id);
     if (page === "helpdesk") return await helpdeskPage(id);
@@ -338,6 +343,7 @@ async function render() {
       document
         .querySelector("#add")
         ?.addEventListener("click", () => workplaceDialog());
+      await selfieSettingCard(id);
     } else if (page === "attendance") {
       document.querySelector("#content").innerHTML =
         heading(
@@ -805,6 +811,7 @@ async function employeeView(id) {
 (async () => {
   try {
     config = await api("/config");
+    if (resetFromLink()) return;
     await loadMe();
     page = landing();
     await render();

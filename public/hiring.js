@@ -6,6 +6,7 @@ const HIRING_TABS = {
   onboarding: "Onboarding",
   assets: "Assets",
   exits: "Exits",
+  changes: "Career changes",
 };
 const STAGE = {
   applied: "Applied",
@@ -132,6 +133,7 @@ async function hiringTabHtml(tab) {
         : empty("No assets", "Add assets to track who has what.")
     }</div>`;
   }
+  if (tab === "changes") return await changesHtml();
   const rows = await api("/admin/exits");
   return `<div class="card"><div class="card-head"><div><h2>Exits</h2><p class="muted">Resignations and exits, with clearance and full and final settlement.</p></div><button id="new-exit">Start an exit</button></div>${
     rows.length
@@ -232,6 +234,8 @@ async function hiringWire(tab) {
         render();
       }),
     );
+  } else if (tab === "changes") {
+    changesWire();
   } else {
     on("#new-exit", startExitDialog);
     each("[data-exit]", (b) => exitView(Number(b.dataset.exit)));
@@ -683,6 +687,7 @@ async function myEmploymentPage(id) {
     notice("Withdrawn.");
     render();
   });
+  await myChangesCard(id);
   document.querySelector("#resign")?.addEventListener("click", () =>
     dialog(
       "Resign",
