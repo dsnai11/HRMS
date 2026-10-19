@@ -16,6 +16,11 @@ const HR = [
   "recruitment.manage",
   "assets.manage",
   "exit.manage",
+  "insights.read",
+  "helpdesk.manage",
+  "announcements.manage",
+  "policies.manage",
+  "performance.manage",
 ];
 const PAYROLL = ["payroll.manage", "payroll.read"];
 const ADMIN = [

@@ -63,18 +63,15 @@ Still to do:
 - Careers page and applicant self-service; email and calendar invites (needs notifications; stage 5).
 - Rehire flow, notice-buyout approvals, multi-level exit approval.
 
-## Stage 5 — Insight, engagement and hardening
+## Stage 5 — Insight, engagement and hardening (mostly done)
 
-- Dashboards: headcount, attrition, attendance, leave, payroll cost.
-- Notifications (email and push), announcements, helpdesk, policy acknowledgement.
-- Performance: goals, reviews, appraisal cycles. Training records.
-- Two-factor login, SSO (Google / Microsoft), IP and session controls.
-- Document storage with retention; API and exports.
+Done: dashboards, in-app notifications and email, announcements, helpdesk, policy acknowledgement, goals and review cycles, training records, document storage, two-factor login, session controls.
+
+Still to do:
+
+- Single sign-on (Google / Microsoft), IP allow-lists, API tokens for integrations.
+- Push notifications to the phone app; calendar invites for interviews.
+- Document storage in object storage with retention rules (documents are in the database for now).
+- 360-degree feedback, calibration, goal cascading, learning paths.
 - Scale: remove request serialization, background jobs, backups and restore drills, load tests, monitoring.
 - Real device attestation (Play Integrity, App Attest).
-
-## Principles
-
-- Every query is scoped to a company; permissions are checked on the server, never only in the UI.
-- Sensitive personal data is added only together with the controls that protect it.
-- Money and statutory calculations get unit tests with worked examples.

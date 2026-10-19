@@ -10,6 +10,7 @@ import { permissionsFor } from "../rbac.js";
 import { bindDevice, deviceFromHeaders } from "../devices.js";
 import { finishedToday } from "./attendance.js";
 import { pendingApprovals } from "../approval.js";
+import { checkSecondFactor } from "./security.js";
 
 const dummyHash = passwordHash("unused-password-for-timing");
 // Roles that record attendance from a phone must register it.
@@ -99,6 +100,18 @@ export function registerAuth(router, app) {
         "Update the mobile app to sign in.",
         "device_required",
       );
+    // Browser sign-ins need a second factor once it is switched on; phones are protected by the approved device.
+    if (user.totp_enabled && b.native !== true) {
+      if (!b.code)
+        throw new HttpError(
+          401,
+          "Enter the code from your authenticator app.",
+          "totp_required",
+        );
+      rateLimit(`totp:${user.id}`, 10);
+      if (!(await checkSecondFactor(app, user, b.code)))
+        throw new HttpError(401, "That code is not right.", "totp_required");
+    }
     const device =
       b.native === true && b.device
         ? await bindDevice(app, user, b.device)
@@ -108,8 +121,17 @@ export function registerAuth(router, app) {
       .prepare("DELETE FROM sessions WHERE expires_at < ?")
       .run(Date.now());
     await db
-      .prepare("INSERT INTO sessions VALUES(?,?,?)")
-      .run(tokenHash(token), user.id, Date.now() + 86400000);
+      .prepare(
+        "INSERT INTO sessions(token_hash,user_id,expires_at,created_at,ip,agent) VALUES(?,?,?,?,?,?)",
+      )
+      .run(
+        tokenHash(token),
+        user.id,
+        Date.now() + 86400000,
+        new Date(clock()).toISOString(),
+        clientIp(req),
+        String(req.headers["user-agent"] ?? "").slice(0, 200),
+      );
     await app.audit(user, "login", {});
     return send(
       200,

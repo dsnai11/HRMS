@@ -67,7 +67,9 @@ async function api(path, body, method = "POST") {
       activeCompany = null;
       login();
     }
-    throw new Error(data.error || "Request failed.");
+    throw Object.assign(new Error(data.error || "Request failed."), {
+      code: data.code,
+    });
   }
   return data;
 }
@@ -114,10 +116,23 @@ function login() {
   document.querySelector("#login").onsubmit = (e) => {
     e.preventDefault();
     busy(e.submitter, async () => {
-      const data = await api(
-        "/login",
-        Object.fromEntries(new FormData(e.target)),
-      );
+      let data;
+      try {
+        data = await api("/login", Object.fromEntries(new FormData(e.target)));
+      } catch (err) {
+        if (err.code === "totp_required") {
+          if (!e.target.code) {
+            e.target
+              .querySelector("button")
+              .insertAdjacentHTML(
+                "beforebegin",
+                '<label>Authenticator code or recovery code<input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="12" required></label>',
+              );
+          }
+          e.target.code.focus();
+        }
+        throw err;
+      }
       me = data.user;
       await loadMe();
       page = landing();
@@ -140,6 +155,8 @@ function setup() {
 function shell() {
   const items = [
     has("attendance.read") && ["overview", "◫", "Overview"],
+    has("insights.read") && ["insights", "▨", "Insights"],
+    ["announcements", "✉", "Announcements"],
     has("employees.read") && ["employees", "♙", "Employees"],
     has("org.read") && ["organization", "▦", "Organization"],
     has("attendance.read") && ["attendance", "▤", "Attendance"],
@@ -167,14 +184,19 @@ function shell() {
     me.role !== "super_admin" && ["payslips", "❒", "Payslips"],
     me.role !== "super_admin" && ["myclaims", "₹", "Claims & loans"],
     me.role !== "super_admin" && ["myemployment", "☗", "My employment"],
+    me.role !== "super_admin" && ["performance", "★", "Performance"],
+    ["documents", "▤", "Documents"],
     me.role !== "super_admin" && ["mine", "◎", "My attendance"],
+    ["helpdesk", "?", "Helpdesk"],
+    ["policies", "§", "Policies"],
     ["profile", "☺", "My profile"],
   ].filter(Boolean);
   const scope = activeCompany || me.company_id;
   const workspace = has("employees.read")
     ? "HR workspace"
     : "Employee workspace";
-  app.innerHTML = `<div class="layout"><aside class="sidebar">${brand()}<div class="nav-label">WORKSPACE</div><nav class="nav">${items.map(([id, icon, label]) => `<button data-page="${id}" class="${page === id ? "selected" : ""}"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="sidebar-foot"><strong>${esc(me.company?.name || config.company)}</strong>Location-verified attendance<br>${esc(config.timezone)}</div></aside><main class="main"><header class="topbar"><span>${esc(workspace)}</span><div class="user">${companies.length > 1 ? `<select id="company" aria-label="Company">${companies.map((c) => `<option value="${c.id}" ${c.id === scope ? "selected" : ""}>${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("")}</select>` : ""}<span class="avatar">${initials(me.name)}</span><span class="name">${esc(me.name)}</span><button class="ghost" id="password">Password</button><button class="ghost" id="logout">Sign out</button></div></header><section class="content" id="content"><div class="loading">Loading…</div></section></main></div>`;
+  app.innerHTML = `<div class="layout"><aside class="sidebar">${brand()}<div class="nav-label">WORKSPACE</div><nav class="nav">${items.map(([id, icon, label]) => `<button data-page="${id}" class="${page === id ? "selected" : ""}"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="sidebar-foot"><strong>${esc(me.company?.name || config.company)}</strong>Location-verified attendance<br>${esc(config.timezone)}</div></aside><main class="main"><header class="topbar"><span>${esc(workspace)}</span><div class="user">${companies.length > 1 ? `<select id="company" aria-label="Company">${companies.map((c) => `<option value="${c.id}" ${c.id === scope ? "selected" : ""}>${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("")}</select>` : ""}<button class="ghost bell" id="bell" aria-label="Notifications">🔔<span id="bell-n" class="bell-n"></span></button><span class="avatar">${initials(me.name)}</span><span class="name">${esc(me.name)}</span><button class="ghost" id="password">Password</button><button class="ghost" id="logout">Sign out</button></div></header><section class="content" id="content"><div class="loading">Loading…</div></section></main></div>`;
+  bellInit();
   document.querySelector("#company")?.addEventListener("change", async (e) => {
     activeCompany =
       Number(e.target.value) === me.company_id ? null : Number(e.target.value);
@@ -255,6 +277,12 @@ async function render() {
     if (page === "payslips") return await payslipsPage(id);
     if (page === "myclaims") return await myClaimsPage(id);
     if (page === "myemployment") return await myEmploymentPage(id);
+    if (page === "insights") return await insightsPage(id);
+    if (page === "performance") return await performancePage(id);
+    if (page === "documents") return await documentsPage(id);
+    if (page === "announcements") return await announcementsPage(id);
+    if (page === "helpdesk") return await helpdeskPage(id);
+    if (page === "policies") return await policiesPage(id);
     if (page === "hiring") return await hiringPage(id);
     if (page === "overview") {
       const [stats, active, sites] = await Promise.all([
@@ -680,6 +708,7 @@ async function profileView(id) {
       '<button class="secondary" id="edit">Edit contact details</button>',
     ) +
     `<div class="card"><h2>${esc(p.name)}</h2><p class="muted">${esc(p.designation_name || "")}${p.designation_name && p.department_name ? " · " : ""}${esc(p.department_name || "")}</p>${row("Employee code", p.employee_code)}${row("Email", p.email)}${row("Role", ROLE_LABELS[p.role] || p.role)}${row("Reports to", p.manager_name)}${row("Branch", p.branch_name)}${row("Workplace", p.workplace_name)}${row("Employment", EMPLOYMENT[p.employment_type])}${row("Date of joining", p.date_of_joining)}</div><div class="card"><h2>Contact</h2>${row("Phone", p.phone)}${row("Address", p.address)}${row("Emergency contact", [p.emergency_name, p.emergency_relation, p.emergency_phone].filter(Boolean).join(" · "))}</div><p class="muted">To change your name, email, department or other job details, contact HR.</p>`;
+  await securityCard(id);
   document.querySelector("#edit").onclick = () =>
     dialog(
       "Edit contact details",
