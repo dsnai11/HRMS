@@ -1,6 +1,6 @@
 // Roles and permissions. Managers are not a stored role: anyone with direct
 // reports gets team access (see routes/team.js).
-export const ROLES = ["super_admin", "admin", "hr", "employee"];
+export const ROLES = ["super_admin", "admin", "hr", "payroll", "employee"];
 
 const HR = [
   "employees.read",
@@ -14,11 +14,21 @@ const HR = [
   "leave.approve",
   "leave.read",
 ];
-const ADMIN = [...HR, "workplaces.manage", "audit.read", "roles.assign"];
+const PAYROLL = ["payroll.manage", "payroll.read"];
+const ADMIN = [
+  ...HR,
+  ...PAYROLL,
+  "payroll.approve",
+  "workplaces.manage",
+  "audit.read",
+  "roles.assign",
+];
 const PERMISSIONS = {
   super_admin: [...ADMIN, "companies.manage"],
   admin: ADMIN,
   hr: HR,
+  // Payroll staff prepare pay but do not see the wider HR record or approve runs.
+  payroll: ["employees.read", "org.read", "attendance.read", ...PAYROLL],
   employee: [],
 };
 
@@ -29,6 +39,6 @@ export const can = (user, permission) =>
 // Roles a caller may grant when creating or editing people.
 export function assignableRoles(user) {
   if (user.role === "super_admin") return ROLES;
-  if (user.role === "admin") return ["admin", "hr", "employee"];
+  if (user.role === "admin") return ["admin", "hr", "payroll", "employee"];
   return ["employee"];
 }

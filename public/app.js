@@ -146,6 +146,7 @@ function shell() {
     has("org.read") && ["workplaces", "◎", "Workplaces"],
     has("attendance.read") && ["muster", "▥", "Monthly muster"],
     has("leave.manage") && ["leaveadmin", "❖", "Leave & holidays"],
+    has("payroll.read") && ["payroll", "₹", "Payroll"],
     has("devices.manage") && ["devices", "▣", "Devices"],
     has("security.read") && ["security", "⚠", "Security"],
     has("audit.read") && ["audit", "≡", "Activity log"],
@@ -158,6 +159,7 @@ function shell() {
     ],
     me.is_manager && ["team", "☷", "My team"],
     me.role !== "super_admin" && ["timeoff", "☼", "Time off"],
+    me.role !== "super_admin" && ["payslips", "❒", "Payslips"],
     me.role !== "super_admin" && ["mine", "◎", "My attendance"],
     ["profile", "☺", "My profile"],
   ].filter(Boolean);
@@ -242,6 +244,8 @@ async function render() {
     if (page === "approvals") return await approvalsPage(id);
     if (page === "leaveadmin") return await leaveAdminPage(id);
     if (page === "muster") return await musterPage(id);
+    if (page === "payroll") return await payrollPage(id);
+    if (page === "payslips") return await payslipsPage(id);
     if (page === "overview") {
       const [stats, active, sites] = await Promise.all([
         api("/admin/overview"),

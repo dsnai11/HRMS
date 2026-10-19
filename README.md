@@ -32,6 +32,22 @@ Attendance application with an Android/iPhone Expo client, a responsive admin po
 
 Not yet included: shifts or weekly offs per branch or employee, a per-company timezone, multi-level approval chains, comp-off, leave encashment and optional holidays. See `docs/ROADMAP.md`.
 
+## Payroll
+
+Payroll is for payroll staff (role `payroll`) and administrators; HR does not see salaries. Only an administrator approves a run.
+
+- **Salary structure.** Components split a monthly gross: a percentage of gross, a percentage of basic, a fixed amount, and exactly one balancing component. "Add standard structure" creates Basic (50% of gross), HRA (40% of basic) and Special allowance (balance). Each employee's salary keeps its own copy of the amounts, with a revision history; revisions cannot reach back into an approved month.
+- **Pay days** come from the monthly muster (present, paid leave, holidays and weekly offs); pay is prorated by paid days over calendar days, rounded to the rupee. Only a completed month can be run.
+- **Provident fund:** 12% employee and employer on PF wages, capped at the statutory ceiling (₹15,000, raised to **₹25,000 from 17 September 2026**; a month that straddles the change is weighted by days, as in EPFO's FAQ). The employer's share splits 8.33% to EPS (only for employees eligible for it) and the rest to EPF; EDLI and admin charges are 0.5% each. PF wages are basic, raised to **50% of total pay** under the labour codes' wage definition (switchable).
+- **ESI:** 0.75% employee and 3.25% employer for wages up to ₹21,000, rounded up; coverage is decided on the full monthly wage and contributions are on wages earned.
+- **Professional tax:** by the state of the employee's branch, from editable slabs (gender and month-specific amounts supported). Presets exist for Maharashtra, Karnataka, West Bengal, Telangana and Gujarat. Rajasthan and several other states levy none. Confirm any preset against your state's notification.
+- **Income tax (TDS on salary):** FY 2026-27 new regime (slabs to 30% above ₹24 lakh, ₹75,000 standard deduction, ₹60,000 rebate up to ₹12 lakh with marginal relief, surcharge with marginal relief, 4% cess) and the old regime (declared deductions, professional tax, senior-citizen slabs from date of birth). Tax is projected for the year and the remainder spread over the months left, counting opening balances and approved runs. Enter opening balances when you start part-way through the year.
+- **Runs.** Draft (recompute freely, add one-off earnings and deductions) → approved (locked; payslips appear for employees) → paid. A run with negative net pay cannot be approved. Optionally the preparer cannot approve their own run. Exports: payroll register, PF, ESI, professional tax and bank file.
+- **Payslips** open as a printable page (save as PDF from the browser) with the amount in words.
+- **Personal data.** Bank account, IFSC, PAN, UAN and ESI numbers are encrypted with AES-256-GCM using `DATA_ENCRYPTION_KEY` (generate with `openssl rand -base64 32` and set it on the server; **keep a backup, because encrypted data cannot be recovered without it**). Without the key nothing sensitive is stored. Values are masked on screen, revealing one is audited, and bank, PF and ESI exports are audited. Aadhaar is deliberately not stored.
+
+**Not included yet:** Form 16 and quarterly TDS returns, the EPFO ECR upload format, ESI return format, gratuity, leave encashment, arrears from back-dated revisions, loans, reimbursements, bonus and statutory-bonus rules, and full-and-final settlement. The statutory rules are reference values for your payroll team or CA to confirm before a real run; they are not legal advice. Parameters and their sources are in `server/payroll/statutory.js`.
+
 ## Attendance integrity (anti-spoofing)
 
 Attendance can only be recorded from the company mobile app on an administrator-approved phone.

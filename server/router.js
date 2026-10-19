@@ -19,6 +19,7 @@ export function createRouter() {
   return {
     get: add("GET"),
     post: add("POST"),
+    put: add("PUT"),
     patch: add("PATCH"),
     delete: add("DELETE"),
     match(method, path) {

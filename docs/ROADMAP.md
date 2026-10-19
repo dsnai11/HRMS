@@ -29,12 +29,18 @@ Still to do:
 - Comp-off, leave encashment, optional holidays, sandwich-leave rule.
 - Leave in the mobile app.
 
-## Stage 3 — Payroll
-- Salary structures and components, revisions, arrears.
-- Monthly payroll run from attendance and leave; loss of pay.
-- India statutory: PF, ESI, professional tax, TDS (old and new regime), gratuity.
-- Payslips (PDF), bank advice files, statutory reports, Form 16 data.
-- Bank, PAN, Aadhaar and UAN stored in a separate, access-logged and encrypted store.
+## Stage 3 — Payroll (in progress)
+Done:
+- Salary structure, per-employee salaries with revision history; monthly runs from the muster with draft, approval and paid states; one-off adjustments.
+- PF (₹25,000 ceiling from 17 Sep 2026, labour-code 50% rule), ESI, professional tax by state, TDS under the new and old regimes with opening balances.
+- Payslips (printable), payroll register, PF, ESI, professional-tax and bank exports.
+- Bank, PAN and UAN stored encrypted, masked and audited; `payroll` role; optional maker-checker.
+
+Still to do:
+- Form 16 data, quarterly TDS return data (24Q), EPFO ECR and ESIC upload formats.
+- Gratuity, leave encashment, bonus, loans and advances with schedules, reimbursements and claims.
+- Back-dated revisions and arrears, mid-month joiner and exit proration, full and final settlement.
+- Salary structures per grade or employee group; investment declarations and proof workflow for the old regime.
 - Must be reviewed by a payroll professional or CA before real use.
 
 ## Stage 4 — Hiring, onboarding, exit

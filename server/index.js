@@ -16,12 +16,17 @@ import { registerTeam } from "./routes/team.js";
 import { registerLeave } from "./routes/leave.js";
 import { registerRegularization } from "./routes/regularization.js";
 import { registerSummary } from "./routes/summary.js";
+import { registerPayrollSetup } from "./routes/payroll-setup.js";
+import { registerPayrollRuns } from "./routes/payroll-runs.js";
 
 const publicDir = new URL("../public/", import.meta.url);
 const STATIC = {
   "/": ["index.html", "text/html"],
   "/app.js": ["app.js", "text/javascript"],
   "/timeoff.js": ["timeoff.js", "text/javascript"],
+  "/payroll.js": ["payroll.js", "text/javascript"],
+  "/payslip.html": ["payslip.html", "text/html"],
+  "/payslip.js": ["payslip.js", "text/javascript"],
   "/styles.css": ["styles.css", "text/css"],
 };
 
@@ -89,6 +94,8 @@ export function createApp({
     registerLeave,
     registerRegularization,
     registerSummary,
+    registerPayrollSetup,
+    registerPayrollRuns,
   ])
     register(router, app);
 
@@ -157,7 +164,7 @@ export function createApp({
         });
         return res.end(content);
       }
-      if (!["GET", "POST", "PATCH", "DELETE"].includes(method))
+      if (!["GET", "POST", "PUT", "PATCH", "DELETE"].includes(method))
         throw new HttpError(405, "Method not allowed.");
       // Browser requests must be same-origin. Native requests do not carry Origin.
       if (req.headers.origin) {
