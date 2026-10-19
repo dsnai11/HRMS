@@ -196,6 +196,7 @@ async function approvalsPage(id) {
       }),
   );
   await claimsApprovals(id);
+  await hiringApprovals(id);
 }
 
 // ---- HR: leave types, holidays, settings, requests, balances ------------------
