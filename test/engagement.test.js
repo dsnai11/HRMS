@@ -97,7 +97,7 @@ async function world(t) {
   await add("pay", { role: "payroll" });
   await add("mgr");
   await add("emp");
-  return { db, call, owner, people, site, add, signIn };
+  return { db, call, base, owner, people, site, add, signIn };
 }
 
 test("announcements, helpdesk, policies and notifications work together", async (t) => {
