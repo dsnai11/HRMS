@@ -20,6 +20,7 @@ const HR = [
   "helpdesk.manage",
   "announcements.manage",
   "policies.manage",
+  "performance.manage",
 ];
 const PAYROLL = ["payroll.manage", "payroll.read"];
 const ADMIN = [

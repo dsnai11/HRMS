@@ -21,6 +21,9 @@ import { registerPayrollRuns } from "./routes/payroll-runs.js";
 import { registerPayrollExtras } from "./routes/payroll-extras.js";
 import { registerRecruitment } from "./routes/recruitment.js";
 import { registerExit } from "./routes/exit.js";
+import { registerDocuments } from "./routes/documents.js";
+import { registerPerformance } from "./routes/performance.js";
+import { registerSecurity } from "./routes/security.js";
 import { registerEngagement } from "./routes/engagement.js";
 import { registerInsights } from "./routes/insights.js";
 import { createNotifier, notifyFromAudit } from "./notify.js";
@@ -127,6 +130,9 @@ export function createApp({
     registerRecruitment,
     registerExit,
     registerEngagement,
+    registerSecurity,
+    registerDocuments,
+    registerPerformance,
     registerInsights,
   ])
     register(router, app);
@@ -227,7 +233,7 @@ export function createApp({
         send,
         headers,
         app,
-        body: () => readBody(req),
+        body: (limit) => readBody(req, limit),
       };
       if (!route.options.public) {
         Object.assign(c, await authenticate(req));
@@ -256,6 +262,7 @@ export function createApp({
           error: e.status
             ? e.message
             : "Unexpected server error. Please retry.",
+          ...(e.status && e.code ? { code: e.code } : {}),
         });
     }
   };

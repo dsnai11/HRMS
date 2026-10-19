@@ -66,11 +66,11 @@ export function oneOf(value, label, allowed) {
     throw new HttpError(400, `${label} must be one of: ${allowed.join(", ")}.`);
   return value;
 }
-export async function readBody(req) {
+export async function readBody(req, limit = 16384) {
   let body = "";
   for await (const chunk of req) {
     body += chunk;
-    if (body.length > 16384) throw new HttpError(413, "Request is too large.");
+    if (body.length > limit) throw new HttpError(413, "Request is too large.");
   }
   let parsed;
   try {
