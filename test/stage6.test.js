@@ -1316,3 +1316,235 @@ async function app_policy(w, person, date) {
     date,
   );
 }
+
+test("employees and salaries can be loaded in bulk, with a dry run first", async (t) => {
+  const w = await world(t);
+  const { call, people, db } = w;
+  const hr = people.hr.token,
+    pay = people.pay.token;
+  const branch = (
+    await call("/admin/branches", { name: "Jaipur", state: "Rajasthan" }, hr)
+  ).data.id;
+  void branch;
+  const rows = [
+    {
+      employee_code: "B001",
+      name: "Anita Rao",
+      email: "anita@example.test",
+      phone: "9876543210",
+      gender: "female",
+      date_of_joining: "2025-04-01",
+      department: "Collections",
+      designation: "Executive",
+      branch: "Jaipur",
+      workplace: "Office",
+    },
+    {
+      employee_code: "B002",
+      name: "Vikram Singh",
+      email: "vikram@example.test",
+      date_of_joining: "2024-01-15",
+      department: "collections",
+      designation: "Manager",
+      branch: "Jaipur",
+      manager_code: "",
+      employment_type: "full_time",
+    },
+    {
+      employee_code: "B003",
+      name: "Meena Das",
+      email: "meena@example.test",
+      department: "Collections",
+      branch: "Jaipur",
+      manager_code: "B002",
+    },
+    { employee_code: "B004", name: "Sunil", email: "not-an-email" },
+    {
+      employee_code: "B001",
+      name: "Duplicate code",
+      email: "dup@example.test",
+    },
+    {
+      employee_code: "B005",
+      name: "Bad date",
+      email: "baddate@example.test",
+      date_of_joining: "01/04/2025",
+    },
+    {
+      employee_code: "B006",
+      name: "Ghost manager",
+      email: "ghost@example.test",
+      manager_code: "Z999",
+    },
+    { employee_code: "B007", name: "Taken email", email: "emp@example.test" },
+    {
+      employee_code: "B008",
+      name: "Nowhere",
+      email: "nowhere@example.test",
+      workplace: "Moon base",
+    },
+  ];
+  assert.equal(
+    (await call("/admin/employees/import", { rows }, people.emp.token)).status,
+    403,
+  );
+  // Missing department "Collections" is refused unless asked to create it.
+  const strict = (
+    await call(
+      "/admin/employees/import",
+      { rows: rows.slice(0, 1), dry_run: true },
+      hr,
+    )
+  ).data;
+  assert.match(strict.report[0].reason, /Unknown department/);
+  const dry = (
+    await call(
+      "/admin/employees/import",
+      { rows, dry_run: true, create_missing: true },
+      hr,
+    )
+  ).data;
+  assert.deepEqual([dry.would_create, dry.failed], [3, 6]);
+  assert.equal(
+    (
+      await db
+        .prepare("SELECT COUNT(*) n FROM users WHERE email LIKE '%anita%'")
+        .get()
+    ).n,
+    0,
+    "a dry run saves nothing",
+  );
+  const reasons = Object.fromEntries(dry.report.map((r) => [r.line, r.reason]));
+  assert.match(reasons[4], /Email is missing or not valid/);
+  assert.match(reasons[5], /Employee code is already in use/);
+  assert.match(reasons[6], /YYYY-MM-DD/);
+  assert.match(reasons[7], /Manager code "Z999" not found/);
+  assert.match(reasons[8], /already registered/);
+  assert.match(reasons[9], /Unknown workplace/);
+
+  // The real import creates people and what they refer to, sets managers, and returns one-time passwords.
+  const done = (
+    await call(
+      "/admin/employees/import",
+      { rows, create_missing: true, branch_state: undefined },
+      hr,
+    )
+  ).data;
+  assert.deepEqual([done.created, done.failed], [3, 6]);
+  assert.equal(done.credentials.length, 3);
+  assert.ok(done.credentials.every((c) => c.temp_password.length === 12));
+  const anita = (await call("/admin/employees?q=anita", undefined, hr)).data
+    .items[0];
+  assert.deepEqual(
+    [
+      anita.employee_code,
+      anita.department_name,
+      anita.designation_name,
+      anita.branch_name,
+      anita.workplace_name,
+    ],
+    ["B001", "Collections", "Executive", "Jaipur", "Office"],
+  );
+  assert.equal(
+    (await call("/admin/org", undefined, hr)).data.departments.filter(
+      (d) => d.name === "Collections",
+    ).length,
+    1,
+    "created once, matched case-insensitively",
+  );
+  const meena = (await call("/admin/employees?q=meena", undefined, hr)).data
+    .items[0];
+  assert.equal(
+    meena.manager_name,
+    "Vikram Singh",
+    "manager set from a later row's code",
+  );
+  // A new person signs in with the temporary password and must change it.
+  const cred = done.credentials.find((c) => c.email === "anita@example.test");
+  const login = await call("/login", {
+    email: cred.email,
+    password: cred.temp_password,
+  });
+  assert.equal(login.status, 200);
+  assert.equal(login.data.user.must_change_password, true);
+  // Importing the same file again creates nobody.
+  const again = (
+    await call(
+      "/admin/employees/import",
+      { rows: rows.slice(0, 3), create_missing: true },
+      hr,
+    )
+  ).data;
+  assert.deepEqual([again.created, again.failed], [0, 3]);
+
+  // Salaries: needs the structure; then rows are validated and saved.
+  const sal = [
+    {
+      employee_code: "B001",
+      monthly_gross: 18000,
+      effective_from: "2026-04-01",
+    },
+    {
+      employee_code: "B002",
+      monthly_gross: 60000,
+      effective_from: "2026-04-01",
+      pf: "yes",
+      tax_regime: "old",
+    },
+    {
+      employee_code: "NOPE",
+      monthly_gross: 20000,
+      effective_from: "2026-04-01",
+    },
+    {
+      employee_code: "B003",
+      monthly_gross: "abc",
+      effective_from: "2026-04-01",
+    },
+    {
+      employee_code: "B003",
+      monthly_gross: 25000,
+      effective_from: "April 2026",
+    },
+  ];
+  assert.equal(
+    (await call("/admin/payroll/salaries/import", { rows: sal }, pay)).status,
+    409,
+    "no salary structure yet",
+  );
+  assert.equal(
+    (await call("/admin/payroll/components/seed-defaults", {}, pay)).status,
+    201,
+  );
+  assert.equal(
+    (await call("/admin/payroll/salaries/import", { rows: sal }, hr)).status,
+    403,
+  );
+  const salDry = (
+    await call(
+      "/admin/payroll/salaries/import",
+      { rows: sal, dry_run: true },
+      pay,
+    )
+  ).data;
+  assert.deepEqual([salDry.ok, salDry.failed], [2, 3]);
+  const saved = (
+    await call("/admin/payroll/salaries/import", { rows: sal }, pay)
+  ).data;
+  assert.deepEqual([saved.ok, saved.failed], [2, 3]);
+  const b1 = (await call(`/admin/employees/${anita.id}/salary`, undefined, pay))
+    .data[0];
+  assert.deepEqual(
+    [b1.monthly_gross, Boolean(b1.esi_applicable), Boolean(b1.pf_applicable)],
+    [18000, true, true],
+    "ESI defaults on at or below 21,000",
+  );
+  const vik = (await call("/admin/employees?q=vikram", undefined, hr)).data
+    .items[0];
+  const b2 = (await call(`/admin/employees/${vik.id}/salary`, undefined, pay))
+    .data[0];
+  assert.deepEqual(
+    [b2.monthly_gross, Boolean(b2.esi_applicable), b2.tax_regime],
+    [60000, false, "old"],
+  );
+});

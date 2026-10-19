@@ -1,4 +1,4 @@
-import { passwordHash } from "../db.js";
+import { passwordHash, passwordHashAsync } from "../db.js";
 import {
   HttpError,
   string,
@@ -207,6 +207,7 @@ export function registerEmployees(router, app) {
     await checkManager(managerId, null, companyId);
     if (await db.prepare("SELECT id FROM users WHERE email=?").get(mail))
       throw new HttpError(409, "That email is already registered.");
+    const hash = await passwordHashAsync(pw);
     return transaction(async () => {
       const code = profile.employee_code ?? (await nextCode(companyId));
       if (
@@ -233,7 +234,7 @@ export function registerEmployees(router, app) {
             .run(
               name,
               mail,
-              passwordHash(pw),
+              hash,
               role,
               companyId,
               new Date().toISOString(),

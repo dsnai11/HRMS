@@ -86,6 +86,6 @@ Also done: rosters.
 
 Also done: Android push (iPhone needs a paid Apple account).
 
-Also done: customisable dashboard.
+Also done: customisable dashboard, bulk import of employees and salaries, pilot guide.
 
 Still to do: LMS content, live biometric device connection (see `docs/COMPARISON.md`).

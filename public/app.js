@@ -326,6 +326,7 @@ async function render() {
       document.querySelector("#refresh").onclick = render;
     } else if (page === "employees") {
       await employeesPage(id);
+      await importPeopleCard(id);
     } else if (page === "organization") {
       await organizationPage(id);
     } else if (page === "workplaces") {

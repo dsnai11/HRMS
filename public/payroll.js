@@ -298,6 +298,7 @@ async function payrollWire(tab) {
       }),
     );
   } else if (tab === "salaries") {
+    importSalariesCard();
     document
       .querySelectorAll("[data-salary]")
       .forEach(

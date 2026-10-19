@@ -26,6 +26,7 @@ import { registerPerformance } from "./routes/performance.js";
 import { registerShiftPolicies } from "./routes/shift-policies.js";
 import { registerAttendanceImport } from "./routes/attendance-import.js";
 import { registerPerformanceExtras } from "./routes/performance-extras.js";
+import { registerBulk } from "./routes/bulk.js";
 import { registerPeople } from "./routes/people.js";
 import { registerSecurity } from "./routes/security.js";
 import { registerEngagement } from "./routes/engagement.js";
@@ -45,6 +46,7 @@ const STATIC = {
   "/engage.js": ["engage.js", "text/javascript"],
   "/more.js": ["more.js", "text/javascript"],
   "/people.js": ["people.js", "text/javascript"],
+  "/bulk.js": ["bulk.js", "text/javascript"],
   "/letter.html": ["letter.html", "text/html"],
   "/letter.js": ["letter.js", "text/javascript"],
   "/payslip.html": ["payslip.html", "text/html"],
@@ -141,6 +143,7 @@ export function createApp({
     registerEngagement,
     registerSecurity,
     registerPeople,
+    registerBulk,
     registerPerformanceExtras,
     registerAttendanceImport,
     registerShiftPolicies,
