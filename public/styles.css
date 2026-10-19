@@ -140,11 +140,12 @@ h3 {
   position: sticky;
   top: 0;
   height: 100vh;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
 }
 .sidebar .brand {
-  margin-bottom: 56px;
+  margin-bottom: 28px;
 }
 .nav-label {
   font-size: 10px;
@@ -909,4 +910,96 @@ a.button.secondary {
 }
 .letter .letter-sign {
   margin-top: 40px;
+}
+
+.bell {
+  position: relative;
+  padding: 6px 10px;
+}
+.bell-n {
+  display: none;
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #c0392b;
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+}
+.bell-n.on {
+  display: inline-block;
+}
+.notice-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 4px;
+  color: inherit;
+  cursor: pointer;
+}
+.notice-row small {
+  display: block;
+  color: var(--muted);
+}
+.notice-row.unread strong::before {
+  content: "● ";
+  color: var(--green);
+}
+.activity.internal {
+  background: #fff8e6;
+}
+textarea {
+  font: inherit;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+@media (max-width: 800px) {
+  .grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+.chart {
+  width: 100%;
+  height: auto;
+}
+.chart .bar,
+.swatch.bar {
+  fill: #146c53;
+  background: #146c53;
+}
+.chart .bar-alt,
+.swatch.bar-alt {
+  fill: #d98e04;
+  background: #d98e04;
+}
+.chart-label,
+.chart-value {
+  font-size: 11px;
+  fill: var(--muted);
+}
+.legend {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 6px;
 }

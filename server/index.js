@@ -21,6 +21,9 @@ import { registerPayrollRuns } from "./routes/payroll-runs.js";
 import { registerPayrollExtras } from "./routes/payroll-extras.js";
 import { registerRecruitment } from "./routes/recruitment.js";
 import { registerExit } from "./routes/exit.js";
+import { registerEngagement } from "./routes/engagement.js";
+import { registerInsights } from "./routes/insights.js";
+import { createNotifier, notifyFromAudit } from "./notify.js";
 
 const publicDir = new URL("../public/", import.meta.url);
 const STATIC = {
@@ -30,6 +33,7 @@ const STATIC = {
   "/payroll.js": ["payroll.js", "text/javascript"],
   "/payroll-more.js": ["payroll-more.js", "text/javascript"],
   "/hiring.js": ["hiring.js", "text/javascript"],
+  "/engage.js": ["engage.js", "text/javascript"],
   "/letter.html": ["letter.html", "text/html"],
   "/letter.js": ["letter.js", "text/javascript"],
   "/payslip.html": ["payslip.html", "text/html"],
@@ -89,6 +93,22 @@ export function createApp({
           companyId,
         ),
   };
+  app.notify = createNotifier(app);
+  const writeAudit = app.audit;
+  app.audit = async (
+    actor,
+    action,
+    detail,
+    companyId = actor?.company_id ?? null,
+  ) => {
+    const result = await writeAudit(actor, action, detail, companyId);
+    try {
+      await notifyFromAudit(app, actor, action, detail, companyId);
+    } catch (e) {
+      console.error("notification failed:", e.message);
+    }
+    return result;
+  };
   const router = createRouter();
   for (const register of [
     registerAuth,
@@ -106,6 +126,8 @@ export function createApp({
     registerPayrollExtras,
     registerRecruitment,
     registerExit,
+    registerEngagement,
+    registerInsights,
   ])
     register(router, app);
 
