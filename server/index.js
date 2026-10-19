@@ -23,6 +23,7 @@ import { registerRecruitment } from "./routes/recruitment.js";
 import { registerExit } from "./routes/exit.js";
 import { registerDocuments } from "./routes/documents.js";
 import { registerPerformance } from "./routes/performance.js";
+import { registerPeople } from "./routes/people.js";
 import { registerSecurity } from "./routes/security.js";
 import { registerEngagement } from "./routes/engagement.js";
 import { registerInsights } from "./routes/insights.js";
@@ -132,6 +133,7 @@ export function createApp({
     registerExit,
     registerEngagement,
     registerSecurity,
+    registerPeople,
     registerDocuments,
     registerPerformance,
     registerInsights,

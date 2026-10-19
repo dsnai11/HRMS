@@ -53,9 +53,31 @@ export function registerAttendance(router, app) {
     ),
   );
 
+  // A small JPEG taken at the moment of the punch, when the company asks for one.
+  async function readSelfie(value, companyId) {
+    const required = (
+      await db
+        .prepare("SELECT require_selfie FROM companies WHERE id=?")
+        .get(companyId)
+    ).require_selfie;
+    if (!value) {
+      if (required)
+        throw new HttpError(422, "Take a selfie to punch.", "selfie_required");
+      return null;
+    }
+    if (
+      typeof value !== "string" ||
+      !/^[A-Za-z0-9+/=]+$/.test(value) ||
+      value.length > 240000
+    )
+      throw new HttpError(400, "The selfie is not valid.", "selfie_invalid");
+    if (Buffer.from(value.slice(0, 8), "base64")[0] !== 0xff)
+      throw new HttpError(400, "The selfie must be a JPEG.", "selfie_invalid");
+    return value;
+  }
   router.post("/api/punch", async ({ req, user, body, send }) => {
     rateLimit(`punch:${user.id}`, 60);
-    const b = await body();
+    const b = await body(300000);
     if (!["in", "out"].includes(b.action))
       throw new HttpError(400, "Choose punch-in or punch-out.");
     const signals = parseSignals(b.signals);
@@ -117,6 +139,7 @@ export function registerAttendance(router, app) {
             "Ask your administrator to assign a workplace.",
           );
         checkLocation(b.location, site, nowMs);
+        const selfie = await readSelfie(b.selfie, user.company_id);
         const { latitude, longitude, accuracy } = b.location;
         const risk = assessPunch({
           signals,
@@ -188,6 +211,12 @@ export function registerAttendance(router, app) {
               id,
             );
         }
+        if (selfie)
+          await db
+            .prepare(
+              "INSERT INTO punch_photos(shift_id,kind,data,created_at) VALUES(?,?,?,?) ON CONFLICT (shift_id,kind) DO UPDATE SET data=EXCLUDED.data,created_at=EXCLUDED.created_at",
+            )
+            .run(id, b.action, selfie, now);
         await recordPunchEvent(app, user, {
           action: b.action,
           outcome: "accepted",

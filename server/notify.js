@@ -37,19 +37,20 @@ export function createNotifier(app, env = process.env) {
       const ids = [...new Set(userIds.filter(Boolean))];
       const at = new Date(clock()).toISOString();
       for (const id of ids) {
-        await db
-          .prepare(
-            "INSERT INTO notifications(company_id,user_id,kind,title,body,link,created_at) VALUES(?,?,?,?,?,?,?)",
-          )
-          .run(
-            n.companyId,
-            id,
-            n.kind,
-            n.title,
-            n.body ?? null,
-            n.link ?? null,
-            at,
-          );
+        if (n.inApp !== false)
+          await db
+            .prepare(
+              "INSERT INTO notifications(company_id,user_id,kind,title,body,link,created_at) VALUES(?,?,?,?,?,?,?)",
+            )
+            .run(
+              n.companyId,
+              id,
+              n.kind,
+              n.title,
+              n.body ?? null,
+              n.link ?? null,
+              at,
+            );
         if (n.email && mailConfigured()) {
           const u = await db
             .prepare("SELECT email,active FROM users WHERE id=?")

@@ -582,120 +582,132 @@ export function registerPayrollSetup(router, app) {
       return send(200, await arrearsFor(companyId, spec, locked));
     },
   );
+  // Shared with career changes (increments).
+  const setSalary = async (user, companyId, personId, b, audit) => {
+    const spec = await salarySpec(companyId, personId, b);
+    const locked = await lastLockedMonth(companyId);
+    const backdated = Boolean(locked) && spec.effective.slice(0, 7) <= locked;
+    if (backdated && b.arrears !== true)
+      throw new HttpError(
+        409,
+        `Payroll for ${locked} is already approved. To back-date this revision, confirm that the difference should be paid as arrears in ${nextMonth(locked)}.`,
+      );
+    const arrears = backdated
+      ? await arrearsFor(companyId, spec, locked)
+      : null;
+    const { person, effective, gross, flags, built, comps } = spec;
+    const id = await transaction(async () => {
+      const id = Number(
+        (
+          await db
+            .prepare(
+              "INSERT INTO employee_salaries(company_id,user_id,effective_from,monthly_gross,pf_applicable,esi_applicable,pt_applicable,eps_eligible,tax_regime,declared_deductions,note,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            )
+            .run(
+              companyId,
+              person.id,
+              effective,
+              round(gross),
+              flags.pf_applicable,
+              flags.esi_applicable,
+              flags.pt_applicable,
+              flags.eps_eligible,
+              flags.tax_regime,
+              flags.declared_deductions,
+              spec.note,
+              user.id,
+              nowIso(app),
+            )
+        ).lastInsertRowid,
+      );
+      for (const l of built) {
+        const c = comps.get(l.component_id);
+        await db
+          .prepare(
+            "INSERT INTO employee_salary_lines(salary_id,component_id,code,name,amount,is_basic,taxable,esi_wage) VALUES(?,?,?,?,?,?,?,?)",
+          )
+          .run(
+            id,
+            c.id,
+            l.code,
+            l.name,
+            l.amount,
+            c.is_basic,
+            c.taxable,
+            c.esi_wage,
+          );
+      }
+      if (arrears && arrears.total_gross !== 0) {
+        const add = (kind, name, amount, source, taxable) =>
+          db
+            .prepare(
+              "INSERT INTO payroll_adjustments(company_id,user_id,month,kind,name,amount,taxable,note,created_by,created_at,source,source_ref) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            )
+            .run(
+              companyId,
+              person.id,
+              arrears.pay_in_month,
+              kind,
+              name,
+              round(Math.abs(amount)),
+              taxable,
+              `Back-dated salary revision from ${effective}`,
+              user.id,
+              nowIso(app),
+              source,
+              id,
+            );
+        if (arrears.total_gross > 0) {
+          await add(
+            "earning",
+            arrears.label,
+            arrears.total_gross,
+            "arrears",
+            1,
+          );
+          if (arrears.total_pf > 0)
+            await add(
+              "deduction",
+              "PF on arrears (employee)",
+              arrears.total_pf,
+              "arrears_pf",
+              0,
+            );
+        } else
+          await add(
+            "deduction",
+            "Arrears recovery (salary reduced retrospectively)",
+            arrears.total_gross,
+            "arrears",
+            0,
+          );
+      }
+      await audit("salary_set", {
+        employeeId: person.id,
+        effective_from: effective,
+        arrears: arrears
+          ? { month: arrears.pay_in_month, months: arrears.rows.length }
+          : null,
+      });
+      return id;
+    });
+    return { id, lines: built, arrears };
+  };
+  app.setSalary = setSalary;
   router.post(
     "/api/admin/employees/:id/salary",
     { perm: "payroll.manage" },
-    async ({ user, params, companyId, body, send, audit }) => {
-      const b = await body();
-      const spec = await salarySpec(companyId, integer(Number(params.id)), b);
-      const locked = await lastLockedMonth(companyId);
-      const backdated = Boolean(locked) && spec.effective.slice(0, 7) <= locked;
-      if (backdated && b.arrears !== true)
-        throw new HttpError(
-          409,
-          `Payroll for ${locked} is already approved. To back-date this revision, confirm that the difference should be paid as arrears in ${nextMonth(locked)}.`,
-        );
-      const arrears = backdated
-        ? await arrearsFor(companyId, spec, locked)
-        : null;
-      const { person, effective, gross, flags, built, comps } = spec;
-      const id = await transaction(async () => {
-        const id = Number(
-          (
-            await db
-              .prepare(
-                "INSERT INTO employee_salaries(company_id,user_id,effective_from,monthly_gross,pf_applicable,esi_applicable,pt_applicable,eps_eligible,tax_regime,declared_deductions,note,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-              )
-              .run(
-                companyId,
-                person.id,
-                effective,
-                round(gross),
-                flags.pf_applicable,
-                flags.esi_applicable,
-                flags.pt_applicable,
-                flags.eps_eligible,
-                flags.tax_regime,
-                flags.declared_deductions,
-                spec.note,
-                user.id,
-                nowIso(app),
-              )
-          ).lastInsertRowid,
-        );
-        for (const l of built) {
-          const c = comps.get(l.component_id);
-          await db
-            .prepare(
-              "INSERT INTO employee_salary_lines(salary_id,component_id,code,name,amount,is_basic,taxable,esi_wage) VALUES(?,?,?,?,?,?,?,?)",
-            )
-            .run(
-              id,
-              c.id,
-              l.code,
-              l.name,
-              l.amount,
-              c.is_basic,
-              c.taxable,
-              c.esi_wage,
-            );
-        }
-        if (arrears && arrears.total_gross !== 0) {
-          const add = (kind, name, amount, source, taxable) =>
-            db
-              .prepare(
-                "INSERT INTO payroll_adjustments(company_id,user_id,month,kind,name,amount,taxable,note,created_by,created_at,source,source_ref) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-              )
-              .run(
-                companyId,
-                person.id,
-                arrears.pay_in_month,
-                kind,
-                name,
-                round(Math.abs(amount)),
-                taxable,
-                `Back-dated salary revision from ${effective}`,
-                user.id,
-                nowIso(app),
-                source,
-                id,
-              );
-          if (arrears.total_gross > 0) {
-            await add(
-              "earning",
-              arrears.label,
-              arrears.total_gross,
-              "arrears",
-              1,
-            );
-            if (arrears.total_pf > 0)
-              await add(
-                "deduction",
-                "PF on arrears (employee)",
-                arrears.total_pf,
-                "arrears_pf",
-                0,
-              );
-          } else
-            await add(
-              "deduction",
-              "Arrears recovery (salary reduced retrospectively)",
-              arrears.total_gross,
-              "arrears",
-              0,
-            );
-        }
-        await audit("salary_set", {
-          employeeId: person.id,
-          effective_from: effective,
-          arrears: arrears
-            ? { month: arrears.pay_in_month, months: arrears.rows.length }
-            : null,
-        });
-        return id;
-      });
-      return send(201, { id, lines: built, arrears });
-    },
+    async ({ user, params, companyId, body, send, audit }) =>
+      send(
+        201,
+        await setSalary(
+          user,
+          companyId,
+          integer(Number(params.id)),
+          await body(),
+          audit,
+        ),
+      ),
   );
   router.get(
     "/api/admin/payroll/opening",
