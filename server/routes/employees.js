@@ -193,67 +193,72 @@ export function registerEmployees(router, app) {
     },
   );
 
+  // Shared with hiring: creates an employee from a request-shaped body.
+  async function createEmployee(user, companyId, b, audit) {
+    const name = string(b.name, "Name");
+    const mail = email(b.email);
+    const pw = password(b.password);
+    const role = b.role === undefined ? "employee" : b.role;
+    if (!ROLES.includes(role) || !assignableRoles(user).includes(role))
+      throw new HttpError(403, "You cannot assign that role.");
+    const profile = profileValues(b);
+    const refs = await references(b, companyId);
+    const managerId = optionalId(b.manager_id, "Reporting manager");
+    await checkManager(managerId, null, companyId);
+    if (await db.prepare("SELECT id FROM users WHERE email=?").get(mail))
+      throw new HttpError(409, "That email is already registered.");
+    return transaction(async () => {
+      const code = profile.employee_code ?? (await nextCode(companyId));
+      if (
+        await db
+          .prepare(
+            "SELECT id FROM users WHERE company_id=? AND employee_code=?",
+          )
+          .get(companyId, code)
+      )
+        throw new HttpError(409, "That employee code is already in use.");
+      const cols = {
+        ...profile,
+        employee_code: code,
+        ...refs,
+        manager_id: managerId,
+      };
+      const keys = Object.keys(cols);
+      const id = Number(
+        (
+          await db
+            .prepare(
+              `INSERT INTO users(name,email,password_hash,role,company_id,must_change_password,created_at${keys.map((k) => `,${k}`).join("")}) VALUES(?,?,?,?,?,1,?${keys.map(() => ",?").join("")})`,
+            )
+            .run(
+              name,
+              mail,
+              passwordHash(pw),
+              role,
+              companyId,
+              new Date().toISOString(),
+              ...keys.map((k) => cols[k]),
+            )
+        ).lastInsertRowid,
+      );
+      await audit("employee_created", {
+        id,
+        name,
+        role,
+        workplaceId: refs.workplace_id ?? null,
+      });
+      return id;
+    });
+  }
+  app.createEmployee = createEmployee;
+
   router.post(
     "/api/admin/employees",
     { perm: "employees.write" },
-    async ({ user, companyId, body, send, audit }) => {
-      const b = await body();
-      const name = string(b.name, "Name");
-      const mail = email(b.email);
-      const pw = password(b.password);
-      const role = b.role === undefined ? "employee" : b.role;
-      if (!ROLES.includes(role) || !assignableRoles(user).includes(role))
-        throw new HttpError(403, "You cannot assign that role.");
-      const profile = profileValues(b);
-      const refs = await references(b, companyId);
-      const managerId = optionalId(b.manager_id, "Reporting manager");
-      await checkManager(managerId, null, companyId);
-      if (await db.prepare("SELECT id FROM users WHERE email=?").get(mail))
-        throw new HttpError(409, "That email is already registered.");
-      const id = await transaction(async () => {
-        const code = profile.employee_code ?? (await nextCode(companyId));
-        if (
-          await db
-            .prepare(
-              "SELECT id FROM users WHERE company_id=? AND employee_code=?",
-            )
-            .get(companyId, code)
-        )
-          throw new HttpError(409, "That employee code is already in use.");
-        const cols = {
-          ...profile,
-          employee_code: code,
-          ...refs,
-          manager_id: managerId,
-        };
-        const keys = Object.keys(cols);
-        const id = Number(
-          (
-            await db
-              .prepare(
-                `INSERT INTO users(name,email,password_hash,role,company_id,must_change_password,created_at${keys.map((k) => `,${k}`).join("")}) VALUES(?,?,?,?,?,1,?${keys.map(() => ",?").join("")})`,
-              )
-              .run(
-                name,
-                mail,
-                passwordHash(pw),
-                role,
-                companyId,
-                new Date().toISOString(),
-                ...keys.map((k) => cols[k]),
-              )
-          ).lastInsertRowid,
-        );
-        await audit("employee_created", {
-          id,
-          name,
-          role,
-          workplaceId: refs.workplace_id ?? null,
-        });
-        return id;
-      });
-      return send(201, { id });
-    },
+    async ({ user, companyId, body, send, audit }) =>
+      send(201, {
+        id: await createEmployee(user, companyId, await body(), audit),
+      }),
   );
 
   router.patch(

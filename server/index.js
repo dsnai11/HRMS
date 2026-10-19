@@ -19,6 +19,7 @@ import { registerSummary } from "./routes/summary.js";
 import { registerPayrollSetup } from "./routes/payroll-setup.js";
 import { registerPayrollRuns } from "./routes/payroll-runs.js";
 import { registerPayrollExtras } from "./routes/payroll-extras.js";
+import { registerRecruitment } from "./routes/recruitment.js";
 
 const publicDir = new URL("../public/", import.meta.url);
 const STATIC = {
@@ -99,6 +100,7 @@ export function createApp({
     registerPayrollSetup,
     registerPayrollRuns,
     registerPayrollExtras,
+    registerRecruitment,
   ])
     register(router, app);
 

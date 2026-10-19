@@ -13,6 +13,8 @@ const HR = [
   "leave.manage",
   "leave.approve",
   "leave.read",
+  "recruitment.manage",
+  "assets.manage",
 ];
 const PAYROLL = ["payroll.manage", "payroll.read"];
 const ADMIN = [
