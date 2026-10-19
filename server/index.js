@@ -267,10 +267,31 @@ export function createApp({
         });
     }
   };
+  // One log line for slow or failing requests, so problems show up in Render's
+  // logs without logging every request.
+  const timed = async (req, res, fn) => {
+    const started = Date.now();
+    try {
+      return await fn();
+    } finally {
+      const ms = Date.now() - started;
+      if (ms > 1000 || res.statusCode >= 500)
+        console.warn(
+          JSON.stringify({
+            status: res.statusCode,
+            ms,
+            method: req.method,
+            path: req.url.split("?")[0],
+          }),
+        );
+    }
+  };
   const server = http.createServer((req, res) => {
     req.setTimeout(20000, () => req.destroy());
     void db
-      .serialized(() => handle(req, res))
+      .serialized(() => timed(req, res, () => handle(req, res)), {
+        concurrent: req.method === "GET",
+      })
       .catch(() => {
         if (!res.headersSent)
           res.writeHead(500, { "Content-Type": "application/json" });

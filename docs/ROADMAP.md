@@ -73,5 +73,5 @@ Still to do:
 - Push notifications to the phone app; calendar invites for interviews.
 - Document storage in object storage with retention rules (documents are in the database for now).
 - 360-degree feedback, calibration, goal cascading, learning paths.
-- Scale: remove request serialization, background jobs, backups and restore drills, load tests, monitoring.
+- Scale out beyond one instance (write ordering in the database, shared counters); background jobs. Reads already run in parallel, backups/restore drill and monitoring are in `docs/OPERATIONS.md`.
 - Real device attestation (Play Integrity, App Attest).

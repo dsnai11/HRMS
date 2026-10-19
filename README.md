@@ -9,7 +9,7 @@ Attendance application with an Android/iPhone Expo client, a responsive admin po
 - Employees punch in and out using a fresh foreground GPS reading. The server checks coordinates, accuracy, timestamp, workplace assignment, mock-location flag, and shift state.
 - Punch-out uses the workplace coordinates and radius saved at punch-in. Reassignment and deactivation are blocked during an open shift.
 - Attendance history, active shifts, elapsed hours, date filters, CSV export, and an activity log are available in the portal.
-- Passwords use salted scrypt hashes. Sessions expire after 24 hours; browser sessions use HttpOnly cookies and native sessions use Expo SecureStore. Roles are enforced by the API.
+- Passwords use salted scrypt hashes. Browser sessions expire after 24 hours and phone sessions after 30 days; browser sessions use HttpOnly cookies and native sessions use Expo SecureStore. Roles are enforced by the API.
 
 ## Companies, roles and people
 
@@ -133,6 +133,8 @@ Free Render services sleep after idle periods, and waking may delay the first re
 Before moving to paid production, review the existing mobile audit findings, test real phones, define attendance exceptions and backups, and load-test the database/request concurrency approach. Upgrading hosting does not by itself complete those steps.
 
 References: [Render free-service limits](https://render.com/docs/free), [Render Blueprint configuration](https://render.com/docs/blueprint-spec), [Neon](https://neon.com).
+
+See `docs/OPERATIONS.md` for capacity, backups, the restore drill and monitoring.
 
 ## Android and iPhone
 
