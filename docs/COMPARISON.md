@@ -13,7 +13,7 @@ Addetto HRMS (Intero Software LLP) is an Indian HRMS with an employee mobile app
 | Attendance source and history in app                       | yes             | Yes (source shown for corrections and on-duty)                                                 |
 | Device locking                                             | yes             | Yes: one approved phone per employee                                                           |
 | Biometric machine import                                   | yes             | CSV import (employee code, date, in, out) with a dry run; no live device connection            |
-| Customisable attendance policies, shifts                   | yes             | Partly: shift rules per company, branch or employee. **No rotating rosters**                   |
+| Customisable attendance policies, shifts                   | yes             | Yes: shift rules per company, branch or employee, plus a day-by-day roster with rest days      |
 | On-duty, work from home, regularisation                    | yes             | Yes, with manager approval                                                                     |
 | Leave: policies, accrual, carry-over, cancel, holiday list | yes             | Yes (phone app too)                                                                            |
 | Payroll: PF + ECR, ESI, PT, TDS, bonus                     | yes             | Yes. ECR as the classic text file; ESIC as CSV                                                 |
@@ -35,4 +35,4 @@ Addetto HRMS (Intero Software LLP) is an Indian HRMS with an employee mobile app
 
 ## Still to build to match
 
-Rotating rosters, phone push notifications, a customisable dashboard, LMS course content, and a live biometric device connection.
+Phone push notifications, a customisable dashboard, LMS course content, and a live biometric device connection.

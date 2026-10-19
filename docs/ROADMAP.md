@@ -82,4 +82,6 @@ Done: phone self-service screens, selfie at punch, shift rules per branch or emp
 
 Also done: attendance import, minimum app version, PF/ESI challans, Labour Welfare Fund, KRAs and feedback.
 
-Still to do: rotating rosters, phone push, customisable dashboard, LMS content, live biometric device connection (see `docs/COMPARISON.md`).
+Also done: rosters.
+
+Still to do: phone push, customisable dashboard, LMS content, live biometric device connection (see `docs/COMPARISON.md`).

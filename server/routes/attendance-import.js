@@ -120,7 +120,7 @@ export function registerAttendanceImport(router, app) {
       if (!dry)
         await transaction(async () => {
           for (const a of todo) {
-            const policy = await app.policyFor(a.person);
+            const policy = await app.policyFor(a.person, a.row.date);
             const inMs = localToUtcMs(a.row.date, a.row.in_time, timezone);
             const outMs = localToUtcMs(a.row.date, a.row.out_time, timezone);
             const rules = evaluatePunchIn(policy, inMs, timezone);

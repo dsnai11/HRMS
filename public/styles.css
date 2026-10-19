@@ -1053,3 +1053,11 @@ code.secret {
   border-radius: 10px;
   border: 1px solid var(--line);
 }
+
+.check-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 16px;
+  max-height: 220px;
+  overflow: auto;
+}

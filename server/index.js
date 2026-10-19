@@ -204,6 +204,10 @@ export function createApp({
       }
       if (!path.startsWith("/api/")) {
         if (method !== "GET") throw new HttpError(405, "Method not allowed.");
+        if (path === "/favicon.ico") {
+          res.writeHead(204, headers);
+          return res.end();
+        }
         if (!STATIC[path]) throw new HttpError(404, "Not found.");
         const [file, type] = STATIC[path];
         const content = await readFile(new URL(file, publicDir));

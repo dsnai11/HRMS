@@ -688,6 +688,7 @@ async function myEmploymentPage(id) {
     render();
   });
   await myChangesCard(id);
+  await myRosterCard(id);
   document.querySelector("#resign")?.addEventListener("click", () =>
     dialog(
       "Resign",

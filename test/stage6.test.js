@@ -1136,3 +1136,183 @@ test("KRAs become goals, and feedback is private to the right people", async (t)
   );
   assert.equal((await call("/feedback/given", undefined, mgr)).data.length, 1);
 });
+
+test("the roster sets shifts and rest days per person per date", async (t) => {
+  const w = await world(t);
+  const { call, people, db } = w;
+  const hr = people.hr.token;
+  const night = (
+    await call(
+      "/admin/shift-policies",
+      {
+        name: "Late",
+        start_time: "10:00",
+        grace_minutes: 15,
+        earliest_out: "19:00",
+        hours: 9,
+      },
+      hr,
+    )
+  ).data.id;
+  const ids = [people.emp.id, people.mgr.id];
+  assert.equal(
+    (
+      await call(
+        "/admin/roster",
+        { user_ids: ids, from: "2026-11-02", to: "2026-11-08", off: true },
+        people.emp.token,
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await call(
+        "/admin/roster",
+        { user_ids: ids, from: "2026-11-08", to: "2026-11-02", off: true },
+        hr,
+      )
+    ).status,
+    400,
+  );
+  // Everyone on the late shift Monday to Friday; Wednesday off for the employee.
+  const set = await call(
+    "/admin/roster",
+    {
+      user_ids: ids,
+      from: "2026-11-02",
+      to: "2026-11-08",
+      policy_id: night,
+      weekdays: [1, 2, 3, 4, 5],
+    },
+    hr,
+  );
+  assert.deepEqual(set.data, { people: 2, days: 5 });
+  assert.equal(
+    (
+      await call(
+        "/admin/roster",
+        {
+          user_ids: [people.emp.id],
+          from: "2026-11-04",
+          to: "2026-11-04",
+          off: true,
+        },
+        hr,
+      )
+    ).status,
+    200,
+  );
+  const grid = (
+    await call("/admin/roster?from=2026-11-02&to=2026-11-08", undefined, hr)
+  ).data;
+  assert.equal(grid.length, 10);
+  assert.deepEqual(
+    grid
+      .filter((r) => r.date === "2026-11-04")
+      .map((r) => [r.employee_name, Boolean(r.off), r.policy_name]),
+    [
+      ["EMP", true, null],
+      ["MGR", false, "Late"],
+    ],
+  );
+  assert.deepEqual(
+    (
+      await call("/my-roster?from=2026-11-02", undefined, people.emp.token)
+    ).data.map((r) => r.date),
+    ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06"],
+  );
+
+  // On Thursday 5 Nov (the test clock's day) the roster's late shift applies, so a 10:00 punch is on time.
+  assert.equal(
+    (await call("/my-shift", undefined, people.emp.token)).data.start,
+    "10:00",
+    "today's roster rule shows in my-shift",
+  );
+  const policy = await app_policy(w, people.emp, "2026-11-05");
+  assert.deepEqual(
+    [policy.startMinutes, policy.earliestOutMinutes],
+    [600, 1140],
+  );
+  assert.equal(
+    (await app_policy(w, people.emp, "2026-11-09")).startMinutes,
+    570,
+    "no roster entry: standing rule",
+  );
+
+  // The muster: the roster's rest day counts as a weekly off, and a rostered Sunday as a working day.
+  await call(
+    "/admin/leave-settings",
+    { attendance_start_date: "2026-11-01" },
+    hr,
+    "PATCH",
+  );
+  w.clockTo("2026-11-20T10:00:00+05:30");
+  await call(
+    "/admin/roster",
+    {
+      user_ids: [people.emp.id],
+      from: "2026-11-08",
+      to: "2026-11-08",
+      policy_id: night,
+    },
+    hr,
+  ); // a Sunday
+  const muster = (
+    await call(
+      "/attendance/calendar?month=2026-11",
+      undefined,
+      people.emp.token,
+    )
+  ).data;
+  const day = (d) => muster.days.find((x) => x.date === d).status;
+  assert.equal(day("2026-11-04"), "weekly_off", "rostered rest day");
+  assert.equal(
+    day("2026-11-08"),
+    "absent",
+    "a rostered working Sunday with no punch is an absence",
+  );
+  assert.equal(
+    day("2026-11-15"),
+    "weekly_off",
+    "an ordinary Sunday is still the weekly off",
+  );
+
+  // Clearing removes entries.
+  assert.equal(
+    (
+      await call(
+        "/admin/roster",
+        { user_ids: ids, from: "2026-11-02", to: "2026-11-08" },
+        hr,
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    (await call("/admin/roster?from=2026-11-02&to=2026-11-08", undefined, hr))
+      .data.length,
+    0,
+  );
+});
+async function app_policy(w, person, date) {
+  const { policyFor } = await import("../server/routes/shift-policies.js");
+  const row = await w.db
+    .prepare("SELECT * FROM users WHERE id=?")
+    .get(person.id);
+  return policyFor(
+    {
+      db: w.db,
+      policy: {
+        startMinutes: 570,
+        graceMinutes: 15,
+        hours: 9,
+        earliestOutMinutes: 1110,
+      },
+      dayOf: (iso) => iso.slice(0, 10),
+      clock: () => 0,
+    },
+    row,
+    date,
+  );
+}

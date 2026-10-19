@@ -70,6 +70,15 @@ export async function computeMuster(
     leaveOf.set(k, [...(leaveOf.get(k) ?? []), l.paid]);
   }
 
+  // Roster entries override the weekly off: a rest day, or a working day on a normal off day.
+  const rosterOf = new Map();
+  for (const r of await db
+    .prepare(
+      `SELECT user_id,date,off FROM roster_entries WHERE user_id IN ${inIds} AND date>=? AND date<=?`,
+    )
+    .all(...ids, from, to))
+    rosterOf.set(`${r.user_id}|${r.date}`, r.off);
+
   const holidayCache = new Map();
   const holidaysFor = async (branchId) => {
     const key = branchId ?? 0;
@@ -116,7 +125,10 @@ export async function computeMuster(
       const slots = leaveOf.get(`${p.id}|${date}`) ?? [];
       const paidLeave = slots.filter((x) => x).length * 0.5,
         unpaidLeave = slots.filter((x) => !x).length * 0.5;
-      const off = dayKind(date, settings, holidays);
+      let off = dayKind(date, settings, holidays);
+      const rostered = rosterOf.get(`${p.id}|${date}`);
+      if (rostered !== undefined && off !== "holiday")
+        off = rostered ? "weekly_off" : null;
       let status;
       // Today is not over: with no punch or leave yet, nothing is counted.
       if (date === todayStr && !off && !s && !slots.length) {

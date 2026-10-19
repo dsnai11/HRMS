@@ -345,6 +345,7 @@ async function render() {
         ?.addEventListener("click", () => workplaceDialog());
       await selfieSettingCard(id);
       await shiftPolicyCard(id);
+      await rosterCard(id);
       await importCard(id);
     } else if (page === "attendance") {
       document.querySelector("#content").innerHTML =
@@ -810,7 +811,9 @@ async function employeeView(id) {
     heading(`Hello, ${me.name.split(" ")[0]}`, "Your workday, in one place.") +
     `<div class="card punch-card"><span class="pill ${open ? "" : "neutral"}">${open ? "You are working" : "Not punched in"}</span><div class="big-clock">${open ? "Your shift is in progress" : "Ready for your day?"}</div><h2>${esc(open?.workplace_name || profile.workplace?.name || "No workplace assigned")}</h2><p class="muted">${open ? `Started ${time(open.in_at)}. Punch out at the same workplace${open.required_out_at ? ` after ${time(open.required_out_at)} for a full day` : ""}.` : `Punch in within ${profile.workplace?.radius || "—"} metres of your assigned workplace.`}</p><div class="callout">Attendance is recorded only from the company mobile app, at your assigned workplace.</div></div><div class="card"><h2>My recent attendance</h2>${table(shifts)}</div>`;
 }
-(async () => {
+// Start once every deferred script has run (they share this page's scope); an early
+// start could use a function from a later script before it exists.
+document.addEventListener("DOMContentLoaded", async () => {
   try {
     config = await api("/config");
     if (resetFromLink()) return;
@@ -820,4 +823,4 @@ async function employeeView(id) {
   } catch {
     login();
   }
-})();
+});

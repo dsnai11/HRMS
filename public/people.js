@@ -422,3 +422,101 @@ async function importCard(id) {
     file.value = "";
   };
 }
+
+// ---- roster ---------------------------------------------------------------------------------------------------
+const ROSTER_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const mondayOf = (d) => {
+  const x = new Date(`${d}T00:00:00Z`);
+  x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7));
+  return x.toISOString().slice(0, 10);
+};
+const addDaysTo = (d, n) => {
+  const x = new Date(`${d}T00:00:00Z`);
+  x.setUTCDate(x.getUTCDate() + n);
+  return x.toISOString().slice(0, 10);
+};
+async function rosterCard(id) {
+  if (!has("org.read")) return;
+  const card = document.createElement("div");
+  card.className = "card";
+  document.querySelector("#content").append(card);
+  let start = mondayOf(today());
+  const draw = async () => {
+    const days = Array.from({ length: 7 }, (_, i) => addDaysTo(start, i));
+    const [rows, policies] = await Promise.all([
+      api(`/admin/roster?from=${days[0]}&to=${days[6]}`),
+      api("/admin/shift-policies"),
+    ]);
+    if (id !== renderId) return;
+    const people = [
+      ...new Map(rows.map((r) => [r.user_id, r.employee_name])).entries(),
+    ];
+    const cell = (uid, d) => {
+      const r = rows.find((x) => x.user_id === uid && x.date === d);
+      return r
+        ? r.off
+          ? '<span class="pill neutral">Off</span>'
+          : esc(r.policy_name || "")
+        : "—";
+    };
+    card.innerHTML = `<div class="card-head"><div><h2>Roster</h2><p class="muted">Give people a different shift, or a rest day, on particular dates. It beats their standing shift rule and the weekly off. A rostered working day on a Sunday counts as a working day.</p></div>${has("org.manage") ? '<button id="set-roster">Set roster</button>' : ""}</div><div class="actions"><button class="ghost" id="r-prev">← Previous week</button><strong>${fmtDate(days[0])} – ${fmtDate(days[6])}</strong><button class="ghost" id="r-next">Next week →</button></div>${people.length ? `<div class="table-wrap"><table><thead><tr><th>Employee</th>${days.map((d) => `<th>${ROSTER_DAYS[new Date(`${d}T00:00:00Z`).getUTCDay()]} ${d.slice(8)}</th>`).join("")}</tr></thead><tbody>${people.map(([uid, name]) => `<tr><td>${esc(name)}</td>${days.map((d) => `<td>${cell(uid, d)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : empty("Nothing rostered this week", "People follow their standing shift rule and the company's weekly off.")}`;
+    card.querySelector("#r-prev").onclick = () => (
+      (start = addDaysTo(start, -7)),
+      draw()
+    );
+    card.querySelector("#r-next").onclick = () => (
+      (start = addDaysTo(start, 7)),
+      draw()
+    );
+    card.querySelector("#set-roster")?.addEventListener("click", async () => {
+      const staff = (await api("/admin/employees?limit=200&active=1")).items;
+      dialog(
+        "Set roster",
+        `<div class="full"><div class="check-grid">${staff.map((p) => `<label class="check"><input type="checkbox" name="u${p.id}"> ${esc(p.name)}</label>`).join("")}</div></div>${input("from", "From", days[0], 'type="date" required')}${input("to", "To", days[6], 'type="date" required')}${sel(
+          "what",
+          "Set to",
+          [
+            ["policy", "A shift rule"],
+            ["off", "Rest day"],
+            ["clear", "Clear the roster"],
+          ],
+        )}${sel(
+          "policy_id",
+          "Shift rule",
+          policies.map((p) => [
+            p.id,
+            `${p.name} (${p.start_time}–${p.earliest_out})`,
+          ]),
+        )}<div class="full"><span class="label">Only on these days (none = every day)</span><div class="actions">${ROSTER_DAYS.map((n, i) => `<label class="check"><input type="checkbox" name="d${i}"> ${n}</label>`).join("")}</div></div>`,
+        async (b) => {
+          const user_ids = staff
+            .filter((p) => `u${p.id}` in b)
+            .map((p) => p.id);
+          if (!user_ids.length)
+            throw new Error("Choose at least one employee.");
+          const body = { user_ids, from: b.from, to: b.to };
+          const weekdays = ROSTER_DAYS.map((_, i) => i).filter(
+            (i) => `d${i}` in b,
+          );
+          if (weekdays.length) body.weekdays = weekdays;
+          if (b.what === "off") body.off = true;
+          else if (b.what === "policy") {
+            if (!b.policy_id) throw new Error("Add a shift rule first.");
+            body.policy_id = Number(b.policy_id);
+          }
+          const r = await api("/admin/roster", body);
+          notice(`Updated ${r.days} day(s) for ${r.people} people.`);
+        },
+      );
+    });
+  };
+  await draw();
+}
+async function myRosterCard(id) {
+  const rows = await api("/my-roster");
+  if (id !== renderId || !rows.length) return;
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>My roster, next two weeks</h2>${rows.map((r) => `<div class="activity"><strong>${fmtDate(r.date)}</strong> · ${r.off ? "Rest day" : `${esc(r.policy_name || "")} (${r.start_time}–${r.earliest_out})`}</div>`).join("")}`;
+  document.querySelector("#content").append(card);
+}
