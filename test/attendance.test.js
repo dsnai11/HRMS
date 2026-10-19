@@ -1,3 +1,4 @@
-import { openDatabase } from "../server/db.js";
+import { openPglite } from "../server/pglite.js";
 import { attendanceCases } from "./attendance-cases.js";
-attendanceCases(() => openDatabase(":memory:"));
+
+attendanceCases(() => openPglite());

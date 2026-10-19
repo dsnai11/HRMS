@@ -636,3 +636,45 @@ dialog h2 {
     display: none;
   }
 }
+
+/* Organisation, directory and profile */
+.tabbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}
+.pager .muted {
+  margin-right: auto;
+}
+.kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.kv:last-child {
+  border-bottom: 0;
+}
+.kv strong {
+  text-align: right;
+  font-weight: 600;
+}
+.form-grid .full strong {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--green);
+}
+.user select {
+  max-width: 190px;
+  padding: 6px 10px;
+}

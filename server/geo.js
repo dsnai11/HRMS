@@ -1,10 +1,4 @@
-export class HttpError extends Error {
-  constructor(status, message, code) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
+import { HttpError } from "./http.js";
 export function distanceMeters(lat1, lon1, lat2, lon2) {
   const radians = (n) => (n * Math.PI) / 180;
   const a =

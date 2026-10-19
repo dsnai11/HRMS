@@ -157,7 +157,7 @@ export default function Attendance() {
     const p = await api<Profile>("/me", undefined, session);
     setProfile(p);
     setRefreshedAt(Date.now());
-    if (!p.user.must_change_password && p.user.role === "employee")
+    if (!p.user.must_change_password && p.user.role !== "super_admin")
       setShifts(await api<Shift[]>("/shifts", undefined, session));
   }
   async function run(fn: () => Promise<void>) {
@@ -503,7 +503,7 @@ export default function Attendance() {
                 disabled={busy}
               />
             </>
-          ) : profile.user.role !== "employee" ? (
+          ) : profile.user.role === "super_admin" ? (
             <View style={s.card}>
               <Text style={s.heading}>Administrator account</Text>
               <Text style={s.subtitle}>

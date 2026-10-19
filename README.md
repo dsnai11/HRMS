@@ -1,4 +1,4 @@
-# Laxmi India Finance Ltd. — HRMS
+# HRMS
 
 Attendance application with an Android/iPhone Expo client, a responsive admin portal, and a Node.js API. Reports default to Asia/Kolkata. No employee or workplace data is seeded into production.
 
@@ -10,6 +10,15 @@ Attendance application with an Android/iPhone Expo client, a responsive admin po
 - Punch-out uses the workplace coordinates and radius saved at punch-in. Reassignment and deactivation are blocked during an open shift.
 - Attendance history, active shifts, elapsed hours, date filters, CSV export, and an activity log are available in the portal.
 - Passwords use salted scrypt hashes. Sessions expire after 24 hours; browser sessions use HttpOnly cookies and native sessions use Expo SecureStore. Roles are enforced by the API.
+
+## Companies, roles and people
+
+- **Companies.** Every record belongs to a company. The platform owner (`super_admin`) creates companies under **Organization → Companies** and switches between them with the selector in the top bar; nobody else can see or reach another company's data.
+- **Roles.** `super_admin` (platform owner), `admin` (everything inside one company), `hr` (people, org, attendance and device approvals; cannot create admins, HR users, workplaces or read the activity log), and `employee`. Permissions are defined in `server/rbac.js` and enforced on the server.
+- **Managers are derived.** Anyone with direct reports gets **My team** (members and their attendance, including indirect reports). Reporting lines cannot be circular, and a manager with active reports cannot be deactivated until they are reassigned.
+- **Organization.** Branches, departments and designations per company (names unique per company, ignoring case).
+- **Employee profile.** Employee code (auto-generated `E0001…` or set by HR), job details (department, designation, branch, workplace, manager, employment type, joining date), personal details and an emergency contact. Employees edit only their contact details under **My profile**.
+- **Server layout.** `server/routes/*` hold the API by area, `server/rbac.js` the roles, `server/migrations/*.sql` the schema. Bank, PAN and Aadhaar data are deliberately not stored yet; they arrive with payroll and its protections.
 
 ## Attendance integrity (anti-spoofing)
 
@@ -37,7 +46,7 @@ Defaults can be changed with the environment variables `SHIFT_START` (`09:30`), 
 
 ## Run the web portal and API
 
-Requires Node.js 24 or newer. Run `npm ci` first. The server uses the `pg` driver for hosted PostgreSQL; local development can still use SQLite.
+Requires Node.js 24 or newer. Run `npm ci` first. The server uses PostgreSQL: set `DATABASE_URL` (Neon or any PostgreSQL with TLS). With no `DATABASE_URL` in development, an embedded PostgreSQL (PGlite) stores data under `./data/pglite`.
 
 1. Copy `.env.example` to `.env`.
 2. Set `ADMIN_EMAIL`, `ADMIN_NAME`, and a unique `ADMIN_PASSWORD` of at least 12 characters.
@@ -45,7 +54,7 @@ Requires Node.js 24 or newer. Run `npm ci` first. The server uses the `pg` drive
 4. Remove `ADMIN_PASSWORD` from `.env` and run `npm start`.
 5. Open http://localhost:3000. Add a workplace, then employees.
 
-`npm test` exercises the geofence and authenticated attendance workflow against both SQLite and an embedded PostgreSQL engine (PGlite), plus PostgreSQL rollback and the hosted-storage guard. This does not replace a live Neon connection check. A separate local preview database, if present, lives under ignored `.local/`; it is never deployed.
+`npm test` runs the whole suite against an embedded PostgreSQL engine (PGlite) with the real migrations: geofence and attendance rules, device binding, multi-company isolation, roles and permissions, org structure, profiles, reporting lines, and upgrading a pre-company database. This does not replace a live Neon connection check. A separate local preview database, if present, lives under ignored `.local/`; it is never deployed.
 
 ## Free showcase deployment: Render + Neon
 
@@ -60,7 +69,7 @@ This is the selected showcase target. `render.yaml` explicitly requests Render's
 
 Free Render services sleep after idle periods, and waking may delay the first request. Open the portal before a presentation. Records live in Neon rather than Render's temporary filesystem; free quotas and provider availability still apply. Do not use Render's expiring free Postgres database for this setup. There is no production availability guarantee.
 
-`DATABASE_URL` selects PostgreSQL. On Render, or with `REQUIRE_POSTGRES=true`, a missing URL stops startup instead of falling back to a disposable SQLite file. Existing local SQLite records are left untouched and are **not** automatically copied to Neon. Run one app instance for the showcase; requests are serialized to preserve the read/check/write semantics of the original app.
+`DATABASE_URL` selects PostgreSQL. On Render, or with `REQUIRE_POSTGRES=true`, a missing URL stops startup instead of falling back to local storage. Schema changes are applied automatically at startup from `server/migrations/`, each once, in order. Run one app instance for now; requests are serialized to preserve the read/check/write semantics of the original app (see `docs/ROADMAP.md`, stage 5).
 
 Before moving to paid production, review the existing mobile audit findings, test real phones, define attendance exceptions and backups, and load-test the database/request concurrency approach. Upgrading hosting does not by itself complete those steps.
 
@@ -84,13 +93,13 @@ Signed app distribution requires your Expo account and the appropriate Apple/Goo
 Target repository: https://github.com/dsnai11/HRMS
 
 1. Create a Railway project and deploy this repository, using its root Dockerfile.
-2. Attach a persistent volume mounted at `/data`. **Do this before storing real attendance.** Set `DATABASE_PATH=/data/hrms.sqlite` and keep a single replica.
+2. Add a PostgreSQL database (Railway PostgreSQL or Neon) and set `DATABASE_URL`. Keep a single replica.
 3. Set `NODE_ENV=production`, `COMPANY_NAME=Laxmi India Finance Ltd.`, and `REPORT_TIMEZONE=Asia/Kolkata`.
 4. Generate an HTTPS domain and set `PUBLIC_URL` to that exact origin. Railway supplies `PORT`; the service listens on `0.0.0.0`.
-5. Set a private random `SETUP_TOKEN` of at least 32 bytes. Open the portal and use that code to create the first administrator, then remove the variable. Alternatively, run `node server/bootstrap.js` in the running service shell with administrator environment variables set. The live volume must be mounted; do not bootstrap during build/pre-deploy.
+5. Set a private random `SETUP_TOKEN` of at least 32 bytes. Open the portal and use that code to create the first administrator, then remove the variable. Alternatively, run `node server/bootstrap.js` in the running service shell with administrator environment variables set. Do not bootstrap during build/pre-deploy.
 6. Verify `/health`, log in, create the real workplace and employees, and point the mobile build at this domain.
 
-`railway.json` configures the Docker build and `/health` deployment check. The volume is provisioned separately. Enable volume backups and confirm a restore procedure before using this for payroll records.
+`railway.json` configures the Docker build and `/health` deployment check. Enable database backups and confirm a restore procedure before using this for payroll records.
 
 Railway references: [volumes](https://docs.railway.com/volumes/reference), [healthchecks](https://docs.railway.com/deployments/healthchecks). Mobile references: [Expo SDK 57](https://docs.expo.dev/versions/v57.0.0/), [location](https://docs.expo.dev/versions/v57.0.0/sdk/location/).
 
@@ -101,7 +110,7 @@ Railway references: [volumes](https://docs.railway.com/volumes/reference), [heal
 - Server timestamps determine working hours. Date reports group shifts by punch-in date; ongoing shifts contribute elapsed time as of refresh. Hours are not a payroll calculation (no breaks, overtime or leave rules).
 - The active-shift view includes overnight shifts. No automatic punch-out or admin location bypass is provided. An employee who leaves without punching out must return to the assigned workplace; agree an exception policy before rollout.
 - GPS and the mock flag are client-provided signals. They cannot prove physical presence against a modified client, spoofed device, or shared credentials. Device attestation and device binding are not implemented.
-- SQLite with a volume supports a single-service pilot. Multi-instance deployment requires a shared database and distributed rate limits.
-- No email delivery, self-service password recovery, leave, payroll, biometric identification, background tracking, or automatic retention policy is included.
+- Multi-instance deployment needs distributed rate limits and removal of request serialization; both are planned (`docs/ROADMAP.md`).
+- Not included yet: email delivery, self-service password recovery, leave, payroll, recruitment, biometric identification, background tracking, or automatic retention policy. See `docs/ROADMAP.md`.
 - Validate GPS permission denial, poor signal, boundary edges, offline responses, duplicate taps, overnight shifts, and both physical phone platforms before employee rollout.
 - The mobile dependency audit currently reports 29 findings (19 high, 10 moderate), including transitive Expo/Metro tooling and Expo Router dependencies. Compatible automatic fixes have been applied; remaining automated recommendations include incompatible SDK changes. These findings require review before production mobile distribution. The API's dependencies are audited separately from the mobile app.

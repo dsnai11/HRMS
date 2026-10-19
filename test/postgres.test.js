@@ -1,27 +1,9 @@
-import { PGlite } from "@electric-sql/pglite";
-import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createPostgresStore } from "../server/postgres.js";
+import { openPglite } from "../server/pglite.js";
 import { openConfiguredDatabase } from "../server/db.js";
-import { attendanceCases } from "./attendance-cases.js";
 
-async function openTestDatabase() {
-  const engine = new PGlite();
-  await engine.exec(
-    await readFile(
-      new URL("../server/schema-postgres.sql", import.meta.url),
-      "utf8",
-    ),
-  );
-  const query = (sql, params) => engine.query(sql, params);
-  return createPostgresStore({
-    query,
-    connect: async () => ({ query, release() {} }),
-    end: () => engine.close(),
-  });
-}
-attendanceCases(openTestDatabase);
+const openTestDatabase = () => openPglite();
 
 test("PostgreSQL transaction rolls back both the business change and its audit event", async () => {
   const db = await openTestDatabase();
@@ -67,7 +49,7 @@ test("PostgreSQL transaction rolls back both the business change and its audit e
   }
 });
 
-test("free hosting refuses an ephemeral SQLite fallback when PostgreSQL is missing", async () => {
+test("hosted deployments refuse ephemeral local storage when PostgreSQL is missing", async () => {
   const original = {
     DATABASE_URL: process.env.DATABASE_URL,
     REQUIRE_POSTGRES: process.env.REQUIRE_POSTGRES,

@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool } from "pg";
+import { runMigrations } from "./migrate.js";
 
 // The application deliberately runs as a single instance for the showcase.
 // Serialize request work so async SQLite transactions and PostgreSQL read/check/write
@@ -35,7 +36,7 @@ export function createPostgresStore(pool) {
         },
         async run(...params) {
           const returning =
-            /^INSERT\s+INTO\s+(users|workplaces|shifts|audit)\b/i.test(
+            /^INSERT\s+INTO\s+(users|workplaces|shifts|audit|devices|punch_events|companies|branches|departments|designations)\b/i.test(
               statement,
             );
           const result = await query(
@@ -68,7 +69,7 @@ export function createPostgresStore(pool) {
   });
 }
 
-export async function openPostgres(connectionString, schema) {
+export async function openPostgres(connectionString) {
   const pool = new Pool({
     connectionString,
     max: 3,
@@ -83,7 +84,7 @@ export async function openPostgres(connectionString, schema) {
   );
   const db = createPostgresStore(pool);
   try {
-    await db.exec(schema);
+    await runMigrations(db);
     return db;
   } catch (error) {
     await pool.end();

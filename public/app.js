@@ -1,7 +1,22 @@
 const app = document.querySelector("#app");
-let config = { company: "Laxmi India Finance Ltd.", timezone: "Asia/Kolkata" },
+let config = { company: "Company", timezone: "Asia/Kolkata" },
   me,
-  page = "overview";
+  page = "overview",
+  activeCompany = null,
+  companies = [];
+const has = (permission) => me?.permissions?.includes(permission);
+// Sign-in returns only the user; the full picture (permissions, company) comes from /me.
+async function loadMe() {
+  const p = await api("/me");
+  me = {
+    ...p.user,
+    permissions: p.permissions,
+    is_manager: p.is_manager,
+    company: p.company,
+  };
+  companies = me.role === "super_admin" ? await api("/admin/companies") : [];
+}
+const landing = () => (has("attendance.read") ? "overview" : "mine");
 const esc = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -38,23 +53,36 @@ const today = () =>
   }).format(new Date());
 async function api(path, body, method = "POST") {
   const res = await fetch(`/api${path}`, {
-    ...(body !== undefined
-      ? {
-          method,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        }
-      : {}),
+    ...(body !== undefined ? { method, body: JSON.stringify(body) } : {}),
+    headers: {
+      "Content-Type": "application/json",
+      ...(activeCompany ? { "X-Company-Id": String(activeCompany) } : {}),
+    },
   });
   const data = await res.json();
   if (!res.ok) {
     if (res.status === 401 && path !== "/login") {
       me = null;
+      activeCompany = null;
       login();
     }
     throw new Error(data.error || "Request failed.");
   }
   return data;
+}
+// Downloads go through fetch so the selected company is honoured.
+async function download(path, filename) {
+  const res = await fetch(`/api${path}`, {
+    headers: activeCompany ? { "X-Company-Id": String(activeCompany) } : {},
+  });
+  if (!res.ok) throw new Error((await res.json()).error || "Download failed.");
+  const url = URL.createObjectURL(await res.blob());
+  const a = Object.assign(document.createElement("a"), {
+    href: url,
+    download: filename,
+  });
+  a.click();
+  URL.revokeObjectURL(url);
 }
 let noticeTimer;
 function notice(message, error = false) {
@@ -75,8 +103,8 @@ async function busy(button, fn) {
     button.disabled = false;
   }
 }
-const brand = () =>
-  `<div class="brand"><span class="brand-icon">L</span><div>Laxmi India<small>PEOPLE & WORKPLACE</small></div></div>`;
+const brand = (name = me?.company?.name || config.company) =>
+  `<div class="brand"><span class="brand-icon">${esc(name.trim()[0]?.toUpperCase() || "H")}</span><div>${esc(name)}<small>PEOPLE & WORKPLACE</small></div></div>`;
 const empty = (title, description) =>
   `<div class="empty"><div class="empty-icon">◎</div><strong>${esc(title)}</strong>${esc(description)}</div>`;
 function login() {
@@ -90,7 +118,8 @@ function login() {
         Object.fromEntries(new FormData(e.target)),
       );
       me = data.user;
-      page = me.role === "admin" ? "overview" : "attendance";
+      await loadMe();
+      page = landing();
       await render();
     });
   };
@@ -108,19 +137,34 @@ function setup() {
   };
 }
 function shell() {
-  const items =
-    me.role === "admin"
-      ? [
-          ["overview", "◫", "Overview"],
-          ["employees", "♙", "Employees"],
-          ["attendance", "▤", "Attendance"],
-          ["workplaces", "◎", "Workplaces"],
-          ["devices", "▣", "Devices"],
-          ["security", "⚠", "Security"],
-          ["audit", "≡", "Activity log"],
-        ]
-      : [["attendance", "◎", "My attendance"]];
-  app.innerHTML = `<div class="layout"><aside class="sidebar">${brand()}<div class="nav-label">WORKSPACE</div><nav class="nav">${items.map(([id, icon, label]) => `<button data-page="${id}" class="${page === id ? "selected" : ""}"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="sidebar-foot"><strong>${esc(config.company)}</strong>Location-verified attendance<br>${esc(config.timezone)}</div></aside><main class="main"><header class="topbar"><span>${me.role === "admin" ? "Admin workspace" : "Employee workspace"}</span><div class="user"><span class="avatar">${initials(me.name)}</span><span class="name">${esc(me.name)}</span><button class="ghost" id="password">Password</button><button class="ghost" id="logout">Sign out</button></div></header><section class="content" id="content"><div class="loading">Loading…</div></section></main></div>`;
+  const items = [
+    has("attendance.read") && ["overview", "◫", "Overview"],
+    has("employees.read") && ["employees", "♙", "Employees"],
+    has("org.read") && ["organization", "▦", "Organization"],
+    has("attendance.read") && ["attendance", "▤", "Attendance"],
+    has("org.read") && ["workplaces", "◎", "Workplaces"],
+    has("devices.manage") && ["devices", "▣", "Devices"],
+    has("security.read") && ["security", "⚠", "Security"],
+    has("audit.read") && ["audit", "≡", "Activity log"],
+    me.is_manager && ["team", "☷", "My team"],
+    me.role !== "super_admin" && ["mine", "◎", "My attendance"],
+    ["profile", "☺", "My profile"],
+  ].filter(Boolean);
+  const scope = activeCompany || me.company_id;
+  const workspace = has("employees.read")
+    ? "HR workspace"
+    : "Employee workspace";
+  app.innerHTML = `<div class="layout"><aside class="sidebar">${brand()}<div class="nav-label">WORKSPACE</div><nav class="nav">${items.map(([id, icon, label]) => `<button data-page="${id}" class="${page === id ? "selected" : ""}"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="sidebar-foot"><strong>${esc(me.company?.name || config.company)}</strong>Location-verified attendance<br>${esc(config.timezone)}</div></aside><main class="main"><header class="topbar"><span>${esc(workspace)}</span><div class="user">${companies.length > 1 ? `<select id="company" aria-label="Company">${companies.map((c) => `<option value="${c.id}" ${c.id === scope ? "selected" : ""}>${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("")}</select>` : ""}<span class="avatar">${initials(me.name)}</span><span class="name">${esc(me.name)}</span><button class="ghost" id="password">Password</button><button class="ghost" id="logout">Sign out</button></div></header><section class="content" id="content"><div class="loading">Loading…</div></section></main></div>`;
+  document.querySelector("#company")?.addEventListener("change", async (e) => {
+    activeCompany =
+      Number(e.target.value) === me.company_id ? null : Number(e.target.value);
+    try {
+      await loadMe();
+    } catch (err) {
+      notice(err.message, true);
+    }
+    await render();
+  });
   document.querySelectorAll("[data-page]").forEach(
     (b) =>
       (b.onclick = () => {
@@ -132,6 +176,7 @@ function shell() {
     busy(e.target, async () => {
       await api("/logout", {});
       me = null;
+      activeCompany = null;
       login();
     });
   document.querySelector("#password").onclick = () => passwordDialog();
@@ -172,7 +217,9 @@ async function render() {
     return;
   }
   try {
-    if (me.role === "employee") return await employeeView(id);
+    if (page === "mine") return await employeeView(id);
+    if (page === "profile") return await profileView(id);
+    if (page === "team") return await teamView(id);
     if (page === "overview") {
       const [stats, active, sites] = await Promise.all([
         api("/admin/overview"),
@@ -209,30 +256,9 @@ async function render() {
           )}</div><div class="card"><div class="card-head"><div><h2>Who’s working now</h2><p class="muted">Most recent punch location. No continuous tracking.</p></div><span class="pill">${stats.active} active shifts</span></div>${table(active)}</div><div class="grid-two"><div class="card"><h2>Your workplaces</h2>${sites.length ? sites.map((s) => `<div class="site"><h3>${esc(s.name)}</h3><p class="muted">${s.latitude.toFixed(5)}, ${s.longitude.toFixed(5)}</p><span class="pill neutral">${s.radius} m radius</span></div>`).join("") : empty("Set up your first workplace", "Open Workplaces to define an attendance boundary.")}</div><div class="card"><div class="eyebrow">Designed for trust</div><h2>Right place. Right record.</h2><p class="muted">Employees punch in and out inside their assigned workplace. Every punch records server time and a fresh GPS reading.</p><div class="callout">Location is captured only at attendance events. GPS uncertainty must fit inside the workplace boundary.</div></div></div>`;
       document.querySelector("#refresh").onclick = render;
     } else if (page === "employees") {
-      const [employees, sites] = await Promise.all([
-        api("/admin/employees"),
-        api("/admin/workplaces"),
-      ]);
-      if (id !== renderId) return;
-      document.querySelector("#content").innerHTML =
-        heading(
-          "Your people",
-          "Manage employee access and assigned workplaces.",
-          '<button id="add">+ Add employee</button>',
-        ) +
-        `<div class="card">${employees.length ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Email</th><th>Workplace</th><th>Status</th><th></th></tr></thead><tbody>${employees.map((e) => `<tr><td>${esc(e.name)}</td><td>${esc(e.email)}</td><td>${esc(e.workplace_name)}</td><td><span class="pill ${e.active ? "" : "neutral"}">${e.active ? "Active" : "Inactive"}</span></td><td><button class="secondary" data-edit="${e.id}">Manage</button></td></tr>`).join("")}</tbody></table></div>` : empty("Your team starts here", "Add a workplace, then invite employees by sharing their temporary credentials securely.")}</div>`;
-      document.querySelector("#add").onclick = () =>
-        sites.length
-          ? employeeDialog(sites)
-          : notice("Create a workplace first.", true);
-      document.querySelectorAll("[data-edit]").forEach(
-        (b) =>
-          (b.onclick = () =>
-            employeeDialog(
-              sites,
-              employees.find((e) => e.id === Number(b.dataset.edit)),
-            )),
-      );
+      await employeesPage(id);
+    } else if (page === "organization") {
+      await organizationPage(id);
     } else if (page === "workplaces") {
       const sites = await api("/admin/workplaces");
       if (id !== renderId) return;
@@ -240,10 +266,14 @@ async function render() {
         heading(
           "Workplaces",
           "Define where your employees can begin and end their day.",
-          '<button id="add">+ Add workplace</button>',
+          has("workplaces.manage")
+            ? '<button id="add">+ Add workplace</button>'
+            : "",
         ) +
-        `<div class="card">${sites.length ? sites.map((s) => `<div class="site"><h3>${esc(s.name)}</h3><p class="muted">${s.latitude}, ${s.longitude} · Maximum GPS uncertainty ${s.max_accuracy} m</p><span class="pill">${s.radius} m allowed radius</span> <a href="https://www.google.com/maps?q=${s.latitude},${s.longitude}" target="_blank" rel="noreferrer">View on map ↗</a></div>`).join("") : empty("A place to start", "Add your office coordinates and the allowed attendance radius.")}</div><p class="muted">Workplace boundaries are fixed after creation. Add a new workplace to change a boundary, then reassign employees after their shifts end.</p>`;
-      document.querySelector("#add").onclick = workplaceDialog;
+        `<div class="card">${sites.length ? sites.map((s) => `<div class="site"><h3>${esc(s.name)}</h3><p class="muted">${s.branch_name ? `${esc(s.branch_name)} · ` : ""}${s.latitude}, ${s.longitude} · Maximum GPS uncertainty ${s.max_accuracy} m</p><span class="pill">${s.radius} m allowed radius</span> <a href="https://www.google.com/maps?q=${s.latitude},${s.longitude}" target="_blank" rel="noreferrer">View on map ↗</a></div>`).join("") : empty("A place to start", "Add your office coordinates and the allowed attendance radius.")}</div><p class="muted">Workplace boundaries are fixed after creation. Add a new workplace to change a boundary, then reassign employees after their shifts end.</p>`;
+      document
+        .querySelector("#add")
+        ?.addEventListener("click", () => workplaceDialog());
     } else if (page === "attendance") {
       document.querySelector("#content").innerHTML =
         heading(
@@ -266,9 +296,10 @@ async function render() {
           await load();
         });
       };
-      document.querySelector("#export").onclick = () => {
-        window.location.href = `/api/admin/export?${query}`;
-      };
+      document.querySelector("#export").onclick = (e) =>
+        busy(e.target, () =>
+          download(`/admin/export?${query}`, "attendance.csv"),
+        );
       await load();
     } else if (page === "devices") {
       const devices = await api("/admin/devices");
@@ -386,24 +417,263 @@ function dialog(title, fields, onSubmit, mandatory = false) {
     }
   };
 }
-function employeeDialog(sites, employee) {
+const EMPLOYMENT = {
+  full_time: "Full time",
+  part_time: "Part time",
+  contract: "Contract",
+  intern: "Intern",
+  consultant: "Consultant",
+};
+const ROLE_LABELS = {
+  super_admin: "Platform owner",
+  admin: "Admin",
+  hr: "HR",
+  employee: "Employee",
+};
+const assignable = () =>
+  me.role === "super_admin"
+    ? ["employee", "hr", "admin", "super_admin"]
+    : me.role === "admin"
+      ? ["employee", "hr", "admin"]
+      : ["employee"];
+const options = (items, selected, blank = "— None —") =>
+  `<option value="">${esc(blank)}</option>${items.map((o) => `<option value="${o.id}" ${o.id === selected ? "selected" : ""}>${esc(o.name)}${o.employee_code ? ` (${esc(o.employee_code)})` : ""}</option>`).join("")}`;
+const input = (name, label, value = "", extra = "") =>
+  `<label>${label}<input name="${name}" value="${esc(value)}" ${extra}></label>`;
+
+async function employeesPage(id) {
+  const org = await api("/admin/org");
+  if (id !== renderId) return;
+  const limit = 25;
+  let offset = 0;
+  document.querySelector("#content").innerHTML =
+    heading(
+      "Your people",
+      "Employee records, roles and reporting lines.",
+      has("employees.write") ? '<button id="add">+ Add employee</button>' : "",
+    ) +
+    `<div class="card"><form class="filters" id="filters"><label>Search<input name="q" placeholder="Name, email or code"></label><label>Department<select name="department_id">${options(org.departments, null, "All")}</select></label><label>Branch<select name="branch_id">${options(org.branches, null, "All")}</select></label><label>Status<select name="active"><option value="1">Active</option><option value="0">Inactive</option><option value="">All</option></select></label><button>Search</button></form></div><div class="card" id="list">Loading…</div>`;
+  const form = document.querySelector("#filters");
+  const load = async () => {
+    const params = new URLSearchParams();
+    for (const [k, v] of new FormData(form)) if (v) params.set(k, v);
+    params.set("limit", limit);
+    params.set("offset", offset);
+    const data = await api(`/admin/employees?${params}`);
+    if (id !== renderId) return;
+    const rows = data.items;
+    document.querySelector("#list").innerHTML = rows.length
+      ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Reports to</th><th>Workplace</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((e) => `<tr><td><div class="person"><span class="avatar">${initials(e.name)}</span><div>${esc(e.name)}<small>${esc(e.employee_code || "")} · ${esc(e.email)}</small></div></div></td><td>${esc(e.department_name || "—")}<small>${esc(e.designation_name || "")}</small></td><td>${esc(e.manager_name || "—")}</td><td>${esc(e.workplace_name || "—")}</td><td>${esc(ROLE_LABELS[e.role] || e.role)}</td><td><span class="pill ${e.active ? "" : "neutral"}">${e.active ? "Active" : "Inactive"}</span></td><td>${has("employees.write") ? `<button class="secondary" data-edit="${e.id}">Manage</button>` : ""}</td></tr>`).join("")}</tbody></table></div><div class="pager"><span class="muted">${offset + 1}–${offset + rows.length} of ${data.total}</span><button class="secondary" id="prev" ${offset ? "" : "disabled"}>← Previous</button><button class="secondary" id="next" ${offset + limit < data.total ? "" : "disabled"}>Next →</button></div>`
+      : empty("No employees found", "Adjust the search or add an employee.");
+    document
+      .querySelector("#prev")
+      ?.addEventListener("click", () =>
+        busy(
+          document.querySelector("#prev"),
+          async () => ((offset -= limit), await load()),
+        ),
+      );
+    document
+      .querySelector("#next")
+      ?.addEventListener("click", () =>
+        busy(
+          document.querySelector("#next"),
+          async () => ((offset += limit), await load()),
+        ),
+      );
+    document
+      .querySelectorAll("[data-edit]")
+      .forEach(
+        (b) =>
+          (b.onclick = () =>
+            busy(b, async () =>
+              employeeDialog(
+                org,
+                await api(`/admin/employees/${b.dataset.edit}`),
+              ),
+            )),
+      );
+  };
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    offset = 0;
+    busy(e.submitter, load);
+  };
+  document
+    .querySelector("#add")
+    ?.addEventListener("click", () => employeeDialog(org));
+  await load();
+}
+
+function employeeDialog(org, e) {
+  const roles = assignable();
   dialog(
-    employee ? "Manage employee" : "Add employee",
-    `${employee ? `<div class="full muted">${esc(employee.name)} · ${esc(employee.email)}</div>` : '<label>Full name<input name="name" maxlength="150" required></label><label>Email<input name="email" type="email" required></label>'}<label class="full">Assigned workplace<select name="workplace_id">${sites.map((s) => `<option value="${s.id}" ${s.id === employee?.workplace_id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></label>${employee ? `<label>Account status<select name="active"><option value="true" ${employee.active ? "selected" : ""}>Active</option><option value="false" ${!employee.active ? "selected" : ""}>Inactive</option></select></label>` : ""}<label class="full">${employee ? "Reset password (optional)" : "Temporary password"}<input name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" ${employee ? "" : "required"}></label><p class="muted full">Use at least 12 characters. Share credentials securely; the employee must change their temporary password at first sign-in.</p>`,
+    e ? "Manage employee" : "Add employee",
+    `<div class="full"><strong>Account</strong></div>${e ? `<div class="full muted">${esc(e.email)}</div>${input("name", "Full name", e.name, 'maxlength="150" required')}` : `${input("name", "Full name", "", 'maxlength="150" required')}${input("email", "Email", "", 'type="email" required')}`}<label>${e ? "Reset password (optional)" : "Temporary password"}<input name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" ${e ? "" : "required"}></label>${roles.length > 1 && has("roles.assign") ? `<label>Role<select name="role">${roles.map((r) => `<option value="${r}" ${r === (e?.role || "employee") ? "selected" : ""}>${ROLE_LABELS[r]}</option>`).join("")}</select></label>` : ""}${e ? `<label>Account status<select name="active"><option value="true" ${e.active ? "selected" : ""}>Active</option><option value="false" ${e.active ? "" : "selected"}>Inactive</option></select></label>` : ""}<div class="full"><strong>Job</strong></div>${input("employee_code", "Employee code", e?.employee_code || "", 'maxlength="30" placeholder="Auto-generated"')}<label>Employment type<select name="employment_type"><option value="">—</option>${Object.entries(
+      EMPLOYMENT,
+    )
+      .map(
+        ([k, v]) =>
+          `<option value="${k}" ${k === e?.employment_type ? "selected" : ""}>${v}</option>`,
+      )
+      .join(
+        "",
+      )}</select></label><label>Department<select name="department_id">${options(org.departments, e?.department_id)}</select></label><label>Designation<select name="designation_id">${options(org.designations, e?.designation_id)}</select></label><label>Branch<select name="branch_id">${options(org.branches, e?.branch_id)}</select></label><label>Attendance workplace<select name="workplace_id">${options(org.workplaces, e?.workplace_id)}</select></label><label>Reports to<select name="manager_id">${options(
+      org.managers.filter((m) => m.id !== e?.id),
+      e?.manager_id,
+    )}</select></label>${input("date_of_joining", "Date of joining", e?.date_of_joining || "", 'type="date"')}<div class="full"><strong>Personal</strong></div>${input("phone", "Phone", e?.phone || "", 'maxlength="20"')}${input("date_of_birth", "Date of birth", e?.date_of_birth || "", 'type="date"')}<label>Gender<select name="gender"><option value="">—</option>${["male", "female", "other"].map((g) => `<option value="${g}" ${g === e?.gender ? "selected" : ""}>${g[0].toUpperCase() + g.slice(1)}</option>`).join("")}</select></label>${input("address", "Address", e?.address || "", 'maxlength="300"')}<div class="full"><strong>Emergency contact</strong></div>${input("emergency_name", "Name", e?.emergency_name || "", 'maxlength="100"')}${input("emergency_phone", "Phone", e?.emergency_phone || "", 'maxlength="20"')}${input("emergency_relation", "Relation", e?.emergency_relation || "", 'maxlength="50"')}`,
     async (b) => {
-      b.workplace_id = Number(b.workplace_id);
-      if (employee) {
+      for (const k of [
+        "department_id",
+        "designation_id",
+        "branch_id",
+        "workplace_id",
+        "manager_id",
+      ])
+        b[k] = b[k] ? Number(b[k]) : null;
+      if (e) {
         b.active = b.active === "true";
         if (!b.password) delete b.password;
-      }
+        if (!b.employee_code) delete b.employee_code;
+      } else if (!b.employee_code) delete b.employee_code;
       await api(
-        employee ? `/admin/employees/${employee.id}` : "/admin/employees",
+        e ? `/admin/employees/${e.id}` : "/admin/employees",
         b,
-        employee ? "PATCH" : "POST",
+        e ? "PATCH" : "POST",
       );
-      notice(employee ? "Employee updated." : "Employee created.");
+      notice(e ? "Employee updated." : "Employee created.");
     },
   );
+}
+
+const ORG_TABS = {
+  departments: {
+    label: "Departments",
+    noun: "department",
+    columns: [["code", "Code"]],
+  },
+  designations: { label: "Designations", noun: "designation", columns: [] },
+  branches: {
+    label: "Branches",
+    noun: "branch",
+    columns: [
+      ["code", "Code"],
+      ["city", "City"],
+      ["state", "State"],
+    ],
+  },
+};
+let orgTab = "departments";
+async function organizationPage(id) {
+  const tabs = {
+    ...ORG_TABS,
+    ...(me.role === "super_admin"
+      ? {
+          companies: {
+            label: "Companies",
+            noun: "company",
+            columns: [["code", "Code"]],
+          },
+        }
+      : {}),
+  };
+  if (!tabs[orgTab]) orgTab = "departments";
+  const spec = tabs[orgTab];
+  const rows = await api(`/admin/${orgTab}`);
+  if (id !== renderId) return;
+  const manage =
+    orgTab === "companies" ? has("companies.manage") : has("org.manage");
+  document.querySelector("#content").innerHTML =
+    heading(
+      "Organization",
+      "Companies, branches, departments and designations.",
+      manage ? `<button id="add">+ Add ${spec.noun}</button>` : "",
+    ) +
+    `<div class="tabbar">${Object.entries(tabs)
+      .map(
+        ([k, t]) =>
+          `<button class="${k === orgTab ? "" : "secondary"}" data-tab="${k}">${t.label}</button>`,
+      )
+      .join(
+        "",
+      )}</div><div class="card">${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th>${spec.columns.map(([, l]) => `<th>${l}</th>`).join("")}<th>Employees</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.name)}</td>${spec.columns.map(([k]) => `<td>${esc(r[k] || "—")}</td>`).join("")}<td>${r.employees ?? 0}</td><td><span class="pill ${r.active ? "" : "neutral"}">${r.active ? "Active" : "Inactive"}</span></td><td>${manage ? `<button class="secondary" data-edit="${r.id}">Edit</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : empty(`No ${spec.label.toLowerCase()} yet`, "Add the first one to get started.")}</div>`;
+  document
+    .querySelectorAll("[data-tab]")
+    .forEach((b) => (b.onclick = () => ((orgTab = b.dataset.tab), render())));
+  const open = (row) => orgDialog(orgTab, spec, row);
+  document.querySelector("#add")?.addEventListener("click", () => open());
+  document
+    .querySelectorAll("[data-edit]")
+    .forEach(
+      (b) =>
+        (b.onclick = () =>
+          open(rows.find((r) => r.id === Number(b.dataset.edit)))),
+    );
+}
+function orgDialog(kind, spec, row) {
+  const fields = {
+    code: ["Code", 20],
+    city: ["City", 80],
+    state: ["State", 80],
+  };
+  dialog(
+    `${row ? "Edit" : "Add"} ${spec.noun}`,
+    `${input("name", "Name", row?.name || "", 'maxlength="150" required')}${spec.columns.map(([k]) => (kind === "companies" && row && k === "code" ? "" : input(k, fields[k][0], row?.[k] || "", `maxlength="${fields[k][1]}" ${kind === "companies" ? "required" : ""}`))).join("")}${kind === "branches" ? input("address", "Address", row?.address || "", 'maxlength="300"') : ""}${row ? `<label>Status<select name="active"><option value="true" ${row.active ? "selected" : ""}>Active</option><option value="false" ${row.active ? "" : "selected"}>Inactive</option></select></label>` : ""}`,
+    async (b) => {
+      if (row) b.active = b.active === "true";
+      await api(
+        `/admin/${kind}${row ? `/${row.id}` : ""}`,
+        b,
+        row ? "PATCH" : "POST",
+      );
+      if (kind === "companies") await loadMe();
+      notice(`${spec.noun[0].toUpperCase() + spec.noun.slice(1)} saved.`);
+    },
+  );
+}
+
+async function profileView(id) {
+  const p = await api("/profile");
+  if (id !== renderId) return;
+  const row = (label, value) =>
+    `<div class="kv"><span class="muted">${label}</span><strong>${esc(value || "—")}</strong></div>`;
+  document.querySelector("#content").innerHTML =
+    heading(
+      "My profile",
+      "Your details as held by HR.",
+      '<button class="secondary" id="edit">Edit contact details</button>',
+    ) +
+    `<div class="card"><h2>${esc(p.name)}</h2><p class="muted">${esc(p.designation_name || "")}${p.designation_name && p.department_name ? " · " : ""}${esc(p.department_name || "")}</p>${row("Employee code", p.employee_code)}${row("Email", p.email)}${row("Role", ROLE_LABELS[p.role] || p.role)}${row("Reports to", p.manager_name)}${row("Branch", p.branch_name)}${row("Workplace", p.workplace_name)}${row("Employment", EMPLOYMENT[p.employment_type])}${row("Date of joining", p.date_of_joining)}</div><div class="card"><h2>Contact</h2>${row("Phone", p.phone)}${row("Address", p.address)}${row("Emergency contact", [p.emergency_name, p.emergency_relation, p.emergency_phone].filter(Boolean).join(" · "))}</div><p class="muted">To change your name, email, department or other job details, contact HR.</p>`;
+  document.querySelector("#edit").onclick = () =>
+    dialog(
+      "Edit contact details",
+      `${input("phone", "Phone", p.phone || "", 'maxlength="20"')}${input("address", "Address", p.address || "", 'maxlength="300"')}${input("emergency_name", "Emergency contact name", p.emergency_name || "", 'maxlength="100"')}${input("emergency_phone", "Emergency contact phone", p.emergency_phone || "", 'maxlength="20"')}${input("emergency_relation", "Relation", p.emergency_relation || "", 'maxlength="50"')}`,
+      async (b) => {
+        await api("/profile", b, "PATCH");
+        notice("Contact details updated.");
+      },
+    );
+}
+
+async function teamView(id) {
+  const members = await api("/team/members");
+  if (id !== renderId) return;
+  document.querySelector("#content").innerHTML =
+    heading(
+      "My team",
+      "People who report to you, directly or through others.",
+    ) +
+    `<div class="card"><h2>Members</h2><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Relation</th><th>Status</th></tr></thead><tbody>${members.map((m) => `<tr><td>${esc(m.name)}<small>${esc(m.employee_code || "")} · ${esc(m.email)}</small></td><td>${esc(m.department_name || "—")}<small>${esc(m.designation_name || "")}</small></td><td>${m.direct ? "Direct report" : "Indirect"}</td><td><span class="pill ${m.active ? "" : "neutral"}">${m.active ? "Active" : "Inactive"}</span></td></tr>`).join("")}</tbody></table></div></div><div class="card"><form class="filters" id="filters"><label>From<input type="date" name="from" value="${today()}" required></label><label>To<input type="date" name="to" value="${today()}" required></label><button>Show attendance</button></form></div><div class="card" id="records">Loading…</div>`;
+  const load = async (query) => {
+    const rows = await api(`/team/attendance?${query}`);
+    if (id === renderId)
+      document.querySelector("#records").innerHTML = table(rows);
+  };
+  document.querySelector("#filters").onsubmit = (e) => {
+    e.preventDefault();
+    busy(e.submitter, () => load(new URLSearchParams(new FormData(e.target))));
+  };
+  await load(new URLSearchParams({ from: today(), to: today() }));
 }
 function workplaceDialog() {
   dialog(
@@ -470,8 +740,8 @@ async function employeeView(id) {
 (async () => {
   try {
     config = await api("/config");
-    const profile = await api("/me");
-    me = profile.user;
+    await loadMe();
+    page = landing();
     await render();
   } catch {
     login();
