@@ -343,3 +343,219 @@ test("insights summarise headcount, movement and attendance", async (t) => {
     [],
   );
 });
+
+test("phone push goes through Firebase to a person's registered phones", async (t) => {
+  const { generateKeyPairSync, createVerify } = await import("node:crypto");
+  const { createPush } = await import("../server/push.js");
+  const w = await (async () => {
+    const db = await openPglite();
+    await createAdmin(db, {
+      name: "Owner",
+      email: "owner@example.test",
+      password: "Owner-password-123",
+      companyName: "Alpha Ltd",
+    });
+    t.after(() => db.close());
+    return { db };
+  })();
+  const { db } = w;
+  const co = (await db.prepare("SELECT id FROM companies").get()).id;
+  const mk = async (n) =>
+    Number(
+      (
+        await db
+          .prepare(
+            "INSERT INTO users(name,email,password_hash,role,company_id,created_at) VALUES(?,?,?,?,?,?)",
+          )
+          .run(
+            n,
+            `${n}@x.test`,
+            "x:y",
+            "employee",
+            co,
+            new Date().toISOString(),
+          )
+      ).lastInsertRowid,
+    );
+  const [a, b] = [await mk("a"), await mk("b")];
+  await db
+    .prepare(
+      "INSERT INTO push_tokens(user_id,token,platform,created_at,updated_at) VALUES(?,?,?,?,?)",
+    )
+    .run(a, "tok-a1", "android", "x", "x");
+  await db
+    .prepare(
+      "INSERT INTO push_tokens(user_id,token,platform,created_at,updated_at) VALUES(?,?,?,?,?)",
+    )
+    .run(a, "tok-a2", "android", "x", "x");
+  await db
+    .prepare(
+      "INSERT INTO push_tokens(user_id,token,platform,created_at,updated_at) VALUES(?,?,?,?,?)",
+    )
+    .run(b, "tok-b", "android", "x", "x");
+
+  const { publicKey, privateKey } = generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+  });
+  const calls = [];
+  const fake = async (url, init) => {
+    calls.push({ url: String(url), init });
+    if (String(url).includes("oauth2"))
+      return new Response(
+        JSON.stringify({ access_token: "ACCESS", expires_in: 3600 }),
+        { status: 200 },
+      );
+    const message = JSON.parse(init.body).message;
+    if (message.token === "tok-a2")
+      return new Response(
+        JSON.stringify({ error: { status: "UNREGISTERED" } }),
+        { status: 404 },
+      );
+    return new Response("{}", { status: 200 });
+  };
+  const env = {
+    FCM_SERVICE_ACCOUNT: JSON.stringify({
+      client_email: "svc@proj.iam.gserviceaccount.com",
+      private_key: privateKey.export({ type: "pkcs8", format: "pem" }),
+      project_id: "hrms-proj",
+    }),
+  };
+  const push = createPush({ db }, env, fake);
+  assert.equal(
+    await push([a], {
+      title: "Your leave request was approved",
+      link: "timeoff",
+    }),
+    1,
+    "one of two phones accepted it",
+  );
+  // The sign-in to Google carries a correctly signed token.
+  const assertion = calls[0].init.body.get("assertion");
+  const [h, c, sig] = assertion.split(".");
+  assert.ok(
+    createVerify("RSA-SHA256")
+      .update(`${h}.${c}`)
+      .verify(publicKey, sig, "base64url"),
+  );
+  assert.equal(
+    JSON.parse(Buffer.from(c, "base64url")).iss,
+    "svc@proj.iam.gserviceaccount.com",
+  );
+  const sent = calls.filter((x) => x.url.includes("fcm.googleapis.com"));
+  assert.equal(
+    sent[0].url,
+    "https://fcm.googleapis.com/v1/projects/hrms-proj/messages:send",
+  );
+  assert.equal(sent[0].init.headers.Authorization, "Bearer ACCESS");
+  assert.deepEqual(JSON.parse(sent[0].init.body).message.notification, {
+    title: "Your leave request was approved",
+  });
+  // The unregistered phone was forgotten; the Google token is reused.
+  assert.deepEqual(
+    (
+      await db.prepare("SELECT token FROM push_tokens ORDER BY token").all()
+    ).map((r) => r.token),
+    ["tok-a1", "tok-b"],
+  );
+  await push([b], { title: "Hi" });
+  assert.equal(
+    calls.filter((x) => x.url.includes("oauth2")).length,
+    1,
+    "one sign-in serves later sends",
+  );
+  // Without the setting, nothing is sent.
+  const off = createPush({ db }, {}, fake);
+  assert.equal(await off([a], { title: "x" }), 0);
+  assert.equal(
+    await createPush(
+      { db },
+      { FCM_SERVICE_ACCOUNT: "not json" },
+      fake,
+    )([a], { title: "x" }),
+    0,
+  );
+});
+
+test("phones register and unregister their push token", async (t) => {
+  const w = await world(t);
+  const { call, people, db } = w;
+  assert.equal(
+    (
+      await call(
+        "/push/register",
+        { token: "short-token-1", platform: "android" },
+        people.emp.token,
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    (
+      await call(
+        "/push/register",
+        { token: "short-token-1", platform: "android" },
+        people.emp.token,
+      )
+    ).status,
+    200,
+    "idempotent",
+  );
+  assert.equal(
+    (
+      await call(
+        "/push/register",
+        { token: "x", platform: "windows" },
+        people.emp.token,
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (await db.prepare("SELECT COUNT(*) n FROM push_tokens").get()).n,
+    1,
+  );
+  // The same phone signed in by someone else takes the token over.
+  assert.equal(
+    (
+      await call(
+        "/push/register",
+        { token: "short-token-1", platform: "android" },
+        people.mgr.token,
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    (await db.prepare("SELECT user_id FROM push_tokens").get()).user_id,
+    people.mgr.id,
+  );
+  assert.equal(
+    (
+      await call(
+        "/push/unregister",
+        { token: "short-token-1" },
+        people.emp.token,
+      )
+    ).status,
+    200,
+    "not theirs now: nothing removed",
+  );
+  assert.equal(
+    (await db.prepare("SELECT COUNT(*) n FROM push_tokens").get()).n,
+    1,
+  );
+  assert.equal(
+    (
+      await call(
+        "/push/unregister",
+        { token: "short-token-1" },
+        people.mgr.token,
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    (await db.prepare("SELECT COUNT(*) n FROM push_tokens").get()).n,
+    0,
+  );
+});

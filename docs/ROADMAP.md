@@ -84,4 +84,6 @@ Also done: attendance import, minimum app version, PF/ESI challans, Labour Welfa
 
 Also done: rosters.
 
-Still to do: phone push, customisable dashboard, LMS content, live biometric device connection (see `docs/COMPARISON.md`).
+Also done: Android push (iPhone needs a paid Apple account).
+
+Still to do: customisable dashboard, LMS content, live biometric device connection (see `docs/COMPARISON.md`).

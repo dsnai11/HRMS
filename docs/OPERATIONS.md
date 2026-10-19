@@ -18,6 +18,19 @@ Phones keep their session for 30 days, so the morning is not a rush of sign-ins 
 - **Secrets:** `DATA_ENCRYPTION_KEY` (required for payroll identity data and two-factor), `RESEND_API_KEY` and `MAIL_FROM` (optional, for email), `SETUP_TOKEN` (remove after the first administrator exists). Rotate the database password after setup.
 - **Limits:** `LOGIN_IP_LIMIT` (default 5000 sign-in attempts per address per 15 minutes; an office behind one address needs this above its headcount) and the per-email limit of 10 per 15 minutes.
 
+## Phone push notifications (Android)
+
+Every notification that reaches the in-app bell can also be pushed to the person's Android phone. It uses Firebase Cloud Messaging and is off until you set it up; nothing breaks without it.
+
+1. In the Firebase console (free) create a project, then **Add app → Android** with the package name `com.laxmiindia.hrms` (or your `ANDROID_PACKAGE`).
+2. Download `google-services.json`. In GitHub: **Settings → Secrets and variables → Actions → New repository secret** named `GOOGLE_SERVICES_JSON`, value = the whole file. The next Android build includes it.
+3. In Firebase: **Project settings → Service accounts → Generate new private key**. Paste the downloaded JSON, as one value, into a Render environment variable named `FCM_SERVICE_ACCOUNT`. Keep that file private; anyone with it can send notifications as your app.
+4. Build and install the new APK. The app asks for notification permission after sign-in.
+
+**iPhone:** apps installed through Sideloadly with a free Apple ID cannot receive push (Apple requires a paid developer account for push). iPhone users still see everything in the in-app bell and the Alerts tab, which refresh when the app opens. Paid-account push would need an Apple key added in Firebase and a signed build.
+
+Push is best effort: a failed send is logged and never blocks the action. Phones that uninstall the app are forgotten automatically.
+
 ## Known limits
 
 - One application instance. The write queue and the sign-in/rate-limit counters live in memory, so running two instances would lose the ordering guarantee. Scaling out needs the write ordering moved into the database (row locks or advisory locks) and the counters moved to a shared store.

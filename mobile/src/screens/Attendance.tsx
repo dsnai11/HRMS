@@ -22,6 +22,7 @@ import * as Device from "expo-device";
 import * as Crypto from "expo-crypto";
 import Constants from "expo-constants";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import * as Notifications from "expo-notifications";
 import More from "./More";
 type User = { name: string; role: string; must_change_password: boolean };
 type Shift = {
@@ -41,6 +42,14 @@ type Profile = {
   todayShift: Shift | null;
   device: { status: "pending" | "approved" | "revoked" } | null;
 };
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
 const API = (process.env.EXPO_PUBLIC_API_URL || "").replace(/\/$/, "");
 const KEY = "laxmi.hrms.session";
 const DEVICE_ID_KEY = "laxmi.hrms.device-id";
@@ -74,6 +83,8 @@ export default function Attendance() {
   const [token, setToken] = useState<string | null>(null),
     sessionRef = useRef<string | null>(null),
     locked = useRef(false),
+    pushToken = useRef<string | null>(null),
+    pushRegistered = useRef(false),
     identity = useRef<Identity | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null),
     [shifts, setShifts] = useState<Shift[]>([]);
@@ -192,13 +203,43 @@ export default function Attendance() {
       clearTimeout(timer);
     }
   }
+  // Android only: registers this phone for push. Quietly does nothing when the app was
+  // built without Firebase, or the person declines notifications.
+  async function registerPush(session: string) {
+    if (Platform.OS !== "android") return;
+    try {
+      await Notifications.setNotificationChannelAsync("default", {
+        name: "HR updates",
+        importance: Notifications.AndroidImportance.DEFAULT,
+      });
+      let granted = (await Notifications.getPermissionsAsync()).granted;
+      if (!granted)
+        granted = (await Notifications.requestPermissionsAsync()).granted;
+      if (!granted) return;
+      const { data } = await Notifications.getDevicePushTokenAsync();
+      if (typeof data !== "string" || !data) return;
+      pushToken.current = data;
+      await api(
+        "/push/register",
+        { token: data, platform: "android" },
+        session,
+      );
+    } catch {
+      /* push is a convenience; the in-app alerts still work */
+    }
+  }
   async function refresh(session = sessionRef.current) {
     if (!session) return;
     const p = await api<Profile>("/me", undefined, session);
     setProfile(p);
     setRefreshedAt(Date.now());
-    if (!p.user.must_change_password && p.user.role !== "super_admin")
+    if (!p.user.must_change_password && p.user.role !== "super_admin") {
       setShifts(await api<Shift[]>("/shifts", undefined, session));
+      if (!pushRegistered.current) {
+        pushRegistered.current = true;
+        void registerPush(session);
+      }
+    }
   }
   async function run(fn: () => Promise<void>) {
     if (locked.current) return;
@@ -289,6 +330,11 @@ export default function Attendance() {
     });
   const logout = () =>
     run(async () => {
+      if (pushToken.current)
+        await api("/push/unregister", { token: pushToken.current }).catch(
+          () => {},
+        );
+      pushRegistered.current = false;
       await api("/logout", {});
       await clearSession();
     });

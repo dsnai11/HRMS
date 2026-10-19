@@ -71,6 +71,8 @@ export function createNotifier(app, env = process.env) {
           sendMail({ id: outbox, to_email: u.email, subject, body });
         }
       }
+      // Phone push, not awaited: the request should not wait on Google.
+      if (n.inApp !== false && app.push) void app.push(ids, n);
     } catch (e) {
       console.error("notify failed:", e.message);
     }
