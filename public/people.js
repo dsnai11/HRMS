@@ -17,7 +17,7 @@ async function directoryPage(id) {
     const box = document.querySelector("#dir-list");
     if (!box) return; // the person moved to another page while the search ran
     box.innerHTML = list.length
-      ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Designation</th><th>Department</th><th>Branch</th><th>Contact</th></tr></thead><tbody>${list.map((p) => `<tr><td><div class="person"><span class="avatar">${initials(p.name)}</span><div>${esc(p.name)}<small>${esc(p.employee_code || "")}</small></div></div></td><td>${esc(p.designation_name || "—")}</td><td>${esc(p.department_name || "—")}</td><td>${esc(p.branch_name || "—")}</td><td>${p.phone ? `<a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : ""}<small>${esc(p.email)}</small></td></tr>`).join("")}</tbody></table></div>`
+      ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Designation</th><th>Department</th><th>Branch</th><th>Contact</th></tr></thead><tbody>${list.map((p) => `<tr><td><div class="person"><span class="avatar">${initials(p.name)}</span><div>${esc(p.name)}<small>${esc(p.employee_code || "")}</small></div></div></td><td>${esc(p.designation_name || "—")}</td><td>${esc(p.department_name || "—")}</td><td>${esc(p.branch_name || "—")}</td><td>${p.phone ? `<a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : ""}<small>${esc(p.email ?? "")}</small>${p.email || p.phone ? "" : '<small class="muted">Visible to HR and their manager</small>'}</td></tr>`).join("")}</tbody></table></div>`
       : empty("Nobody found", "Try a different search.");
   };
   draw(rows);

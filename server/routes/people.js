@@ -40,16 +40,26 @@ export function registerPeople(router, app) {
       if (query.get(key))
         (where.push(`u.${key}=?`),
           params.push(integer(Number(query.get(key)))));
-    return send(
-      200,
-      await db
-        .prepare(
-          `SELECT u.id,u.name,u.employee_code,u.email,u.phone,g.name designation_name,d.name department_name,b.name branch_name,m.name manager_name
+    const rows = await db
+      .prepare(
+        `SELECT u.id,u.name,u.employee_code,u.email,u.phone,u.manager_id,g.name designation_name,d.name department_name,b.name branch_name,m.name manager_name
            FROM users u LEFT JOIN designations g ON g.id=u.designation_id LEFT JOIN departments d ON d.id=u.department_id
            LEFT JOIN branches b ON b.id=u.branch_id LEFT JOIN users m ON m.id=u.manager_id
            WHERE ${where.join(" AND ")} ORDER BY u.name LIMIT 200`,
-        )
-        .all(...params),
+      )
+      .all(...params);
+    // Contact details are for HR, the person's manager chain and the person themselves.
+    const seeAll = can(user, "employees.read");
+    return send(
+      200,
+      rows.map(({ manager_id, ...p }) =>
+        seeAll ||
+        p.id === user.id ||
+        manager_id === user.id ||
+        p.id === user.manager_id
+          ? p
+          : { ...p, email: null, phone: null },
+      ),
     );
   });
 

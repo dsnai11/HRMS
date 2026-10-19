@@ -145,6 +145,16 @@ test("directory, referrals and career changes", async (t) => {
     all.some((p) => p.name === "Owner"),
     false,
   );
+  // Contact details stay private to HR, the person and their manager.
+  const hrRow = all.find((p) => p.name === "HR");
+  assert.equal(hrRow.email, null);
+  assert.equal(hrRow.phone, null);
+  assert.equal(all.find((p) => p.name === "EMP").email, "emp@example.test");
+  assert.equal(
+    (await call("/directory", undefined, hr)).data.find((p) => p.name === "EMP")
+      .email,
+    "emp@example.test",
+  );
 
   // Referral: becomes a candidate with its source, HR is told, duplicates are refused.
   const opening = (await call("/admin/openings", { title: "Clerk" }, hr)).data

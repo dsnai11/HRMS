@@ -73,7 +73,7 @@ type Person = {
   designation_name?: string | null;
   department_name?: string | null;
   phone?: string | null;
-  email: string;
+  email: string | null;
 };
 type Ticket = {
   id: number;
