@@ -413,14 +413,14 @@ export function registerPerformance(router, app) {
         kind === "course" && !(Array.isArray(b.user_ids) && b.user_ids.length)
           ? []
           : Array.isArray(b.user_ids) && b.user_ids.length
-          ? [...new Set(b.user_ids.map(integer))]
-          : (
-              await db
-                .prepare(
-                  "SELECT id FROM users WHERE company_id=? AND active=1 AND role<>'super_admin'",
-                )
-                .all(companyId)
-            ).map((r) => r.id);
+            ? [...new Set(b.user_ids.map(integer))]
+            : (
+                await db
+                  .prepare(
+                    "SELECT id FROM users WHERE company_id=? AND active=1 AND role<>'super_admin'",
+                  )
+                  .all(companyId)
+              ).map((r) => r.id);
       for (const id of ids) await owned("users", id, companyId, "employee");
       const id = await transaction(async () => {
         const id = Number(

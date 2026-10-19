@@ -39,8 +39,10 @@ const url = (v, label) => {
 export function cleanContent(b) {
   const lessons = Array.isArray(b.lessons) ? b.lessons : [];
   const questions = Array.isArray(b.questions) ? b.questions : [];
-  if (lessons.length > 30) throw new HttpError(400, "A course can have up to 30 lessons.");
-  if (questions.length > 50) throw new HttpError(400, "A quiz can have up to 50 questions.");
+  if (lessons.length > 30)
+    throw new HttpError(400, "A course can have up to 30 lessons.");
+  if (questions.length > 50)
+    throw new HttpError(400, "A quiz can have up to 50 questions.");
   return {
     lessons: lessons.map((l, i) => {
       const kind = LESSON_KINDS.includes(l?.kind) ? l.kind : "text";
@@ -56,10 +58,20 @@ export function cleanContent(b) {
     questions: questions.map((q, i) => {
       const options = Array.isArray(q?.options) ? q.options : [];
       if (options.length < 2 || options.length > 5)
-        throw new HttpError(400, `Question ${i + 1} needs 2 to 5 answer choices.`);
+        throw new HttpError(
+          400,
+          `Question ${i + 1} needs 2 to 5 answer choices.`,
+        );
       const correct = Number(q.correct);
-      if (!Number.isInteger(correct) || correct < 0 || correct >= options.length)
-        throw new HttpError(400, `Question ${i + 1}: mark which answer is correct.`);
+      if (
+        !Number.isInteger(correct) ||
+        correct < 0 ||
+        correct >= options.length
+      )
+        throw new HttpError(
+          400,
+          `Question ${i + 1}: mark which answer is correct.`,
+        );
       return {
         question: string(q?.question, `Question ${i + 1}`, 300),
         options: options.map((o) => string(o, `Question ${i + 1} choice`, 150)),
@@ -142,7 +154,8 @@ export function registerLearning(router, app) {
       due_date: r.due_date ?? r.training_due,
       pass_mark: r.pass_mark,
       attempts: r.attempts,
-      attempts_left: r.max_attempts > 0 ? Math.max(r.max_attempts - r.attempts, 0) : null,
+      attempts_left:
+        r.max_attempts > 0 ? Math.max(r.max_attempts - r.attempts, 0) : null,
       best_score: best.s,
       score: r.score,
       completed_on: r.completed_on,
@@ -197,7 +210,8 @@ export function registerLearning(router, app) {
       if (r.status === "completed")
         throw new HttpError(409, "You have already completed this course.");
       const questions = await questionsOf(r.training_id);
-      if (!questions.length) throw new HttpError(409, "This course has no quiz.");
+      if (!questions.length)
+        throw new HttpError(409, "This course has no quiz.");
       const lessons = await lessonsOf(r.training_id);
       const doneN = (
         await db
@@ -207,12 +221,17 @@ export function registerLearning(router, app) {
       if (doneN < lessons.length)
         throw new HttpError(409, "Finish all the lessons before the quiz.");
       if (r.max_attempts > 0 && r.attempts >= r.max_attempts)
-        throw new HttpError(409, "No attempts left. Ask HR to reset your attempts.");
+        throw new HttpError(
+          409,
+          "No attempts left. Ask HR to reset your attempts.",
+        );
       const answers = (await body()).answers;
       if (!Array.isArray(answers) || answers.length !== questions.length)
         throw new HttpError(400, "Answer every question.");
       const flags = questions.map((q, i) => Number(answers[i]) === q.correct);
-      const score = Math.round((flags.filter(Boolean).length / questions.length) * 100);
+      const score = Math.round(
+        (flags.filter(Boolean).length / questions.length) * 100,
+      );
       const passed = score >= r.pass_mark;
       await transaction(async () => {
         await db
@@ -240,7 +259,8 @@ export function registerLearning(router, app) {
         pass_mark: r.pass_mark,
         correct: flags,
         explanations: passed ? questions.map((q) => q.explanation) : undefined,
-        attempts_left: r.max_attempts > 0 ? Math.max(r.max_attempts - used, 0) : null,
+        attempts_left:
+          r.max_attempts > 0 ? Math.max(r.max_attempts - used, 0) : null,
       });
     },
   );
@@ -259,7 +279,10 @@ export function registerLearning(router, app) {
       )
         throw new HttpError(404, "Certificate not found.");
       if (r.status !== "completed" || !r.certificate_no)
-        throw new HttpError(409, "No certificate: the course is not completed.");
+        throw new HttpError(
+          409,
+          "No certificate: the course is not completed.",
+        );
       const company = await db
         .prepare("SELECT name FROM companies WHERE id=?")
         .get(r.company_id);
@@ -316,8 +339,12 @@ export function registerLearning(router, app) {
         );
       const c = cleanContent(await body(300_000));
       await transaction(async () => {
-        await db.prepare("DELETE FROM training_lessons WHERE training_id=?").run(t.id);
-        await db.prepare("DELETE FROM training_questions WHERE training_id=?").run(t.id);
+        await db
+          .prepare("DELETE FROM training_lessons WHERE training_id=?")
+          .run(t.id);
+        await db
+          .prepare("DELETE FROM training_questions WHERE training_id=?")
+          .run(t.id);
         for (const [i, l] of c.lessons.entries())
           await db
             .prepare(
@@ -329,14 +356,24 @@ export function registerLearning(router, app) {
             .prepare(
               "INSERT INTO training_questions(training_id,position,question,options,correct,explanation) VALUES(?,?,?,?,?,?)",
             )
-            .run(t.id, i + 1, q.question, JSON.stringify(q.options), q.correct, q.explanation);
+            .run(
+              t.id,
+              i + 1,
+              q.question,
+              JSON.stringify(q.options),
+              q.correct,
+              q.explanation,
+            );
         await audit("course_content_saved", {
           id: t.id,
           lessons: c.lessons.length,
           questions: c.questions.length,
         });
       });
-      return send(200, { lessons: c.lessons.length, questions: c.questions.length });
+      return send(200, {
+        lessons: c.lessons.length,
+        questions: c.questions.length,
+      });
     },
   );
   router.patch(
@@ -347,21 +384,29 @@ export function registerLearning(router, app) {
       const b = await body();
       const set = {};
       if (b.description !== undefined)
-        set.description = optionalString(b.description, "Description", 1000) || null;
+        set.description =
+          optionalString(b.description, "Description", 1000) || null;
       if (b.pass_mark !== undefined)
         set.pass_mark = Math.round(number(b.pass_mark, "Pass mark", 1, 100));
       if (b.max_attempts !== undefined)
-        set.max_attempts = Math.round(number(b.max_attempts, "Attempts", 0, 20));
+        set.max_attempts = Math.round(
+          number(b.max_attempts, "Attempts", 0, 20),
+        );
       if (b.auto_assign !== undefined) set.auto_assign = b.auto_assign ? 1 : 0;
       if (b.due_days !== undefined)
-        set.due_days = Math.round(number(b.due_days, "Days to complete", 1, 365));
+        set.due_days = Math.round(
+          number(b.due_days, "Days to complete", 1, 365),
+        );
       if (b.mandatory !== undefined) set.mandatory = b.mandatory ? 1 : 0;
       if (b.active !== undefined) set.active = b.active ? 1 : 0;
-      if (b.due_date !== undefined) set.due_date = isoDate(b.due_date, "Due date");
+      if (b.due_date !== undefined)
+        set.due_date = isoDate(b.due_date, "Due date");
       const keys = Object.keys(set);
       if (!keys.length) throw new HttpError(400, "Nothing to change.");
       await db
-        .prepare(`UPDATE trainings SET ${keys.map((k) => `${k}=?`).join(",")} WHERE id=?`)
+        .prepare(
+          `UPDATE trainings SET ${keys.map((k) => `${k}=?`).join(",")} WHERE id=?`,
+        )
         .run(...keys.map((k) => set[k]), t.id);
       await audit("course_updated", { id: t.id, fields: keys });
       return send(200, { ok: true });
@@ -376,10 +421,16 @@ export function registerLearning(router, app) {
       if (t.kind === "course") {
         const n = (
           await db
-            .prepare("SELECT COUNT(*) n FROM training_lessons WHERE training_id=?")
+            .prepare(
+              "SELECT COUNT(*) n FROM training_lessons WHERE training_id=?",
+            )
             .get(t.id)
         ).n;
-        if (!n) throw new HttpError(409, "Add at least one lesson before assigning the course.");
+        if (!n)
+          throw new HttpError(
+            409,
+            "Add at least one lesson before assigning the course.",
+          );
       }
       const b = await body();
       const ids =
@@ -426,7 +477,9 @@ export function registerLearning(router, app) {
         .get(integer(Number(params.id)));
       if (!r || r.company_id !== companyId)
         throw new HttpError(404, "Training record not found.");
-      await db.prepare("UPDATE training_records SET attempts=0 WHERE id=?").run(r.id);
+      await db
+        .prepare("UPDATE training_records SET attempts=0 WHERE id=?")
+        .run(r.id);
       await audit("training_attempts_reset", { id: r.id });
       return send(200, { ok: true });
     },

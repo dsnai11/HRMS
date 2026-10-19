@@ -194,16 +194,13 @@ async function performancePage(id) {
     mine: "My goals & reviews",
     ...(me.is_manager ? { team: "My team's reviews" } : {}),
     feedback: "Feedback",
-    training: "Training",
-    ...(manage
-      ? { cycles: "Review cycles", trainings: "Manage training", kras: "KRAs" }
-      : {}),
+    ...(manage ? { cycles: "Review cycles", kras: "KRAs" } : {}),
   };
   if (!tabs[perfTab]) perfTab = "mine";
   const html = await perfHtml(perfTab);
   if (id !== renderId) return;
   document.querySelector("#content").innerHTML =
-    heading("Performance", "Goals, reviews and training.") +
+    heading("Performance", "Goals, reviews and feedback.") +
     `<div class="tabbar">${Object.entries(tabs)
       .map(
         ([k, l]) =>
