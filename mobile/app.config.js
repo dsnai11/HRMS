@@ -22,6 +22,14 @@ module.exports = {
       "expo-router",
       "expo-secure-store",
       [
+        "expo-camera",
+        {
+          cameraPermission:
+            "The camera is used only to take a selfie when you punch in or out, if your company requires it.",
+          recordAudioAndroid: false,
+        },
+      ],
+      [
         "expo-location",
         {
           locationWhenInUsePermission:

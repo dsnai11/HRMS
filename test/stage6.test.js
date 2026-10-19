@@ -577,3 +577,49 @@ test("selfie at punch is required when the company asks, stored and viewable by 
     403,
   );
 });
+
+test("old punch selfies are purged but the punch stays", async (t) => {
+  const { purgeOldSelfies } = await import("../server/retention.js");
+  const w = await world(t);
+  const { db, people } = w;
+  const shift = Number(
+    (
+      await db
+        .prepare(
+          "INSERT INTO shifts(user_id,workplace_id,workplace_name,site_latitude,site_longitude,radius,max_accuracy,in_at,in_latitude,in_longitude,in_accuracy) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        )
+        .run(
+          people.emp.id,
+          w.site,
+          "Office",
+          26.9,
+          75.8,
+          150,
+          50,
+          "2026-01-01T04:00:00.000Z",
+          26.9,
+          75.8,
+          10,
+        )
+    ).lastInsertRowid,
+  );
+  await db
+    .prepare(
+      "INSERT INTO punch_photos(shift_id,kind,data,created_at) VALUES(?,?,?,?)",
+    )
+    .run(shift, "in", "AAAA", "2026-01-01T04:00:00.000Z");
+  await db
+    .prepare(
+      "INSERT INTO punch_photos(shift_id,kind,data,created_at) VALUES(?,?,?,?)",
+    )
+    .run(shift, "out", "AAAA", "2026-10-20T04:00:00.000Z");
+  assert.equal(
+    await purgeOldSelfies(db, 90, Date.parse("2026-11-05T00:00:00Z")),
+    1,
+  );
+  assert.equal(
+    (await db.prepare("SELECT COUNT(*) n FROM punch_photos").get()).n,
+    1,
+  );
+  assert.equal((await db.prepare("SELECT COUNT(*) n FROM shifts").get()).n, 1);
+});

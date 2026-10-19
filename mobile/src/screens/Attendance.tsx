@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   AppState,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -20,6 +21,8 @@ import * as SecureStore from "expo-secure-store";
 import * as Device from "expo-device";
 import * as Crypto from "expo-crypto";
 import Constants from "expo-constants";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import More from "./More";
 type User = { name: string; role: string; must_change_password: boolean };
 type Shift = {
   id: number;
@@ -32,6 +35,7 @@ type Shift = {
 };
 type Profile = {
   user: User;
+  company?: { id: number; name: string; require_selfie?: boolean } | null;
   workplace: { name: string; radius: number } | null;
   openShift: Shift | null;
   todayShift: Shift | null;
@@ -82,7 +86,37 @@ export default function Attendance() {
   const [changing, setChanging] = useState(false),
     [message, setMessage] = useState(""),
     [timezone, setTimezone] = useState("Asia/Kolkata"),
-    [history, setHistory] = useState(false);
+    [history, setHistory] = useState(false),
+    [more, setMore] = useState(false);
+  const [cameraPermission, requestCamera] = useCameraPermissions();
+  const selfieResolver = useRef<((photo: string | null) => void) | null>(null);
+  const cameraRef = useRef<CameraView | null>(null);
+  const [selfieOpen, setSelfieOpen] = useState(false);
+  // Resolves with a small JPEG (base64) or null if the person cancels.
+  async function takeSelfie(): Promise<string | null> {
+    if (!cameraPermission?.granted && !(await requestCamera()).granted)
+      throw new Error(
+        "Allow camera access in phone settings to take the selfie.",
+      );
+    setSelfieOpen(true);
+    return new Promise((resolve) => {
+      selfieResolver.current = resolve;
+    });
+  }
+  async function captureSelfie() {
+    const photo = await cameraRef.current?.takePictureAsync({
+      quality: 0.25,
+      base64: true,
+      skipProcessing: true,
+      shutterSound: false,
+    });
+    setSelfieOpen(false);
+    selfieResolver.current?.(photo?.base64 ?? null);
+  }
+  function cancelSelfie() {
+    setSelfieOpen(false);
+    selfieResolver.current?.(null);
+  }
   // The phone's identity survives sign-out: the administrator approves this
   // specific phone once, and the secret proves later requests come from it.
   async function loadIdentity(): Promise<Identity> {
@@ -111,6 +145,7 @@ export default function Attendance() {
     path: string,
     body?: object,
     session = sessionRef.current,
+    method?: string,
   ): Promise<T> {
     if (
       !API ||
@@ -134,7 +169,12 @@ export default function Attendance() {
               }
             : {}),
         },
-        ...(body ? { method: "POST", body: JSON.stringify(body) } : {}),
+        ...(body || method
+          ? {
+              method: method ?? "POST",
+              ...(body ? { body: JSON.stringify(body) } : {}),
+            }
+          : {}),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -306,6 +346,12 @@ export default function Attendance() {
         ))
       )
         return;
+      let selfie: string | undefined;
+      if (current.company?.require_selfie) {
+        const photo = await takeSelfie();
+        if (!photo) throw new Error("A selfie is needed to punch.");
+        selfie = photo;
+      }
       const permission = await Location.requestForegroundPermissionsAsync();
       if (permission.status !== "granted")
         throw new Error(
@@ -339,6 +385,7 @@ export default function Attendance() {
       try {
         await api("/punch", {
           action,
+          ...(selfie ? { selfie } : {}),
           location: {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
@@ -366,12 +413,36 @@ export default function Attendance() {
           : "You are punched out. Your working hours are saved.",
       );
     });
+  const moreApi = useMemo(
+    () =>
+      <T,>(path: string, body?: object, method?: string) =>
+        api<T>(path, body, sessionRef.current, method),
+    // api reads only refs and state setters, so the first one stays valid.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
   const open = profile?.openShift,
     done = profile?.todayShift;
   const passwordScreen = profile?.user.must_change_password || changing;
   return (
     <SafeAreaView style={s.safe}>
       <StatusBar style="dark" />
+      <Modal
+        visible={selfieOpen}
+        animationType="slide"
+        onRequestClose={cancelSelfie}
+      >
+        <View style={{ flex: 1, backgroundColor: "#000" }}>
+          <CameraView ref={cameraRef} style={{ flex: 1 }} facing="front" />
+          <View style={{ padding: 20, gap: 12, backgroundColor: "#000" }}>
+            <Text style={{ color: "#fff", textAlign: "center" }}>
+              Face the camera and tap Take selfie.
+            </Text>
+            <Button title="Take selfie" onPress={() => void captureSelfie()} />
+            <Button title="Cancel" secondary onPress={cancelSelfie} />
+          </View>
+        </View>
+      </Modal>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -429,6 +500,21 @@ export default function Attendance() {
                   title={busy ? "Signing in…" : "Sign in →"}
                   onPress={login}
                   disabled={busy || !email || !password}
+                />
+                <Button
+                  title="Forgot password?"
+                  secondary
+                  disabled={busy || !email}
+                  onPress={() =>
+                    run(async () => {
+                      const r = await api<{ message: string }>(
+                        "/forgot-password",
+                        { email: email.trim() },
+                        null,
+                      );
+                      setMessage(r.message);
+                    })
+                  }
                 />
               </View>
               <Text style={s.note}>
@@ -524,16 +610,33 @@ export default function Attendance() {
               <View style={s.tabs}>
                 <Button
                   title="Today"
-                  secondary={history}
-                  onPress={() => setHistory(false)}
+                  secondary={history || more}
+                  onPress={() => {
+                    setHistory(false);
+                    setMore(false);
+                  }}
                 />
                 <Button
-                  title="My history"
-                  secondary={!history}
-                  onPress={() => setHistory(true)}
+                  title="History"
+                  secondary={!history || more}
+                  onPress={() => {
+                    setHistory(true);
+                    setMore(false);
+                  }}
+                />
+                <Button
+                  title="More"
+                  secondary={!more}
+                  onPress={() => setMore(true)}
                 />
               </View>
-              {!history ? (
+              {more ? (
+                <More
+                  api={moreApi}
+                  onSignOut={() => void logout()}
+                  onPassword={() => setChanging(true)}
+                />
+              ) : !history ? (
                 <View style={s.card}>
                   <Text style={s.badge}>
                     {open

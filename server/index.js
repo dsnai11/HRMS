@@ -27,6 +27,7 @@ import { registerPeople } from "./routes/people.js";
 import { registerSecurity } from "./routes/security.js";
 import { registerEngagement } from "./routes/engagement.js";
 import { registerInsights } from "./routes/insights.js";
+import { scheduleRetention } from "./retention.js";
 import { createNotifier, notifyFromAudit } from "./notify.js";
 
 const publicDir = new URL("../public/", import.meta.url);
@@ -305,6 +306,7 @@ export function createApp({
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { server, db } = createApp({ db: await openConfiguredDatabase() });
+  scheduleRetention(db);
   server.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () =>
     console.log(`HRMS listening on port ${process.env.PORT || 3000}`),
   );

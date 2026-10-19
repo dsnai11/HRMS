@@ -178,11 +178,14 @@ export function registerAuth(router, app) {
     { allowTemp: true },
     async ({ req, user, companyId, send }) => {
       const company = await db
-        .prepare("SELECT id,name FROM companies WHERE id=?")
+        .prepare("SELECT id,name,require_selfie FROM companies WHERE id=?")
         .get(companyId);
       return send(200, {
         user: safeUser(user),
-        company,
+        company: company && {
+          ...company,
+          require_selfie: Boolean(company.require_selfie),
+        },
         permissions: permissionsFor(user.role),
         is_manager: Boolean(
           await db
