@@ -17,6 +17,13 @@ export function passwordMatches(password, encoded) {
     Buffer.from(hash, "hex"),
   );
 }
+export async function passwordHashAsync(password) {
+  const salt = randomBytes(16).toString("hex");
+  const key = await new Promise((resolve, reject) =>
+    scrypt(password, salt, 64, (err, k) => (err ? reject(err) : resolve(k))),
+  );
+  return `${salt}:${key.toString("hex")}`;
+}
 // Same check without blocking the event loop: scrypt runs on the thread pool, so a
 // burst of sign-ins does not stall punches and other requests.
 export async function passwordMatchesAsync(password, encoded) {

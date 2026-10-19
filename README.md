@@ -91,6 +91,7 @@ See `docs/COMPARISON.md` for how this lines up with Addetto HRMS.
 - **Forgot password.** Emails a one-hour link (needs `RESEND_API_KEY`, `MAIL_FROM` and `APP_URL`); the answer never reveals whether an address has an account. Without email, HR resets passwords.
 - **Annual tax statement** for each employee on the Payslips page.
 - **Customisable Insights:** each person chooses which widgets to show and their order; new widgets show birthdays and work anniversaries for the next 30 days (never the birth year) and people who joined in the last 30 days.
+- **Bulk import** from CSV: employees (Employees page; names are matched to existing departments, designations, branches; each person gets a one-time temporary password you download) and salaries (Payroll → Salaries). Both show a dry run first and send large files in chunks.
 - **Android push notifications** for everything the bell shows, through Firebase (setup in `docs/OPERATIONS.md`). iPhones installed with a free Apple ID cannot receive push; they use the in-app alerts.
 - **Attendance import** from a biometric machine or another system (Workplaces → Import attendance): CSV with a dry run, skips days that already have attendance, applies the late and early rules. **Minimum app version** to refuse punches from old apps.
 - **Challan summaries** for PF (A/c 01, 02, 10, 21) and ESI, a **Labour Welfare Fund** rule per state (you enter the state's current figures and months), shown on the payroll register.
@@ -151,7 +152,7 @@ Before moving to paid production, review the existing mobile audit findings, tes
 
 References: [Render free-service limits](https://render.com/docs/free), [Render Blueprint configuration](https://render.com/docs/blueprint-spec), [Neon](https://neon.com).
 
-See `docs/OPERATIONS.md` for capacity, backups, the restore drill and monitoring.
+See `docs/PILOT.md` for how to run a trial with real people, and `docs/OPERATIONS.md` for capacity, backups, the restore drill and monitoring.
 
 ## Android and iPhone
 
