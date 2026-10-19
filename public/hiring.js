@@ -108,11 +108,13 @@ async function hiringTabHtml(tab) {
     }</div>`;
   }
   if (tab === "onboarding") {
-    const [people, template] = await Promise.all([
+    const [people, template, pipeline, probation] = await Promise.all([
       api("/admin/onboarding"),
       api("/admin/onboarding/template"),
+      api("/admin/onboarding/joiners"),
+      has("changes.manage") ? api("/admin/probation") : [],
     ]);
-    return `<div class="card"><h2>New joiners</h2>${
+    return `${joiningSoonCard(pipeline.pending)}${probationCard(probation)}<div class="card"><h2>New joiners</h2>${
       people.length
         ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Joining</th><th>Progress</th><th>Overdue</th><th></th></tr></thead><tbody>${people.map((p) => `<tr><td>${esc(p.name)}<small>${esc(p.employee_code || "")}</small></td><td>${fmtDate(p.date_of_joining)}</td><td>${p.done || 0} of ${p.total}</td><td>${p.overdue ? `<span class="pill">${p.overdue}</span>` : "—"}</td><td><button class="secondary" data-onboard="${p.id}" data-name="${esc(p.name)}">Checklist</button></td></tr>`).join("")}</tbody></table></div>`
         : empty(
@@ -170,6 +172,8 @@ async function hiringWire(tab) {
     on("#new-cand", () => candidateDialogNew(null));
     each("[data-cand]", (b) => candidateView(Number(b.dataset.cand)));
   } else if (tab === "onboarding") {
+    each("[data-pre-cand]", (b) => candidateView(Number(b.dataset.preCand)));
+    probationWire();
     each("[data-onboard]", (b) =>
       onboardingDialog(Number(b.dataset.onboard), b.dataset.name),
     );
@@ -293,6 +297,10 @@ async function candidateView(id) {
   const offer = c.offers.find((o) =>
     ["draft", "sent", "accepted"].includes(o.status),
   );
+  const pre =
+    !c.user_id && c.offers.some((o) => ["sent", "accepted"].includes(o.status))
+      ? await api(`/admin/candidates/${id}/preboarding`)
+      : null;
   const html = `<p class="muted">${esc(c.email || "")} ${esc(c.phone || "")} · ${esc(c.opening_title || "No opening")} · ${stagePill(c.stage)}${c.user_id ? " · now an employee" : ""}</p>${c.notes ? `<p>${esc(c.notes)}</p>` : ""}${c.resume_url ? `<p><a href="${esc(c.resume_url)}" target="_blank" rel="noopener noreferrer">Resume</a></p>` : ""}
     ${
       live
@@ -309,6 +317,7 @@ async function candidateView(id) {
     }
     <h3>Interviews</h3>${c.interviews.length ? c.interviews.map((i) => `<div class="activity"><strong>${esc(i.round_name)}</strong> · ${esc(i.interviewer_name)} · ${new Date(i.scheduled_at).toLocaleString("en-IN")} · ${esc(i.status)}${i.rating ? `<br><small>${i.rating}/5 · ${REC[i.recommendation]} · ${esc(i.feedback || "")}</small>` : ""}${i.status === "scheduled" ? ` <button class="ghost" data-cancel-iv="${i.id}">Cancel</button>` : ""}</div>`).join("") : '<p class="muted">None yet.</p>'}
     <h3>Offers</h3>${c.offers.length ? c.offers.map((o) => `<div class="activity"><strong>${esc(o.designation)}</strong> · ${inr(o.monthly_gross)} a month · joins ${fmtDate(o.joining_date)} · ${OFFER_STATUS[o.status]}<br>${o.status === "draft" ? `<button class="ghost" data-offer="${o.id}" data-st="sent">Mark as sent</button>` : ""}${o.status === "sent" ? `<button class="ghost" data-offer="${o.id}" data-st="accepted">Accepted</button><button class="ghost" data-offer="${o.id}" data-st="declined">Declined</button>` : ""}${["draft", "sent", "accepted"].includes(o.status) && !c.user_id ? `<button class="ghost" data-offer="${o.id}" data-st="withdrawn">Withdraw</button>` : ""} <a class="button secondary" href="/letter.html?type=offer&id=${o.id}" target="_blank" rel="noopener">Offer letter</a></div>`).join("") : '<p class="muted">None yet.</p>'}
+    ${pre ? preboardingPanel(pre) : ""}
     ${offer?.status === "accepted" && !c.user_id ? '<div class="actions spaced"><button id="hire">Hire and create the employee</button></div>' : ""}
     <h3>History</h3>${c.events.map((e) => `<div class="activity"><small>${time(e.created_at)} · ${esc(e.kind.replaceAll("_", " "))}${e.detail ? ` · ${esc(e.detail)}` : ""}${e.actor_name ? ` · ${esc(e.actor_name)}` : ""}</small></div>`).join("")}`;
   viewDialog(c.name, html);
@@ -347,6 +356,7 @@ async function candidateView(id) {
           render();
         })),
   );
+  wirePreboarding(id, pre, reopen);
   on("#reject", () =>
     dialog(
       "Close this candidate",
@@ -389,9 +399,10 @@ async function candidateView(id) {
   on("#new-offer", () =>
     dialog(
       "Make an offer",
-      `${input("designation", "Designation", "", "required maxlength=100")}${input("monthly_gross", "Monthly gross (₹)", "", 'type="number" min="1" required')}${input("joining_date", "Joining date", "", 'type="date" required')}${input("valid_until", "Offer valid until", "", 'type="date"')}<label class="full">Note for the letter<input name="note" maxlength="1000"></label>`,
+      `${input("designation", "Designation", "", "required maxlength=100")}${input("monthly_gross", "Monthly gross (₹)", "", 'type="number" min="1" required')}${input("joining_date", "Joining date", "", 'type="date" required')}${input("valid_until", "Offer valid until", "", 'type="date"')}${input("probation_months", "Probation (months)", 6, 'type="number" min="0" max="24"')}<label class="full">Note for the letter<input name="note" maxlength="1000"></label>`,
       async (b) => {
         await api(`/admin/candidates/${id}/offers`, {
+          probation_months: Number(b.probation_months),
           designation: b.designation,
           monthly_gross: Number(b.monthly_gross),
           joining_date: b.joining_date,
@@ -410,7 +421,7 @@ async function candidateView(id) {
     ] = await Promise.all([api("/admin/org"), peopleList()]);
     dialog(
       "Hire " + c.name,
-      `${input("email", "Login email", c.email || "", 'type="email" required')}${input("password", "Temporary password", "", 'type="password" minlength="10" required')}<label>Workplace (for punching)<select name="workplace_id">${options(sites, null)}</select></label><label>Department<select name="department_id">${options(deps, null)}</select></label><label>Branch<select name="branch_id">${options(branches, null)}</select></label><label>Designation<select name="designation_id">${options(desigs, null)}</select></label><label>Reporting manager<select name="manager_id">${options(people, null)}</select></label>${sel(
+      `${input("email", "Login email", c.email || "", 'type="email" required')}${input("password", "Temporary password", "", 'type="password" minlength="10" required')}<label>Workplace (for punching)<select name="workplace_id">${options(sites, null)}</select></label><label>Department<select name="department_id">${options(deps, null)}</select></label><label>Branch<select name="branch_id">${options(branches, null)}</select></label><label>Designation<select name="designation_id">${options(desigs, null)}</select></label><label>Reporting manager<select name="manager_id">${options(people, null)}</select></label><label>Onboarding buddy<select name="buddy_id">${options(people, null)}</select></label>${sel(
         "gender",
         "Gender",
         [
@@ -428,6 +439,7 @@ async function candidateView(id) {
           "branch_id",
           "designation_id",
           "manager_id",
+          "buddy_id",
         ])
           if (b[k]) body[k] = Number(b[k]);
         if (b.gender) body.gender = b.gender;
@@ -438,6 +450,167 @@ async function candidateView(id) {
       },
     );
   });
+}
+
+// ---- pre-boarding, joiners and probation --------------------------------------------------
+const PRE_STATUS = {
+  invited: "Invited",
+  in_progress: "Filling in",
+  submitted: "Submitted — review",
+  verified: "Verified",
+  changes_requested: "Changes requested",
+};
+async function openFile(url) {
+  const res = await fetch(url, {
+    headers: activeCompany ? { "X-Company-Id": String(activeCompany) } : {},
+  });
+  if (!res.ok)
+    return notice(
+      (await res.json()).error || "Could not open the document.",
+      true,
+    );
+  const blobUrl = URL.createObjectURL(await res.blob());
+  window.open(blobUrl, "_blank", "noopener");
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+}
+function joiningSoonCard(rows) {
+  return `<div class="card"><div class="card-head"><div><h2>Joining soon</h2><p class="muted">Candidates with an offer out: where their offer and joining details stand.</p></div></div>${
+    rows.length
+      ? `<div class="table-wrap"><table><thead><tr><th>Candidate</th><th>Joining</th><th>Offer</th><th>Joining details</th><th>Documents</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.name)}<small>${esc(r.designation)}</small></td><td>${fmtDate(r.joining_date)}</td><td><span class="pill ${r.offer_status === "accepted" ? "" : "neutral"}">${OFFER_STATUS[r.offer_status]}</span></td><td>${r.preboarding_status ? `<span class="pill ${r.preboarding_status === "verified" ? "" : "neutral"}">${PRE_STATUS[r.preboarding_status]}</span>` : '<span class="muted">Not invited</span>'}</td><td>${r.docs ? `${r.docs_verified} of ${r.docs} verified` : "—"}</td><td><button class="secondary" data-pre-cand="${r.candidate_id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
+      : empty("Nobody waiting to join", "Offers that are sent appear here.")
+  }</div>`;
+}
+function probationCard(rows) {
+  if (!has("changes.manage")) return "";
+  return `<div class="card"><div class="card-head"><div><h2>Probation reviews</h2><p class="muted">Due within 45 days or overdue. Confirming records a confirmation and ends probation.</p></div></div>${
+    rows.length
+      ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Manager</th><th>Probation ends</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.name)}<small>${esc(r.employee_code || "")} · joined ${fmtDate(r.date_of_joining)}</small></td><td>${esc(r.manager_name || "—")}</td><td>${fmtDate(r.probation_end_date)} ${r.overdue ? '<span class="pill">Overdue</span>' : ""}</td><td><button class="secondary" data-confirm="${r.user_id}">Confirm</button> <button class="ghost" data-extend="${r.user_id}" data-name="${esc(r.name)}">Extend</button></td></tr>`).join("")}</tbody></table></div>`
+      : empty("No reviews due", "Nobody's probation ends in the next 45 days.")
+  }</div>`;
+}
+function probationWire() {
+  document.querySelectorAll("[data-confirm]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        busy(b, async () => {
+          const ch = await api("/admin/changes", {
+            user_id: Number(b.dataset.confirm),
+            kind: "confirmation",
+            effective_date: today(),
+          });
+          await api(`/admin/changes/${ch.id}/apply`, {});
+          notice("Confirmed. The employee has been told.");
+          render();
+        })),
+  );
+  document.querySelectorAll("[data-extend]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        dialog(
+          `Extend probation · ${b.dataset.name}`,
+          sel(
+            "extend_months",
+            "Extend by",
+            [1, 2, 3, 6].map((m) => [m, `${m} month${m > 1 ? "s" : ""}`]),
+          ),
+          async (f) => {
+            await api(`/admin/employees/${b.dataset.extend}/probation`, {
+              extend_months: Number(f.extend_months),
+            });
+            notice("Probation extended and the employee told.");
+          },
+        )),
+  );
+}
+function preboardingPanel(pre) {
+  if (!pre.invited)
+    return `<h3>Joining portal</h3><p class="muted">Send the candidate a private link to accept the offer, fill in their details and upload documents before day one.</p><div class="actions spaced"><button class="secondary" id="pre-invite">Invite to the joining portal</button></div>`;
+  const f = pre.form;
+  const rows = [
+    ["Date of birth", f.date_of_birth && fmtDate(f.date_of_birth)],
+    ["Gender", f.gender],
+    ["Address", f.address],
+    [
+      "Emergency contact",
+      f.emergency_name &&
+        `${f.emergency_name} · ${f.emergency_phone || ""} ${f.emergency_relation ? `(${f.emergency_relation})` : ""}`,
+    ],
+    ["PAN", pre.sensitive.pan],
+    ["UAN", pre.sensitive.uan],
+    [
+      "Bank",
+      pre.sensitive.bank_account &&
+        `${pre.sensitive.bank_name || ""} ${pre.sensitive.bank_account} · ${pre.sensitive.ifsc || ""}`,
+    ],
+  ].filter(([, v]) => v);
+  return `<h3>Joining portal</h3><p><span class="pill ${pre.status === "verified" ? "" : "neutral"}">${PRE_STATUS[pre.status]}</span> <small class="muted">${pre.last_opened_at ? `Last opened ${time(pre.last_opened_at)}` : "Not opened yet"} · link ${pre.expired ? "expired" : `valid to ${fmtDate(pre.expires_at.slice(0, 10))}`}</small></p>${pre.hr_note ? `<p class="muted">Sent back: ${esc(pre.hr_note)}</p>` : ""}${rows.map(([k, v]) => `<div class="activity"><small>${k}</small><br>${esc(v)}</div>`).join("")}${
+    pre.documents.length
+      ? `<div class="table-wrap"><table><thead><tr><th>Document</th><th>Type</th><th>Status</th><th></th></tr></thead><tbody>${pre.documents.map((d) => `<tr><td>${esc(d.name)}</td><td>${esc(d.kind.replace("_", " "))}</td><td><span class="pill ${d.verified ? "" : "neutral"}">${d.verified ? "Verified" : "Not verified"}</span></td><td><button class="secondary" data-pre-doc="${d.id}">View</button> <button class="ghost" data-pre-verify="${d.id}" data-on="${d.verified ? 0 : 1}">${d.verified ? "Unverify" : "Verify"}</button></td></tr>`).join("")}</tbody></table></div>`
+      : '<p class="muted">No documents uploaded yet.</p>'
+  }<div class="actions spaced">${pre.status === "submitted" ? '<button id="pre-approve">Approve details</button><button class="secondary" id="pre-changes">Ask for changes</button>' : ""}<button class="ghost" id="pre-invite">Send a new link</button></div>`;
+}
+function wirePreboarding(id, pre, reopen) {
+  if (!pre) return;
+  const on = (s, fn) =>
+    document.querySelector(`dialog ${s}`)?.addEventListener("click", fn);
+  on("#pre-invite", async () => {
+    const r = await api(`/admin/candidates/${id}/preboarding/invite`, {});
+    viewDialog(
+      "Joining link",
+      `<p>${r.emailed ? "The link has been emailed to the candidate. " : "Email is not set up, so send this link to the candidate yourself. "}It is valid for 30 days, and a new link replaces the old one.</p><label class="full">Link<input id="join-link" readonly value="${esc(r.link)}"></label><div class="actions spaced"><button class="secondary" id="copy-link">Copy link</button></div>`,
+    );
+    document.querySelector("dialog #copy-link").onclick = async () => {
+      document.querySelector("dialog #join-link").select();
+      await navigator.clipboard?.writeText(r.link).catch(() => {});
+      notice("Copied.");
+    };
+  });
+  document
+    .querySelectorAll("dialog [data-pre-doc]")
+    .forEach(
+      (b) =>
+        (b.onclick = () =>
+          openFile(
+            `/api/admin/preboarding/documents/${b.dataset.preDoc}/file`,
+          )),
+    );
+  document.querySelectorAll("dialog [data-pre-verify]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        busy(b, async () => {
+          await api(
+            `/admin/preboarding/documents/${b.dataset.preVerify}/verify`,
+            {
+              verified: b.dataset.on === "1",
+            },
+          );
+          await reopen();
+        })),
+  );
+  on("#pre-approve", async () => {
+    try {
+      await api(`/admin/candidates/${id}/preboarding/review`, {
+        decision: "verified",
+      });
+      notice("Details approved.");
+      await reopen();
+    } catch (e) {
+      notice(e.message, true);
+    }
+  });
+  on("#pre-changes", () =>
+    dialog(
+      "Ask for changes",
+      '<label class="full">What should the candidate correct?<input name="note" maxlength="500" required></label>',
+      async (b) => {
+        await api(`/admin/candidates/${id}/preboarding/review`, {
+          decision: "changes_requested",
+          note: b.note,
+        });
+        notice("Sent back to the candidate.");
+      },
+    ),
+  );
 }
 
 async function onboardingDialog(userId, name) {
@@ -655,10 +828,11 @@ const addDaysStr = (d, n) => {
 
 // ---- employee: my employment (onboarding, assets, exit) -----------------------------------------
 async function myEmploymentPage(id) {
-  const [tasks, assets, exit] = await Promise.all([
+  const [tasks, assets, exit, overview] = await Promise.all([
     api("/onboarding/mine"),
     api("/assets/mine"),
     api("/exit/mine"),
+    api("/employment/overview"),
   ]);
   if (id !== renderId) return;
   const x = exit.exit;
@@ -668,6 +842,9 @@ async function myEmploymentPage(id) {
       "My employment",
       "Your joining checklist, company items with you, and resignation.",
     ) +
+    (overview.probation_end_date || overview.buddy
+      ? `<div class="card"><h2>Settling in</h2>${overview.probation_end_date ? `<p>Your probation ends on <strong>${fmtDate(overview.probation_end_date)}</strong>. Your manager and HR will review it before then.</p>` : ""}${overview.buddy ? `<p>Your onboarding buddy is <strong>${esc(overview.buddy.name)}</strong>${overview.buddy.phone ? ` · ${esc(overview.buddy.phone)}` : ""}. Ask them anything.</p>` : ""}</div>`
+      : "") +
     (tasks.length
       ? `<div class="card"><h2>Joining checklist</h2>${tasks.map((t) => `<label class="check"><input type="checkbox" data-task="${t.id}" ${t.done ? "checked" : ""} ${t.owner === "employee" ? "" : "disabled"}> ${esc(t.title)} <small>${OWNER[t.owner]}${t.due_date ? ` · due ${fmtDate(t.due_date)}` : ""}</small></label>`).join("")}</div>`
       : "") +

@@ -32,6 +32,11 @@ import { registerSecurity } from "./routes/security.js";
 import { registerEngagement } from "./routes/engagement.js";
 import { registerInsights } from "./routes/insights.js";
 import { scheduleRetention } from "./retention.js";
+import { registerPreboarding } from "./routes/preboarding.js";
+import {
+  registerProbation,
+  scheduleProbationReminders,
+} from "./routes/probation.js";
 import { createPush } from "./push.js";
 import { createNotifier, notifyFromAudit } from "./notify.js";
 
@@ -47,6 +52,8 @@ const STATIC = {
   "/more.js": ["more.js", "text/javascript"],
   "/people.js": ["people.js", "text/javascript"],
   "/bulk.js": ["bulk.js", "text/javascript"],
+  "/join.html": ["join.html", "text/html"],
+  "/join.js": ["join.js", "text/javascript"],
   "/letter.html": ["letter.html", "text/html"],
   "/letter.js": ["letter.js", "text/javascript"],
   "/payslip.html": ["payslip.html", "text/html"],
@@ -139,6 +146,8 @@ export function createApp({
     registerPayrollRuns,
     registerPayrollExtras,
     registerRecruitment,
+    registerPreboarding,
+    registerProbation,
     registerExit,
     registerEngagement,
     registerSecurity,
@@ -317,11 +326,14 @@ export function createApp({
         res.end(JSON.stringify({ error: "Unable to complete request." }));
       });
   });
-  return { server, db };
+  return { server, db, app };
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const { server, db } = createApp({ db: await openConfiguredDatabase() });
+  const { server, db, app } = createApp({
+    db: await openConfiguredDatabase(),
+  });
   scheduleRetention(db);
+  scheduleProbationReminders(app);
   server.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () =>
     console.log(`HRMS listening on port ${process.env.PORT || 3000}`),
   );

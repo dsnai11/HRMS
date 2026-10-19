@@ -58,6 +58,39 @@ const PRIVATE_FIELDS = {
 };
 const SENSITIVE = ["pan", "uan", "esi_ip", "bank_account"];
 
+/** Validates the fields present in `input` and merges them over `base`; throws 400 on a bad value. */
+export function cleanPrivate(input, base = {}) {
+  const data = { ...base };
+  for (const [field, [pattern, message]] of Object.entries(PRIVATE_FIELDS)) {
+    if (input[field] === undefined) continue;
+    const free = field === "bank_name" || field === "account_holder";
+    const v =
+      typeof input[field] === "string"
+        ? free
+          ? input[field].trim()
+          : input[field].trim().toUpperCase()
+        : input[field];
+    if (v === "" || v === null) delete data[field];
+    else if (typeof v !== "string" || !pattern.test(v))
+      throw new HttpError(400, `${message}.`);
+    else data[field] = v;
+  }
+  return data;
+}
+export async function storePrivate(app, userId, companyId, data, actorId) {
+  await app.db
+    .prepare(
+      "INSERT INTO employee_private(user_id,company_id,data,updated_by,updated_at) VALUES(?,?,?,?,?) ON CONFLICT (user_id) DO UPDATE SET data=EXCLUDED.data, updated_by=EXCLUDED.updated_by, updated_at=EXCLUDED.updated_at",
+    )
+    .run(
+      userId,
+      companyId,
+      encryptJson(data, encryptionKey()),
+      actorId,
+      new Date(app.clock()).toISOString(),
+    );
+}
+
 export async function readPrivate(app, userId) {
   const key = encryptionKey();
   const row = await app.db
@@ -910,43 +943,9 @@ export function registerPayrollSetup(router, app) {
           "Personal data cannot be stored until the server has DATA_ENCRYPTION_KEY set.",
         );
       const b = await body();
-      const data = await readPrivate(app, person.id);
-      for (const [field, [pattern, message]] of Object.entries(
-        PRIVATE_FIELDS,
-      )) {
-        if (b[field] === undefined) continue;
-        const v =
-          typeof b[field] === "string"
-            ? b[field].trim().toUpperCase()
-            : b[field];
-        if (v === "" || v === null) delete data[field];
-        else if (
-          typeof v !== "string" ||
-          !pattern.test(
-            field === "bank_name" || field === "account_holder"
-              ? b[field].trim()
-              : v,
-          )
-        )
-          throw new HttpError(400, `${message}.`);
-        else
-          data[field] =
-            field === "bank_name" || field === "account_holder"
-              ? b[field].trim()
-              : v;
-      }
+      const data = cleanPrivate(b, await readPrivate(app, person.id));
       await transaction(async () => {
-        await db
-          .prepare(
-            "INSERT INTO employee_private(user_id,company_id,data,updated_by,updated_at) VALUES(?,?,?,?,?) ON CONFLICT (user_id) DO UPDATE SET data=EXCLUDED.data, updated_by=EXCLUDED.updated_by, updated_at=EXCLUDED.updated_at",
-          )
-          .run(
-            person.id,
-            companyId,
-            encryptJson(data, key),
-            user.id,
-            nowIso(app),
-          );
+        await storePrivate(app, person.id, companyId, data, user.id);
         await audit("sensitive_data_updated", {
           employeeId: person.id,
           fields: Object.keys(b).filter((k) => k in PRIVATE_FIELDS),

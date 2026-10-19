@@ -195,6 +195,12 @@ export function registerPeople(router, app) {
               .join(",")} WHERE id=?`,
           )
           .run(...Object.values(sets), person.id);
+      if (c.kind === "confirmation")
+        await db
+          .prepare(
+            "UPDATE users SET probation_end_date=NULL,probation_notified_on=NULL WHERE id=?",
+          )
+          .run(person.id);
       if (c.kind === "increment") {
         const prev = await db
           .prepare(

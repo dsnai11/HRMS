@@ -96,7 +96,7 @@ function inWords(n) {
           `<tr><td>${esc(x.name)}</td><td class="num">${inr(x.amount)}</td></tr>`,
       )
       .join("");
-  slip.innerHTML = `<article class="slip"><header><div><h1>${esc(d.company || "")}</h1><p>Payslip for ${monthLabel(d.month)}</p></div><button class="no-print" onclick="print()">Print / save as PDF</button></header>
+  slip.innerHTML = `<article class="slip"><header><div><h1>${esc(d.company || "")}</h1><p>Payslip for ${monthLabel(d.month)}</p></div><button class="no-print" id="print">Print / save as PDF</button></header>
     <table class="meta"><tr><td>Employee</td><td><strong>${esc(d.employee.name)}</strong></td><td>Employee code</td><td>${esc(d.employee.employee_code || "—")}</td></tr>
     <tr><td>Department</td><td>${esc(d.employee.department || "—")}</td><td>Designation</td><td>${esc(d.employee.designation || "—")}</td></tr>
     <tr><td>Days in month</td><td>${d.days_in_month}</td><td>Paid days</td><td>${d.paid_days}${d.lop_days ? ` (loss of pay ${d.lop_days})` : ""}</td></tr></table>
@@ -104,4 +104,5 @@ function inWords(n) {
     <table><thead><tr><th>Deductions</th><th class="num">Amount</th></tr></thead><tbody>${rows(d.deductions) || '<tr><td colspan="2">None</td></tr>'}</tbody><tfoot><tr><td>Total deductions</td><td class="num">${inr(d.total_deductions)}</td></tr></tfoot></table></div>
     <p class="net"><span>Net pay</span><strong>${inr(d.net_pay)}</strong></p><p class="words">Rupees ${esc(inWords(d.net_pay))} only</p>
     <footer>This is a computer-generated payslip.</footer></article>`;
+  slip.querySelector("#print")?.addEventListener("click", () => print());
 })();

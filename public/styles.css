@@ -1069,3 +1069,79 @@ code.secret {
   padding: 6px 0;
   border-bottom: 1px solid var(--line);
 }
+
+/* ---- joining portal (public, candidate) ---- */
+.join-wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+  display: grid;
+  gap: 18px;
+}
+.join-wrap h1 {
+  margin: 0;
+  font-size: 24px;
+}
+.join-wrap .card {
+  display: grid;
+  gap: 14px;
+}
+.join-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.join-steps li {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #edf3f0;
+  font-size: 13px;
+}
+.join-steps li.done {
+  background: var(--green);
+  color: white;
+}
+.join-letter p {
+  margin: 0 0 10px;
+  line-height: 1.7;
+}
+.join-rows {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 2fr 2fr 1fr 1fr;
+}
+.join-rows.jobs {
+  grid-template-columns: 2fr 2fr 1fr 1fr;
+}
+.join-doc {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+}
+.join-note {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #fff6e5;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.join-ok {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #e8f5ef;
+  font-size: 14px;
+  line-height: 1.6;
+}
+@media (max-width: 640px) {
+  .join-rows,
+  .join-rows.jobs,
+  .join-wrap .form-grid {
+    grid-template-columns: 1fr;
+  }
+}

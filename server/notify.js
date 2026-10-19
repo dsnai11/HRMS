@@ -31,8 +31,24 @@ export function createNotifier(app, env = process.env) {
     }
   }
 
+  /** Plain email to anyone (e.g. a candidate with no login yet); resolves false if mail is not configured. */
+  async function mail(companyId, to, subject, body) {
+    if (!mailConfigured() || !to) return false;
+    const outbox = Number(
+      (
+        await db
+          .prepare(
+            "INSERT INTO email_outbox(company_id,to_email,subject,body,created_at) VALUES(?,?,?,?,?)",
+          )
+          .run(companyId, to, subject, body, new Date(clock()).toISOString())
+      ).lastInsertRowid,
+    );
+    void sendMail({ id: outbox, to_email: to, subject, body });
+    return true;
+  }
+
   /** notify([userId…], { companyId, kind, title, body, link, email }) */
-  return async function notify(userIds, n) {
+  async function notify(userIds, n) {
     try {
       const ids = [...new Set(userIds.filter(Boolean))];
       const at = new Date(clock()).toISOString();
@@ -76,7 +92,9 @@ export function createNotifier(app, env = process.env) {
     } catch (e) {
       console.error("notify failed:", e.message);
     }
-  };
+  }
+  notify.mail = mail;
+  return notify;
 }
 
 const monthName = (m) =>

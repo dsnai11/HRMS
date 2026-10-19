@@ -11,6 +11,9 @@ import {
 import { requireOwned } from "../scope.js";
 import { can } from "../rbac.js";
 import { offerLetter } from "../letters.js";
+import { preboardingForHire } from "./preboarding.js";
+import { storePrivate } from "./payroll-setup.js";
+import { encryptionKey } from "../crypto-store.js";
 
 const STAGES = [
   "applied",
@@ -43,6 +46,17 @@ export function registerRecruitment(router, app) {
   const addDays = (d, n) => {
     const x = new Date(`${d}T00:00:00Z`);
     x.setUTCDate(x.getUTCDate() + n);
+    return x.toISOString().slice(0, 10);
+  };
+  const addMonths = (d, n) => {
+    const x = new Date(`${d}T00:00:00Z`);
+    const day = x.getUTCDate();
+    x.setUTCDate(1);
+    x.setUTCMonth(x.getUTCMonth() + n);
+    const last = new Date(
+      Date.UTC(x.getUTCFullYear(), x.getUTCMonth() + 1, 0),
+    ).getUTCDate();
+    x.setUTCDate(Math.min(day, last));
     return x.toISOString().slice(0, 10);
   };
   const owned = (table, id, companyId, label) =>
@@ -583,7 +597,7 @@ export function registerRecruitment(router, app) {
           (
             await db
               .prepare(
-                "INSERT INTO offers(company_id,candidate_id,designation,monthly_gross,joining_date,valid_until,note,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO offers(company_id,candidate_id,designation,monthly_gross,joining_date,valid_until,note,probation_months,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
               )
               .run(
                 companyId,
@@ -595,6 +609,11 @@ export function registerRecruitment(router, app) {
                 joining,
                 validUntil,
                 optionalString(b.note, "Note", 1000),
+                b.probation_months === undefined
+                  ? 6
+                  : Math.round(
+                      number(b.probation_months, "Probation months", 0, 24),
+                    ),
                 user.id,
                 nowIso(),
               )
@@ -716,6 +735,10 @@ export function registerRecruitment(router, app) {
             .prepare("SELECT * FROM job_openings WHERE id=?")
             .get(c.opening_id)
         : null;
+      const pre = await preboardingForHire(app, c.id);
+      const f = pre?.form ?? {};
+      const buddyId = optionalId(b.buddy_id, "Buddy");
+      if (buddyId) await owned("users", buddyId, companyId, "buddy");
       const userId = await transaction(async () => {
         const userId = await app.createEmployee(
           user,
@@ -724,7 +747,11 @@ export function registerRecruitment(router, app) {
             name: c.name,
             email: mail,
             password: b.password,
-            phone: c.phone ?? undefined,
+            phone: f.phone ?? c.phone ?? undefined,
+            address: f.address ?? undefined,
+            emergency_name: f.emergency_name ?? undefined,
+            emergency_phone: f.emergency_phone ?? undefined,
+            emergency_relation: f.emergency_relation ?? undefined,
             date_of_joining: offer.joining_date,
             employment_type: opening?.employment_type ?? b.employment_type,
             department_id:
@@ -734,11 +761,45 @@ export function registerRecruitment(router, app) {
               b.designation_id ?? opening?.designation_id ?? undefined,
             workplace_id: b.workplace_id,
             manager_id: b.manager_id ?? opening?.hiring_manager_id ?? undefined,
-            gender: b.gender,
-            date_of_birth: b.date_of_birth,
+            gender: b.gender ?? f.gender ?? undefined,
+            date_of_birth: b.date_of_birth ?? f.date_of_birth ?? undefined,
           },
           audit,
         );
+        await db
+          .prepare(
+            "UPDATE users SET probation_end_date=?,buddy_id=? WHERE id=?",
+          )
+          .run(
+            offer.probation_months > 0
+              ? addMonths(offer.joining_date, offer.probation_months)
+              : null,
+            buddyId ?? null,
+            userId,
+          );
+        if (pre) {
+          // What the candidate gave before joining moves onto the new employee's record.
+          for (const d of pre.documents)
+            await db
+              .prepare(
+                "INSERT INTO documents(company_id,user_id,kind,name,mime,size,data,uploaded_by,verified_by,verified_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+              )
+              .run(
+                companyId,
+                userId,
+                d.kind,
+                d.name,
+                d.mime,
+                d.size,
+                d.data,
+                user.id,
+                d.verified ? user.id : null,
+                d.verified ? nowIso() : null,
+                nowIso(),
+              );
+          if (Object.keys(pre.sensitive).length && encryptionKey())
+            await storePrivate(app, userId, companyId, pre.sensitive, user.id);
+        }
         await db
           .prepare(
             "UPDATE candidates SET stage='hired',user_id=?,updated_at=? WHERE id=?",
@@ -770,6 +831,27 @@ export function registerRecruitment(router, app) {
         await audit("candidate_hired", { id: c.id, userId });
         return userId;
       });
+      const notice = (ids, title, body) =>
+        app.notify(ids, {
+          companyId,
+          kind: "onboarding",
+          title,
+          body,
+          link: "team",
+        });
+      if (buddyId)
+        await notice(
+          [buddyId],
+          `You are ${c.name}'s onboarding buddy`,
+          `${c.name} joins on ${offer.joining_date}. Please help them settle in.`,
+        );
+      const mgr = b.manager_id ?? opening?.hiring_manager_id;
+      if (mgr)
+        await notice(
+          [mgr],
+          `${c.name} will join your team on ${offer.joining_date}`,
+          null,
+        );
       return send(201, { user_id: userId });
     },
   );
