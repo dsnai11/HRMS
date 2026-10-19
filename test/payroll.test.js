@@ -1719,3 +1719,44 @@ test("leave encashment, statutory bonus, gratuity and the statutory files", asyn
   assert.equal(liability.rows.find((r) => r.name === "E1").payable, 155769);
   assert.equal(liability.rows.find((r) => r.name === "E4").error, undefined);
 });
+
+test("PF and ESI challan summaries add up the run", async (t) => {
+  const w = await prepared(t);
+  const { call, people } = w;
+  const pay = people.pay.token;
+  const run = (await call("/admin/payroll/runs", { month: "2026-10" }, pay))
+    .data.id;
+  const csvOf = async (type) =>
+    (
+      await call(
+        `/admin/payroll/runs/${run}/export?type=${type}`,
+        undefined,
+        pay,
+      )
+    ).data
+      .replace(/^﻿/, "")
+      .split("\r\n")
+      .map((l) => l.split(",").map((c) => c.replaceAll('"', "")));
+  const esi = await csvOf("esi_challan");
+  const pf = await csvOf("pf_challan");
+  assert.deepEqual(esi[1], [
+    "2026-10",
+    "1",
+    "15484",
+    "117",
+    "504",
+    "621",
+    "2026-11-15",
+  ]);
+  assert.deepEqual(pf[1], [
+    "2026-10",
+    "3",
+    "137742",
+    "9047",
+    "4811",
+    "289",
+    "289",
+    "14436",
+    "2026-11-15",
+  ]);
+});

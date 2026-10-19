@@ -155,8 +155,20 @@ async function selfieSettingCard(id) {
   if (id !== renderId) return;
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = `<h2>Selfie at punch</h2><p class="muted">When on, the phone app asks for a selfie with every punch, and HR can see it in Attendance records. It helps against someone punching for a colleague.</p><label class="check"><input type="checkbox" id="selfie-on" ${s.require_selfie ? "checked" : ""}> Require a selfie to punch in and out</label>`;
+  card.innerHTML = `<h2>Selfie at punch</h2><p class="muted">When on, the phone app asks for a selfie with every punch, and HR can see it in Attendance records. It helps against someone punching for a colleague.</p><label class="check"><input type="checkbox" id="selfie-on" ${s.require_selfie ? "checked" : ""}> Require a selfie to punch in and out</label><div class="actions"><label>Oldest app version allowed to punch<input id="min-version" value="${esc(s.min_app_version || "")}" placeholder="e.g. 1.2.0 (blank = any)" maxlength="12"></label><button class="secondary" id="min-save">Save</button></div>`;
   document.querySelector("#content").append(card);
+  card.querySelector("#min-save").onclick = () =>
+    busy(card.querySelector("#min-save"), async () => {
+      await api(
+        "/admin/attendance-settings",
+        {
+          min_app_version:
+            card.querySelector("#min-version").value.trim() || null,
+        },
+        "PATCH",
+      );
+      notice("Saved. Phones on an older version can no longer punch.");
+    });
   card.querySelector("#selfie-on").onchange = async (e) => {
     await api(
       "/admin/attendance-settings",
@@ -306,4 +318,107 @@ async function shiftPolicyCard(id) {
       },
     );
   });
+}
+
+// ---- attendance import (biometric or another system) ---------------------------------------------------------
+function parseCsv(text) {
+  const rows = [];
+  let row = [],
+    cell = "",
+    quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') ((cell += '"'), i++);
+      else if (c === '"') quoted = false;
+      else cell += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ",") (row.push(cell), (cell = ""));
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(cell);
+      cell = "";
+      if (row.some((x) => x.trim())) rows.push(row);
+      row = [];
+    } else cell += c;
+  }
+  row.push(cell);
+  if (row.some((x) => x.trim())) rows.push(row);
+  return rows;
+}
+async function importCard(id) {
+  if (!has("attendance.import")) return;
+  if (id !== renderId) return;
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<div class="card-head"><div><h2>Import attendance</h2><p class="muted">Bring in attendance from a biometric machine or another system. Use a CSV with the columns employee_code, date (YYYY-MM-DD), in_time and out_time (HH:MM). Days that already have attendance are skipped; late and early rules apply as usual.</p></div><button id="import-csv">Choose a CSV file</button></div><input type="file" id="import-file" accept=".csv,text/csv" hidden>`;
+  document.querySelector("#content").append(card);
+  const file = card.querySelector("#import-file");
+  card.querySelector("#import-csv").onclick = () => file.click();
+  file.onchange = async () => {
+    const f = file.files[0];
+    if (!f) return;
+    const table = parseCsv(await f.text());
+    const head =
+      table.shift()?.map((h) =>
+        h
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z]+/g, "_"),
+      ) ?? [];
+    const col = (...names) => head.findIndex((h) => names.includes(h));
+    const [ci, di, ii, oi] = [
+      col("employee_code", "code", "emp_code"),
+      col("date"),
+      col("in_time", "in", "punch_in"),
+      col("out_time", "out", "punch_out"),
+    ];
+    if ([ci, di, ii, oi].some((x) => x < 0))
+      return notice(
+        "The first row must have the columns employee_code, date, in_time and out_time.",
+        true,
+      );
+    const rows = table.map((r) => ({
+      employee_code: (r[ci] || "").trim(),
+      date: (r[di] || "").trim(),
+      in_time: (r[ii] || "").trim().slice(0, 5),
+      out_time: (r[oi] || "").trim().slice(0, 5),
+    }));
+    try {
+      const dry = await api("/admin/attendance/import", {
+        rows,
+        dry_run: true,
+        source: f.name.slice(0, 40),
+      });
+      viewDialog(
+        "Check before importing",
+        `<p>${dry.would_import} row(s) will be imported and ${dry.skipped} skipped.</p>${
+          dry.report.length
+            ? `<div class="table-wrap"><table><thead><tr><th>Line</th><th>Employee</th><th>Date</th><th>Why skipped</th></tr></thead><tbody>${dry.report
+                .slice(0, 50)
+                .map(
+                  (r) =>
+                    `<tr><td>${r.line}</td><td>${esc(r.code)}</td><td>${esc(r.date)}</td><td>${esc(r.reason)}</td></tr>`,
+                )
+                .join("")}</tbody></table></div>`
+            : ""
+        }${dry.would_import ? '<div class="actions"><button id="confirm-import">Import now</button></div>' : ""}`,
+      );
+      document
+        .querySelector("dialog #confirm-import")
+        ?.addEventListener("click", (e) =>
+          busy(e.target, async () => {
+            const done = await api("/admin/attendance/import", {
+              rows,
+              source: f.name.slice(0, 40),
+            });
+            document.querySelector("dialog")?.remove();
+            notice(`Imported ${done.imported} day(s).`);
+          }),
+        );
+    } catch (e) {
+      notice(e.message, true);
+    }
+    file.value = "";
+  };
 }

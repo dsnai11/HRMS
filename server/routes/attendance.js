@@ -53,6 +53,30 @@ export function registerAttendance(router, app) {
     ),
   );
 
+  // Companies can refuse punches from old app versions (for example after a security fix).
+  async function checkAppVersion(companyId, version) {
+    const min = (
+      await db
+        .prepare("SELECT min_app_version FROM companies WHERE id=?")
+        .get(companyId)
+    ).min_app_version;
+    if (!min) return;
+    const parts = (v) =>
+      String(v ?? "0")
+        .split(".")
+        .map((n) => Number(n) || 0);
+    const have = parts(version),
+      need = parts(min);
+    for (let i = 0; i < 3; i++) {
+      if ((have[i] ?? 0) > (need[i] ?? 0)) return;
+      if ((have[i] ?? 0) < (need[i] ?? 0))
+        throw new HttpError(
+          426,
+          `Update the company app to version ${min} or later to record attendance.`,
+          "update_required",
+        );
+    }
+  }
   // A small JPEG taken at the moment of the punch, when the company asks for one.
   async function readSelfie(value, companyId) {
     const required = (
@@ -138,6 +162,7 @@ export function registerAttendance(router, app) {
             422,
             "Ask your administrator to assign a workplace.",
           );
+        await checkAppVersion(user.company_id, b.signals?.appVersion);
         checkLocation(b.location, site, nowMs);
         const selfie = await readSelfie(b.selfie, user.company_id);
         const { latitude, longitude, accuracy } = b.location;

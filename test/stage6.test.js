@@ -816,3 +816,181 @@ test("shift policies apply per employee, then branch, then company", async (t) =
     "deleting a policy falls back",
   );
 });
+
+test("attendance can be imported from another system, and old app versions can be refused", async (t) => {
+  const w = await world(t);
+  const { call, people, db } = w;
+  const hr = people.hr.token;
+  await db
+    .prepare("UPDATE users SET employee_code='E100' WHERE id=?")
+    .run(people.emp.id);
+  await db
+    .prepare("UPDATE users SET employee_code='E200' WHERE id=?")
+    .run(people.mgr.id);
+  const rows = [
+    {
+      employee_code: "E100",
+      date: "2026-11-02",
+      in_time: "09:20",
+      out_time: "18:45",
+    },
+    {
+      employee_code: "E100",
+      date: "2026-11-03",
+      in_time: "10:30",
+      out_time: "19:30",
+    },
+    {
+      employee_code: "E200",
+      date: "2026-11-02",
+      in_time: "09:25",
+      out_time: "18:30",
+    },
+    {
+      employee_code: "E999",
+      date: "2026-11-02",
+      in_time: "09:25",
+      out_time: "18:30",
+    },
+    {
+      employee_code: "E100",
+      date: "2026-12-30",
+      in_time: "09:25",
+      out_time: "18:30",
+    },
+    {
+      employee_code: "E100",
+      date: "2026-11-04",
+      in_time: "9am",
+      out_time: "18:30",
+    },
+    {
+      employee_code: "E100",
+      date: "2026-11-02",
+      in_time: "09:20",
+      out_time: "18:45",
+    },
+  ];
+  assert.equal(
+    (await call("/admin/attendance/import", { rows }, people.emp.token)).status,
+    403,
+  );
+  // A dry run reports without saving.
+  const dry = (
+    await call("/admin/attendance/import", { rows, dry_run: true }, hr)
+  ).data;
+  assert.deepEqual([dry.would_import, dry.imported, dry.skipped], [3, 0, 4]);
+  assert.equal((await db.prepare("SELECT COUNT(*) n FROM shifts").get()).n, 0);
+  const done = (await call("/admin/attendance/import", { rows }, hr)).data;
+  assert.deepEqual([done.imported, done.skipped], [3, 4]);
+  assert.deepEqual(done.report.map((r) => r.reason).sort(), [
+    "Date is in the future",
+    "Duplicate row for this person and date",
+    "Times must be HH:MM",
+    "Unknown or inactive employee code",
+  ]);
+  const shifts = await db
+    .prepare(
+      "SELECT user_id,source,day_type FROM shifts ORDER BY in_at,user_id",
+    )
+    .all();
+  assert.deepEqual(
+    shifts.map((s) => [s.source, s.day_type]),
+    [
+      ["imported", "full_day"],
+      ["imported", "full_day"],
+      ["imported", "half_day"],
+    ],
+    "10:30 is late under the default rules",
+  );
+  // Importing the same file again skips what is already there.
+  const again = (
+    await call("/admin/attendance/import", { rows: rows.slice(0, 3) }, hr)
+  ).data;
+  assert.deepEqual([again.imported, again.skipped], [0, 3]);
+
+  // Minimum app version: refused below, accepted at or above.
+  assert.equal(
+    (
+      await call(
+        "/admin/attendance-settings",
+        { min_app_version: "bad" },
+        hr,
+        "PATCH",
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await call(
+        "/admin/attendance-settings",
+        { min_app_version: "1.2.0" },
+        hr,
+        "PATCH",
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    (await call("/admin/attendance-settings", undefined, hr)).data
+      .min_app_version,
+    "1.2.0",
+  );
+  const device = "version-device-0000000";
+  const secret = "v".repeat(32);
+  await db
+    .prepare(
+      "INSERT INTO devices(user_id,device_id,platform,model,secret_hash,status,registered_at) VALUES(?,?,?,?,?,'approved',?)",
+    )
+    .run(
+      people.pay.id,
+      device,
+      "android",
+      "Pixel",
+      sha(secret),
+      new Date().toISOString(),
+    );
+  const session = (
+    await call("/login", {
+      email: "pay@example.test",
+      password: PW,
+      native: true,
+      device: { id: device, platform: "android", model: "Pixel", secret },
+    })
+  ).data.token;
+  const punch = async (appVersion) => {
+    const res = await fetch(`${w.base}/punch`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session}`,
+        "X-Device-Id": device,
+        "X-Device-Secret": secret,
+      },
+      body: JSON.stringify({
+        action: "in",
+        location: {
+          latitude: 26.9,
+          longitude: 75.8,
+          accuracy: 10,
+          timestamp: Date.parse("2026-11-05T10:00:00+05:30"),
+        },
+        signals: {
+          emulator: false,
+          rooted: false,
+          ...(appVersion ? { appVersion } : {}),
+        },
+      }),
+    });
+    return { status: res.status, data: await res.json() };
+  };
+  const old = await punch("1.1.9");
+  assert.deepEqual([old.status, old.data.code], [426, "update_required"]);
+  assert.equal(
+    (await punch()).status,
+    426,
+    "an app that does not report its version is refused too",
+  );
+  assert.equal((await punch("1.2.0")).status, 200);
+});

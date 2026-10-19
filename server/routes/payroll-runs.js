@@ -670,9 +670,67 @@ export function registerPayrollRuns(router, app) {
           month: run.month,
           rows: out.length,
         });
+      } else if (type === "esi_challan" || type === "pf_challan") {
+        // One-row summaries for paying the contribution on the portals; due by the 15th of the next month.
+        const [y, m] = run.month.split("-").map(Number);
+        const due = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}-15`;
+        if (type === "esi_challan") {
+          const covered = rows.filter(
+            (x) => x.esi && (x.esi.employee || x.esi.employer),
+          );
+          const sum = (k) => covered.reduce((t, x) => t + x.esi[k], 0);
+          header = [
+            ["period", "Contribution period"],
+            ["ips", "Insured persons"],
+            ["wages", "Total ESI wages"],
+            ["employee", "Employee contribution"],
+            ["employer", "Employer contribution"],
+            ["total", "Total payable"],
+            ["due", "Due date"],
+          ];
+          out = [
+            {
+              period: run.month,
+              ips: covered.length,
+              wages: sum("wages"),
+              employee: sum("employee"),
+              employer: sum("employer"),
+              total: sum("employee") + sum("employer"),
+              due,
+            },
+          ];
+        } else {
+          const members = rows.filter((x) => x.pf);
+          const sum = (k) => members.reduce((t, x) => t + x.pf[k], 0);
+          const ac1 = sum("employee") + sum("employerEpf");
+          header = [
+            ["period", "Contribution period"],
+            ["members", "Members"],
+            ["wages", "Total EPF wages"],
+            ["ac01", "A/c 01 (EPF: employee + employer share)"],
+            ["ac10", "A/c 10 (EPS)"],
+            ["ac21", "A/c 21 (EDLI)"],
+            ["ac02", "A/c 02 (admin charges)"],
+            ["total", "Total payable"],
+            ["due", "Due date"],
+          ];
+          out = [
+            {
+              period: run.month,
+              members: members.length,
+              wages: sum("wages"),
+              ac01: ac1,
+              ac10: sum("employerEps"),
+              ac21: sum("edli"),
+              ac02: sum("admin"),
+              total: ac1 + sum("employerEps") + sum("edli") + sum("admin"),
+              due,
+            },
+          ];
+        }
       } else throw new HttpError(400, "Unknown export type.");
       // PF and ESI files carry identity numbers that were stored encrypted.
-      if (type === "pf" || type === "esi" || type === "esic")
+      if (["pf", "esi", "esic", "pf_challan", "esi_challan"].includes(type))
         await audit("statutory_file_exported", {
           id: run.id,
           month: run.month,
