@@ -11,6 +11,7 @@ import {
 import { requireOwned } from "../scope.js";
 import { can } from "../rbac.js";
 import { offerLetter } from "../letters.js";
+import { assignJoinerCourses } from "./learning.js";
 import { preboardingForHire } from "./preboarding.js";
 import { storePrivate } from "./payroll-setup.js";
 import { encryptionKey } from "../crypto-store.js";
@@ -828,6 +829,7 @@ export function registerRecruitment(router, app) {
               addDays(offer.joining_date, t[3]),
               nowIso(),
             );
+        await assignJoinerCourses(app, userId, companyId, offer.joining_date);
         await audit("candidate_hired", { id: c.id, userId });
         return userId;
       });
