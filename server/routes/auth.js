@@ -3,6 +3,7 @@ import {
   createAdmin,
   passwordHash,
   passwordMatches,
+  passwordMatchesAsync,
   tokenHash,
 } from "../db.js";
 import { HttpError, string, password, email, clientIp } from "../http.js";
@@ -84,14 +85,20 @@ export function registerAuth(router, app) {
         ? b.password
         : "";
     // Per-address limit is generous (offices share one address); the per-email limit is the tight one.
-    rateLimit(`ip:${clientIp(req)}`, 1000);
+    rateLimit(
+      `ip:${clientIp(req)}`,
+      Number(process.env.LOGIN_IP_LIMIT) || 5000,
+    );
     rateLimit(`email:${mail}`, 10);
     const user = await db
       .prepare(
         "SELECT u.* FROM users u JOIN companies c ON c.id=u.company_id WHERE u.email=? AND c.active=1",
       )
       .get(mail);
-    const valid = passwordMatches(pw, user?.password_hash || dummyHash);
+    const valid = await passwordMatchesAsync(
+      pw,
+      user?.password_hash || dummyHash,
+    );
     if (!valid || !user?.active)
       throw new HttpError(401, "Email or password is incorrect.");
     if (b.native === true && !b.device && PHONE_ROLES.includes(user.role))
@@ -127,7 +134,9 @@ export function registerAuth(router, app) {
       .run(
         tokenHash(token),
         user.id,
-        Date.now() + 86400000,
+        // Phones are bound to an approved device and keep the session for 30 days, so
+        // the morning rush is not a rush of sign-ins; browsers stay at 24 hours.
+        Date.now() + (b.native === true ? 30 * 86400000 : 86400000),
         new Date(clock()).toISOString(),
         clientIp(req),
         String(req.headers["user-agent"] ?? "").slice(0, 200),

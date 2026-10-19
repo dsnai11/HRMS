@@ -1,6 +1,7 @@
 import { openPostgres } from "./postgres.js";
 import {
   randomBytes,
+  scrypt,
   scryptSync,
   timingSafeEqual,
   createHash,
@@ -15,6 +16,17 @@ export function passwordMatches(password, encoded) {
     scryptSync(password, salt, 64),
     Buffer.from(hash, "hex"),
   );
+}
+// Same check without blocking the event loop: scrypt runs on the thread pool, so a
+// burst of sign-ins does not stall punches and other requests.
+export async function passwordMatchesAsync(password, encoded) {
+  const [salt, hash] = encoded.split(":");
+  const derived = await new Promise((resolve, reject) =>
+    scrypt(password, salt, 64, (err, key) =>
+      err ? reject(err) : resolve(key),
+    ),
+  );
+  return timingSafeEqual(derived, Buffer.from(hash, "hex"));
 }
 export const tokenHash = (token) =>
   createHash("sha256").update(token).digest("hex");

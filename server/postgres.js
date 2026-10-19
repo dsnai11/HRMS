@@ -7,7 +7,12 @@ import { runMigrations } from "./migrate.js";
 // sequences have the same semantics. Transactions still commit atomically in the DB.
 export function serializedStore(store) {
   let tail = Promise.resolve();
-  store.serialized = (fn) => {
+  // On PostgreSQL, read-only requests (GET) may run alongside others: statements
+  // outside a transaction use their own pooled connection, and the few GET routes
+  // that write do so idempotently. Writes stay strictly in order.
+  store.serialized = (fn, { concurrent = false } = {}) => {
+    if (concurrent && store.dialect === "postgres")
+      return Promise.resolve().then(fn);
     const task = tail.then(fn);
     tail = task.catch(() => {});
     return task;
@@ -72,7 +77,7 @@ export function createPostgresStore(pool) {
 export async function openPostgres(connectionString) {
   const pool = new Pool({
     connectionString,
-    max: 3,
+    max: Number(process.env.DB_POOL_MAX) || 5,
     connectionTimeoutMillis: 15000,
     idleTimeoutMillis: 30000,
   });
