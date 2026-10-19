@@ -739,6 +739,7 @@ dialog h2 {
 .day.weekly_off,
 .day.future,
 .day.not_joined,
+.day.exited,
 .day.not_started {
   background: #f1f3f2;
 }
@@ -896,4 +897,16 @@ a.button.secondary {
 }
 .actions.spaced {
   margin-bottom: 12px;
+}
+
+.letter p {
+  line-height: 1.6;
+  margin: 0 0 14px;
+}
+.letter .letter-date {
+  text-align: right;
+  color: var(--muted, #5b6b65);
+}
+.letter .letter-sign {
+  margin-top: 40px;
 }

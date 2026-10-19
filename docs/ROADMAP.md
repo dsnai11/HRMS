@@ -47,16 +47,21 @@ Done:
 
 Still to do:
 
-- Full and final settlement (built with the exit workflow in stage 4), mid-month joiner and exit proration.
 - ECR 2.0 layout and ESIC `.xls`; perquisite tax on interest-free loans.
 - Salary structures per grade or employee group; investment declarations and proof workflow for the old regime.
 - Must be reviewed by a payroll professional or CA before real use.
 
-## Stage 4 — Hiring, onboarding, exit
+## Stage 4 — Hiring, onboarding, exit (done)
 
-- Job openings, candidate pipeline, interview feedback, offers and offer letters.
-- Onboarding checklists and document collection; asset allocation.
-- Resignation, notice period, clearance, full and final settlement, experience letters.
+- Job openings, candidate pipeline, interviews and feedback, offers and offer letters, hire to employee.
+- Joining checklists (standard or company's own); asset allocation and return.
+- Resignation and company-initiated exits, notice period, clearance, full and final settlement through payroll, relieving and experience letters, mid-month exit proration.
+
+Still to do:
+
+- Document collection and storage for candidates and joiners (needs file storage; stage 5).
+- Careers page and applicant self-service; email and calendar invites (needs notifications; stage 5).
+- Rehire flow, notice-buyout approvals, multi-level exit approval.
 
 ## Stage 5 — Insight, engagement and hardening
 

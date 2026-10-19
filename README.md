@@ -54,7 +54,18 @@ Payroll is for payroll staff (role `payroll`) and administrators; HR does not se
 - **Gratuity.** Calculator and liability report: 15 days' wages per completed year (a part over six months counts), wages at least half of gross, ₹20 lakh cap, five years (one for fixed-term) to qualify, with the provision accruing before that.
 - **Statutory files.** EPFO ECR text upload (`#~#`-separated; blocked until every member has a UAN), ESIC upload CSV, and Form 130 (annual salary and tax) and Form 138 (quarterly deduction) data as CSV.
 
-**Not included yet:** full-and-final settlement (arrives with the exit workflow), the revamped EPFO ECR 2.0 layout and ESIC `.xls` file (the data is exported as CSV), perquisite tax on interest-free loans, investment-proof workflow for the old regime, and the official Form 130/138 e-filing files. The statutory rules are reference values for your payroll team or CA to confirm before a real run; they are not legal advice. Parameters and their sources are in `server/payroll/statutory.js` and `server/payroll/extras.js`.
+**Not included yet:** the revamped EPFO ECR 2.0 layout and ESIC `.xls` file (the data is exported as CSV), perquisite tax on interest-free loans, investment-proof workflow for the old regime, and the official Form 130/138 e-filing files. The statutory rules are reference values for your payroll team or CA to confirm before a real run; they are not legal advice. Parameters and their sources are in `server/payroll/statutory.js` and `server/payroll/extras.js`.
+
+## Hiring, onboarding and exit
+
+Under **Hiring & exits** (HR and admin); employees see **My employment**.
+
+- **Recruitment.** Job openings (department, branch, positions, hiring manager) → candidates with a stage (applied, screening, interview, offer, hired, rejected, withdrawn) and a history → interviews with an interviewer, mode and place → interviewer feedback (rating, recommendation) → offers (draft, sent, accepted, declined, withdrawn) with a printable offer letter. A duplicate candidate in the same pipeline is refused; a declined offer closes the candidate.
+- **Hiring.** An accepted offer turns into an employee in one step (login, joining date from the offer, department, branch and manager from the opening). The standard 9-task joining checklist, or your company's own, is created, each task owned by HR, IT, the manager or the new joiner. Managers and interviewers see their tasks and interviews under Approvals.
+- **Assets.** Register assets with tags (unique per company), issue to one person at a time, receive back; employees see what they hold.
+- **Exit.** The employee resigns (notice period from company or employee setting, default 30 days) or HR starts an exit (termination, retirement, end of contract). HR accepts and sets the last working day; a clearance checklist (manager, IT, finance, HR, plus one line per asset held) is created. Payroll stops counting days after the last working day, so the final month is pro-rated.
+- **Full and final settlement.** Calculated and posted into the final month's payroll as one-off lines, so tax and net pay come from the normal run: notice shortfall recovery on resignation (gross ÷ 30 a day, can be waived), leave encashment (tax-exempt up to ₹25 lakh on resignation or retirement only), gratuity, and the remaining loan instalments recovered in the same run; approved claims are paid with it. HR can add one-off lines or leave a line out, and the settlement can be voided until the run is approved.
+- **Completing the exit** needs every clearance item done, the settlement posted, the pay-in month's run approved, no assets still held and the last day reached. It then closes the login and revokes the phone, and relieving and experience letters become available.
 
 ## Attendance integrity (anti-spoofing)
 
@@ -147,6 +158,6 @@ Railway references: [volumes](https://docs.railway.com/volumes/reference), [heal
 - The active-shift view includes overnight shifts. No automatic punch-out or admin location bypass is provided. An employee who leaves without punching out must return to the assigned workplace; agree an exception policy before rollout.
 - GPS and the mock flag are client-provided signals. They cannot prove physical presence against a modified client, spoofed device, or shared credentials. Device attestation and device binding are not implemented.
 - Multi-instance deployment needs distributed rate limits and removal of request serialization; both are planned (`docs/ROADMAP.md`).
-- Not included yet: email delivery, self-service password recovery, leave, payroll, recruitment, biometric identification, background tracking, or automatic retention policy. See `docs/ROADMAP.md`.
+- Not included yet: email delivery, self-service password recovery, file storage for documents, biometric identification, background tracking, or automatic retention policy. See `docs/ROADMAP.md`.
 - Validate GPS permission denial, poor signal, boundary edges, offline responses, duplicate taps, overnight shifts, and both physical phone platforms before employee rollout.
 - The mobile dependency audit currently reports 29 findings (19 high, 10 moderate), including transitive Expo/Metro tooling and Expo Router dependencies. Compatible automatic fixes have been applied; remaining automated recommendations include incompatible SDK changes. These findings require review before production mobile distribution. The API's dependencies are audited separately from the mobile app.

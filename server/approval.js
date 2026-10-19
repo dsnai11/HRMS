@@ -27,9 +27,24 @@ export async function inboxScope(app, user) {
 }
 
 export async function pendingApprovals(app, user) {
+  // Interviews to give feedback on and joining tasks for this person.
+  let n = (
+    await app.db
+      .prepare(
+        "SELECT COUNT(*) n FROM interviews WHERE interviewer_id=? AND status='scheduled'",
+      )
+      .get(user.id)
+  ).n;
+  n += (
+    await app.db
+      .prepare(
+        `SELECT COUNT(*) n FROM onboarding_tasks t JOIN users u ON u.id=t.user_id
+         WHERE t.company_id=? AND t.done=0 AND ((t.owner='manager' AND u.manager_id=?) ${can(user, "recruitment.manage") ? "OR t.owner IN ('hr','it')" : ""})`,
+      )
+      .get(user.company_id, user.id)
+  ).n;
   const scope = await inboxScope(app, user);
-  if (!scope) return 0;
-  let n = 0;
+  if (!scope) return n;
   for (const table of ["leave_requests", "regularizations"])
     n += (
       await app.db

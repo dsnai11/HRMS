@@ -147,10 +147,15 @@ function shell() {
     has("attendance.read") && ["muster", "▥", "Monthly muster"],
     has("leave.manage") && ["leaveadmin", "❖", "Leave & holidays"],
     has("payroll.read") && ["payroll", "₹", "Payroll"],
+    (has("recruitment.manage") || has("exit.manage")) && [
+      "hiring",
+      "✚",
+      "Hiring & exits",
+    ],
     has("devices.manage") && ["devices", "▣", "Devices"],
     has("security.read") && ["security", "⚠", "Security"],
     has("audit.read") && ["audit", "≡", "Activity log"],
-    (me.is_manager || has("leave.approve")) && [
+    (me.is_manager || has("leave.approve") || me.approvals_pending) && [
       "approvals",
       "✓",
       me.approvals_pending
@@ -161,6 +166,7 @@ function shell() {
     me.role !== "super_admin" && ["timeoff", "☼", "Time off"],
     me.role !== "super_admin" && ["payslips", "❒", "Payslips"],
     me.role !== "super_admin" && ["myclaims", "₹", "Claims & loans"],
+    me.role !== "super_admin" && ["myemployment", "☗", "My employment"],
     me.role !== "super_admin" && ["mine", "◎", "My attendance"],
     ["profile", "☺", "My profile"],
   ].filter(Boolean);
@@ -248,6 +254,8 @@ async function render() {
     if (page === "payroll") return await payrollPage(id);
     if (page === "payslips") return await payslipsPage(id);
     if (page === "myclaims") return await myClaimsPage(id);
+    if (page === "myemployment") return await myEmploymentPage(id);
+    if (page === "hiring") return await hiringPage(id);
     if (page === "overview") {
       const [stats, active, sites] = await Promise.all([
         api("/admin/overview"),
