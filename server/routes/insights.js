@@ -1,3 +1,4 @@
+import { HttpError } from "../http.js";
 import { can } from "../rbac.js";
 import { addDays, eachDay } from "../calendar.js";
 
@@ -7,8 +8,72 @@ const monthsBack = (month, n) => {
   return d.toISOString().slice(0, 7);
 };
 
+export const WIDGETS = [
+  "stats",
+  "celebrations",
+  "joiners",
+  "movement",
+  "attendance",
+  "departments",
+  "branches",
+  "leave",
+  "pipeline",
+  "payroll",
+];
+
 export function registerInsights(router, app) {
   const { db, clock } = app;
+
+  router.get(
+    "/api/dashboard-prefs",
+    { perm: "insights.read" },
+    async ({ user, send }) => {
+      const row = await db
+        .prepare("SELECT layout FROM dashboard_prefs WHERE user_id=?")
+        .get(user.id);
+      return send(200, {
+        widgets: WIDGETS,
+        layout: row ? JSON.parse(row.layout) : null,
+      });
+    },
+  );
+  router.put(
+    "/api/dashboard-prefs",
+    { perm: "insights.read" },
+    async ({ user, body, send }) => {
+      const b = await body();
+      const ok =
+        Array.isArray(b.layout) &&
+        b.layout.length <= WIDGETS.length &&
+        b.layout.every(
+          (w) => WIDGETS.includes(w?.id) && typeof w.visible === "boolean",
+        );
+      if (!ok || new Set(b.layout.map((w) => w.id)).size !== b.layout.length)
+        throw new HttpError(400, "That layout is not valid.");
+      await db
+        .prepare(
+          "INSERT INTO dashboard_prefs(user_id,layout,updated_at) VALUES(?,?,?) ON CONFLICT (user_id) DO UPDATE SET layout=EXCLUDED.layout,updated_at=EXCLUDED.updated_at",
+        )
+        .run(
+          user.id,
+          JSON.stringify(
+            b.layout.map((w) => ({ id: w.id, visible: w.visible })),
+          ),
+          new Date(clock()).toISOString(),
+        );
+      return send(200, { ok: true });
+    },
+  );
+  router.delete(
+    "/api/dashboard-prefs",
+    { perm: "insights.read" },
+    async ({ user, send }) => {
+      await db
+        .prepare("DELETE FROM dashboard_prefs WHERE user_id=?")
+        .run(user.id);
+      return send(200, { ok: true });
+    },
+  );
 
   router.get(
     "/api/admin/insights",
@@ -176,6 +241,53 @@ export function registerInsights(router, app) {
             )
             .all(companyId)
         ).reverse();
+      // Birthdays, work anniversaries and new joiners around today (month and day only, never the birth year).
+      const mmdd = (d) => d.slice(5);
+      const horizon = Array.from({ length: 31 }, (_, i) => addDays(today, i));
+      const upcoming = new Map(
+        horizon.map((d, i) => [mmdd(d), { date: d, in_days: i }]),
+      );
+      const people = await db
+        .prepare(
+          `SELECT name,date_of_birth,date_of_joining FROM users WHERE ${active}`,
+        )
+        .all(companyId);
+      out.celebrations = {
+        birthdays: people
+          .filter((p) => p.date_of_birth && upcoming.has(mmdd(p.date_of_birth)))
+          .map((p) => ({
+            name: p.name,
+            ...upcoming.get(mmdd(p.date_of_birth)),
+          }))
+          .sort((a, b) => a.in_days - b.in_days),
+        anniversaries: people
+          .filter(
+            (p) =>
+              p.date_of_joining &&
+              p.date_of_joining.slice(0, 4) < today.slice(0, 4) &&
+              upcoming.has(mmdd(p.date_of_joining)),
+          )
+          .map((p) => {
+            const u = upcoming.get(mmdd(p.date_of_joining));
+            return {
+              name: p.name,
+              years:
+                Number(u.date.slice(0, 4)) -
+                Number(p.date_of_joining.slice(0, 4)),
+              ...u,
+            };
+          })
+          .sort((a, b) => a.in_days - b.in_days),
+        new_joiners: people
+          .filter(
+            (p) =>
+              p.date_of_joining &&
+              p.date_of_joining >= addDays(today, -30) &&
+              p.date_of_joining <= today,
+          )
+          .map((p) => ({ name: p.name, date: p.date_of_joining }))
+          .sort((a, b) => b.date.localeCompare(a.date)),
+      };
       return send(200, out);
     },
   );

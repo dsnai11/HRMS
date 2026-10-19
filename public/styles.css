@@ -1061,3 +1061,11 @@ code.secret {
   max-height: 220px;
   overflow: auto;
 }
+
+.widget-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}

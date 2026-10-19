@@ -90,6 +90,7 @@ See `docs/COMPARISON.md` for how this lines up with Addetto HRMS.
 - **Career changes** (Hiring & exits → Career changes): promotion, transfer, increment and confirmation with an effective date. Applying updates the profile, creates the salary revision for increments (keeping the person's PF setting; ESI is switched off above ₹21,000), notifies the employee and gives a printable letter.
 - **Forgot password.** Emails a one-hour link (needs `RESEND_API_KEY`, `MAIL_FROM` and `APP_URL`); the answer never reveals whether an address has an account. Without email, HR resets passwords.
 - **Annual tax statement** for each employee on the Payslips page.
+- **Customisable Insights:** each person chooses which widgets to show and their order; new widgets show birthdays and work anniversaries for the next 30 days (never the birth year) and people who joined in the last 30 days.
 - **Android push notifications** for everything the bell shows, through Firebase (setup in `docs/OPERATIONS.md`). iPhones installed with a free Apple ID cannot receive push; they use the in-app alerts.
 - **Attendance import** from a biometric machine or another system (Workplaces → Import attendance): CSV with a dry run, skips days that already have attendance, applies the late and early rules. **Minimum app version** to refuse punches from old apps.
 - **Challan summaries** for PF (A/c 01, 02, 10, 21) and ESI, a **Labour Welfare Fund** rule per state (you enter the state's current figures and months), shown on the payroll register.

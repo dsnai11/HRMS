@@ -318,7 +318,10 @@ function columnChart(rows, { label, series, width = 560, height = 150 }) {
     )}</svg><div class="legend">${series.map((s) => `<span><i class="swatch ${s.cls}"></i>${s.name}</span>`).join("")}</div>`;
 }
 async function insightsPage(id) {
-  const d = await api("/admin/insights");
+  const [d, prefs] = await Promise.all([
+    api("/admin/insights"),
+    api("/dashboard-prefs"),
+  ]);
   if (id !== renderId) return;
   const stat = (label, value, hint = "") =>
     `<div class="stat"><div class="stat-label">${label}</div><div class="stat-value">${value}</div>${hint ? `<div class="muted">${hint}</div>` : ""}</div>`;
@@ -328,43 +331,177 @@ async function insightsPage(id) {
       timeZone: "UTC",
     });
   const stages = ["applied", "screening", "interview", "offer", "hired"];
+  const day = (r) =>
+    r.in_days === 0 ? "Today" : r.in_days === 1 ? "Tomorrow" : fmtDate(r.date);
+  const list = (rows, line, none) =>
+    rows.length
+      ? rows.map((r) => `<div class="activity">${line(r)}</div>`).join("")
+      : `<p class="muted">${none}</p>`;
+  // Each widget: title shown in the customise list, and its HTML (null when it does not apply).
+  const W = {
+    stats: [
+      "Key numbers",
+      () =>
+        `<div class="stats">${stat("Headcount", d.headcount.total)}${stat("Present today", d.attendance.today_present, `${d.attendance.on_leave_today} on leave`)}${stat("Attrition, 12 months", `${d.movement.attrition_percent}%`, `${d.movement.leavers_12m} left · ${d.movement.in_notice} serving notice`)}${stat("Pending leave requests", d.leave.pending)}${stat("Open positions", d.recruitment.open_positions)}${stat("Open helpdesk tickets", d.helpdesk.open)}</div>`,
+    ],
+    celebrations: [
+      "Birthdays and anniversaries",
+      () =>
+        `<div class="grid-2"><div class="card"><h2>Birthdays, next 30 days</h2>${list(d.celebrations.birthdays, (r) => `<strong>${esc(r.name)}</strong> · ${day(r)}`, "None coming up.")}</div><div class="card"><h2>Work anniversaries, next 30 days</h2>${list(d.celebrations.anniversaries, (r) => `<strong>${esc(r.name)}</strong> · ${r.years} year${r.years === 1 ? "" : "s"} · ${day(r)}`, "None coming up.")}</div></div>`,
+    ],
+    joiners: [
+      "New joiners",
+      () =>
+        `<div class="card"><h2>Joined in the last 30 days</h2>${list(d.celebrations.new_joiners, (r) => `<strong>${esc(r.name)}</strong> · ${fmtDate(r.date)}`, "Nobody has joined recently.")}</div>`,
+    ],
+    movement: [
+      "Joiners and leavers",
+      () =>
+        `<div class="card"><h2>Joiners and leavers</h2>${columnChart(
+          d.movement.months,
+          {
+            label: (r) => short(r.month),
+            series: [
+              { key: "joined", name: "Joined", cls: "bar" },
+              { key: "left", name: "Left", cls: "bar-alt" },
+            ],
+          },
+        )}</div>`,
+    ],
+    attendance: [
+      "Attendance, last 14 days",
+      () =>
+        `<div class="card"><h2>Attendance, last 14 days</h2>${columnChart(d.attendance.series, { label: (r) => r.date.slice(8), series: [{ key: "present", name: "People punched in", cls: "bar" }] })}</div>`,
+    ],
+    departments: [
+      "People by department",
+      () =>
+        `<div class="card"><h2>People by department</h2>${barChart(d.headcount.by_department, { label: (r) => r.name, value: (r) => r.n })}</div>`,
+    ],
+    branches: [
+      "People by branch",
+      () =>
+        `<div class="card"><h2>People by branch</h2>${barChart(d.headcount.by_branch, { label: (r) => r.name, value: (r) => r.n })}</div>`,
+    ],
+    leave: [
+      "Leave taken this year",
+      () =>
+        `<div class="card"><h2>Leave taken this year (days)</h2>${d.leave.taken_this_year.length ? barChart(d.leave.taken_this_year, { label: (r) => r.name, value: (r) => r.days }) : empty("No leave yet", "Approved leave appears here.")}</div>`,
+    ],
+    pipeline: [
+      "Hiring pipeline",
+      () =>
+        `<div class="card"><h2>Hiring pipeline</h2>${barChart(
+          stages.map((s) => ({
+            name: STAGE[s],
+            n: d.recruitment.stages[s] ?? 0,
+          })),
+          { label: (r) => r.name, value: (r) => r.n },
+        )}</div>`,
+    ],
+    payroll: [
+      "Payroll cost",
+      d.payroll
+        ? () =>
+            `<div class="card"><h2>Payroll cost, last approved months</h2>${
+              d.payroll.length
+                ? `${columnChart(d.payroll, {
+                    label: (r) => short(r.month),
+                    series: [
+                      { key: "gross", name: "Gross pay", cls: "bar" },
+                      {
+                        key: "employer_cost",
+                        name: "Cost to company",
+                        cls: "bar-alt",
+                      },
+                    ],
+                  })}<div class="table-wrap"><table><thead><tr><th>Month</th><th>People</th><th>Gross</th><th>Net</th><th>Cost to company</th></tr></thead><tbody>${d.payroll.map((r) => `<tr><td>${monthLabel(r.month)}</td><td>${r.employees}</td><td>${inr(r.gross)}</td><td>${inr(r.net)}</td><td>${inr(r.employer_cost)}</td></tr>`).join("")}</tbody></table></div>`
+                : empty(
+                    "No approved payroll",
+                    "Cost appears after the first approved run.",
+                  )
+            }</div>`
+        : null,
+    ],
+  };
+  // The saved layout, then any widgets it does not mention (so new ones appear), skipping ones this person cannot see.
+  const saved = prefs.layout ?? [];
+  const layout = [
+    ...saved.filter((w) => W[w.id]),
+    ...prefs.widgets
+      .filter((w) => !saved.some((s) => s.id === w))
+      .map((id) => ({
+        id,
+        visible: true,
+      })),
+  ].filter((w) => W[w.id][1]);
   document.querySelector("#content").innerHTML =
-    heading("Insights", `Company overview as of ${fmtDate(d.as_of)}.`) +
-    `<div class="stats">${stat("Headcount", d.headcount.total)}${stat("Present today", d.attendance.today_present, `${d.attendance.on_leave_today} on leave`)}${stat("Attrition, 12 months", `${d.movement.attrition_percent}%`, `${d.movement.leavers_12m} left · ${d.movement.in_notice} serving notice`)}${stat("Pending leave requests", d.leave.pending)}${stat("Open positions", d.recruitment.open_positions)}${stat("Open helpdesk tickets", d.helpdesk.open)}</div>` +
-    `<div class="card"><h2>Joiners and leavers</h2>${columnChart(
-      d.movement.months,
-      {
-        label: (r) => short(r.month),
-        series: [
-          { key: "joined", name: "Joined", cls: "bar" },
-          { key: "left", name: "Left", cls: "bar-alt" },
-        ],
+    heading(
+      "Insights",
+      `Company overview as of ${fmtDate(d.as_of)}.`,
+      '<button class="secondary" id="customise">Customise</button>',
+    ) +
+    (layout
+      .filter((w) => w.visible)
+      .map((w) => W[w.id][1]())
+      .join("") ||
+      `<div class="card">${empty("Everything is hidden", "Use Customise to choose what to show.")}</div>`);
+  document.querySelector("#customise").onclick = () => {
+    let order = layout.map((w) => ({ ...w }));
+    const draw = () => {
+      const box = document.querySelector("dialog #widget-list");
+      box.innerHTML = order
+        .map(
+          (w, i) =>
+            `<div class="widget-row"><label class="check"><input type="checkbox" data-vis="${i}" ${w.visible ? "checked" : ""}> ${esc(W[w.id][0])}</label><span><button class="ghost" data-up="${i}" ${i === 0 ? "disabled" : ""} aria-label="Move up">↑</button><button class="ghost" data-down="${i}" ${i === order.length - 1 ? "disabled" : ""} aria-label="Move down">↓</button></span></div>`,
+        )
+        .join("");
+      box
+        .querySelectorAll("[data-vis]")
+        .forEach(
+          (c) =>
+            (c.onchange = () =>
+              (order[Number(c.dataset.vis)].visible = c.checked)),
+        );
+      box.querySelectorAll("[data-up]").forEach(
+        (b) =>
+          (b.onclick = () => {
+            const i = Number(b.dataset.up);
+            [order[i - 1], order[i]] = [order[i], order[i - 1]];
+            draw();
+          }),
+      );
+      box.querySelectorAll("[data-down]").forEach(
+        (b) =>
+          (b.onclick = () => {
+            const i = Number(b.dataset.down);
+            [order[i + 1], order[i]] = [order[i], order[i + 1]];
+            draw();
+          }),
+      );
+    };
+    dialog(
+      "Customise Insights",
+      '<div class="full" id="widget-list"></div><p class="full muted">Your choice is saved for you only.</p>',
+      async () => {
+        await api(
+          "/dashboard-prefs",
+          { layout: order.map(({ id, visible }) => ({ id, visible })) },
+          "PUT",
+        );
+        notice("Saved.");
       },
-    )}</div>` +
-    `<div class="card"><h2>Attendance, last 14 days</h2>${columnChart(d.attendance.series, { label: (r) => r.date.slice(8), series: [{ key: "present", name: "People punched in", cls: "bar" }] })}</div>` +
-    `<div class="grid-2"><div class="card"><h2>People by department</h2>${barChart(d.headcount.by_department, { label: (r) => r.name, value: (r) => r.n })}</div><div class="card"><h2>People by branch</h2>${barChart(d.headcount.by_branch, { label: (r) => r.name, value: (r) => r.n })}</div></div>` +
-    `<div class="grid-2"><div class="card"><h2>Leave taken this year (days)</h2>${d.leave.taken_this_year.length ? barChart(d.leave.taken_this_year, { label: (r) => r.name, value: (r) => r.days }) : empty("No leave yet", "Approved leave appears here.")}</div><div class="card"><h2>Hiring pipeline</h2>${barChart(
-      stages.map((s) => ({ name: STAGE[s], n: d.recruitment.stages[s] ?? 0 })),
-      { label: (r) => r.name, value: (r) => r.n },
-    )}</div></div>` +
-    (d.payroll
-      ? `<div class="card"><h2>Payroll cost, last approved months</h2>${
-          d.payroll.length
-            ? `${columnChart(d.payroll, {
-                label: (r) => short(r.month),
-                series: [
-                  { key: "gross", name: "Gross pay", cls: "bar" },
-                  {
-                    key: "employer_cost",
-                    name: "Cost to company",
-                    cls: "bar-alt",
-                  },
-                ],
-              })}<div class="table-wrap"><table><thead><tr><th>Month</th><th>People</th><th>Gross</th><th>Net</th><th>Cost to company</th></tr></thead><tbody>${d.payroll.map((r) => `<tr><td>${monthLabel(r.month)}</td><td>${r.employees}</td><td>${inr(r.gross)}</td><td>${inr(r.net)}</td><td>${inr(r.employer_cost)}</td></tr>`).join("")}</tbody></table></div>`
-            : empty(
-                "No approved payroll",
-                "Cost appears after the first approved run.",
-              )
-        }</div>`
-      : "");
+    );
+    draw();
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.className = "ghost";
+    reset.textContent = "Reset to default";
+    reset.onclick = async () => {
+      await api("/dashboard-prefs", undefined, "DELETE");
+      document.querySelector("dialog")?.remove();
+      render();
+    };
+    document.querySelector("dialog .form-actions").prepend(reset);
+  };
 }
