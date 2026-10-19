@@ -32,6 +32,10 @@ import { registerSecurity } from "./routes/security.js";
 import { registerEngagement } from "./routes/engagement.js";
 import { registerInsights } from "./routes/insights.js";
 import { scheduleRetention } from "./retention.js";
+import {
+  registerLearning,
+  scheduleLearningReminders,
+} from "./routes/learning.js";
 import { registerPreboarding } from "./routes/preboarding.js";
 import {
   registerProbation,
@@ -52,6 +56,7 @@ const STATIC = {
   "/more.js": ["more.js", "text/javascript"],
   "/people.js": ["people.js", "text/javascript"],
   "/bulk.js": ["bulk.js", "text/javascript"],
+  "/learning.js": ["learning.js", "text/javascript"],
   "/join.html": ["join.html", "text/html"],
   "/join.js": ["join.js", "text/javascript"],
   "/letter.html": ["letter.html", "text/html"],
@@ -148,6 +153,7 @@ export function createApp({
     registerRecruitment,
     registerPreboarding,
     registerProbation,
+    registerLearning,
     registerExit,
     registerEngagement,
     registerSecurity,
@@ -334,6 +340,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   });
   scheduleRetention(db);
   scheduleProbationReminders(app);
+  scheduleLearningReminders(app);
   server.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () =>
     console.log(`HRMS listening on port ${process.env.PORT || 3000}`),
   );

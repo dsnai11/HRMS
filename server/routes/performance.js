@@ -366,7 +366,7 @@ export function registerPerformance(router, app) {
       200,
       await db
         .prepare(
-          "SELECT r.id,r.status,r.completed_on,r.score,t.title,t.hours,t.mandatory,t.due_date FROM training_records r JOIN trainings t ON t.id=r.training_id WHERE r.user_id=? ORDER BY (r.status='assigned') DESC,t.due_date,r.id",
+          "SELECT r.id,r.status,r.completed_on,r.score,r.attempts,r.certificate_no,t.title,t.kind,t.hours,t.mandatory,COALESCE(r.due_date,t.due_date) due_date FROM training_records r JOIN trainings t ON t.id=r.training_id WHERE r.user_id=? AND t.active=1 ORDER BY (r.status='assigned') DESC,COALESCE(r.due_date,t.due_date),r.id",
         )
         .all(user.id),
     ),
@@ -408,23 +408,26 @@ export function registerPerformance(router, app) {
     async ({ user, companyId, body, send, audit }) => {
       const b = await body();
       const title = string(b.title, "Title", 150);
+      const kind = b.kind === "course" ? "course" : "tracked";
       const ids =
-        Array.isArray(b.user_ids) && b.user_ids.length
-          ? [...new Set(b.user_ids.map(integer))]
-          : (
-              await db
-                .prepare(
-                  "SELECT id FROM users WHERE company_id=? AND active=1 AND role<>'super_admin'",
-                )
-                .all(companyId)
-            ).map((r) => r.id);
+        kind === "course" && !(Array.isArray(b.user_ids) && b.user_ids.length)
+          ? []
+          : Array.isArray(b.user_ids) && b.user_ids.length
+            ? [...new Set(b.user_ids.map(integer))]
+            : (
+                await db
+                  .prepare(
+                    "SELECT id FROM users WHERE company_id=? AND active=1 AND role<>'super_admin'",
+                  )
+                  .all(companyId)
+              ).map((r) => r.id);
       for (const id of ids) await owned("users", id, companyId, "employee");
       const id = await transaction(async () => {
         const id = Number(
           (
             await db
               .prepare(
-                "INSERT INTO trainings(company_id,title,hours,mandatory,due_date,created_by,created_at) VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO trainings(company_id,title,hours,mandatory,due_date,created_by,created_at,kind,description) VALUES(?,?,?,?,?,?,?,?,?)",
               )
               .run(
                 companyId,
@@ -434,6 +437,8 @@ export function registerPerformance(router, app) {
                 isoDate(b.due_date, "Due date"),
                 user.id,
                 nowIso(),
+                kind,
+                optionalString(b.description, "Description", 1000) || null,
               )
           ).lastInsertRowid,
         );
@@ -464,12 +469,17 @@ export function registerPerformance(router, app) {
     async ({ user, params, body, send, audit }) => {
       const r = await db
         .prepare(
-          "SELECT r.*,t.company_id,t.mandatory FROM training_records r JOIN trainings t ON t.id=r.training_id WHERE r.id=?",
+          "SELECT r.*,t.company_id,t.mandatory,t.kind FROM training_records r JOIN trainings t ON t.id=r.training_id WHERE r.id=?",
         )
         .get(integer(Number(params.id)));
       if (!r || r.company_id !== user.company_id)
         throw new HttpError(404, "Training record not found.");
       const self = r.user_id === user.id;
+      if (r.kind === "course" && !can(user, "performance.manage"))
+        throw new HttpError(
+          403,
+          "A course is completed by finishing its lessons and passing the quiz.",
+        );
       if (
         !(
           can(user, "performance.manage") ||

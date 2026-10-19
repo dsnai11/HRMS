@@ -186,6 +186,7 @@ function shell() {
     me.role !== "super_admin" && ["myclaims", "₹", "Claims & loans"],
     me.role !== "super_admin" && ["myemployment", "☗", "My employment"],
     me.role !== "super_admin" && ["performance", "★", "Performance"],
+    me.role !== "super_admin" && ["learning", "✎", "Learning"],
     ["documents", "▤", "Documents"],
     me.role !== "super_admin" && ["mine", "◎", "My attendance"],
     ["directory", "☰", "Directory"],
@@ -282,6 +283,7 @@ async function render() {
     if (page === "myemployment") return await myEmploymentPage(id);
     if (page === "insights") return await insightsPage(id);
     if (page === "performance") return await performancePage(id);
+    if (page === "learning") return await learningPage(id);
     if (page === "directory") return await directoryPage(id);
     if (page === "refer") return await referPage(id);
     if (page === "documents") return await documentsPage(id);

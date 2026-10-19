@@ -1145,3 +1145,30 @@ code.secret {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- learning ---- */
+.prewrap {
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+.builder-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+dialog.wide {
+  width: min(760px, 96vw);
+}
+fieldset {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 0 0 12px;
+  display: grid;
+  gap: 8px;
+}
+.notice-ok {
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #e8f5ef;
+}

@@ -28,11 +28,11 @@ Addetto HRMS (Intero Software LLP) is an Indian HRMS with an employee mobile app
 | Documents and acknowledgement                              | yes             | Yes: upload, verify, policy acknowledgement                                                                   |
 | Helpdesk                                                   | yes             | Yes (web and phone)                                                                                           |
 | Refer a candidate                                          | yes             | Yes (web and phone)                                                                                           |
-| LMS / courses                                              | yes             | Training assignment and completion records; **no course content or quizzes**                                  |
+| LMS / courses                                              | yes             | Courses with lessons, quizzes, certificates, auto-assign and reminders; videos are links, not hosted          |
 | Forgot password                                            | yes             | Yes: emailed link (needs email set up and `APP_URL`); otherwise HR resets                                     |
 | Version-gated punching                                     | yes             | Yes: set the oldest app version allowed to punch                                                              |
 | Data security: encrypted sensitive fields                  | yes             | Yes (AES-256-GCM), two-factor on the web, session controls                                                    |
 
 ## Still to build to match
 
-LMS course content, and a live biometric device connection.
+a live biometric device connection.
