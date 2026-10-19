@@ -42,7 +42,7 @@ export async function loadAttendance(app, { companyId, query, teamOf }) {
   return (
     await app.db
       .prepare(
-        `SELECT s.*,u.name employee_name,u.email,u.employee_code,d.name department_name,b.name branch_name
+        `SELECT s.*,(SELECT COUNT(*) FROM punch_photos p WHERE p.shift_id=s.id) selfies,u.name employee_name,u.email,u.employee_code,d.name department_name,b.name branch_name
          FROM shifts s JOIN users u ON u.id=s.user_id
          LEFT JOIN departments d ON d.id=u.department_id LEFT JOIN branches b ON b.id=u.branch_id
          WHERE ${where.join(" AND ")} ORDER BY s.in_at DESC`,

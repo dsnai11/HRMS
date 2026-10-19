@@ -1025,3 +1025,31 @@ code.secret {
   background: #f1f3f2;
   border-radius: 6px;
 }
+
+.forgot {
+  display: block;
+  margin-top: 14px;
+  font-size: 14px;
+  color: var(--green);
+}
+#dir-q {
+  width: 100%;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.selfies {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.selfies figure {
+  margin: 0;
+}
+.selfies img {
+  width: 220px;
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+}

@@ -23,9 +23,12 @@ import { registerRecruitment } from "./routes/recruitment.js";
 import { registerExit } from "./routes/exit.js";
 import { registerDocuments } from "./routes/documents.js";
 import { registerPerformance } from "./routes/performance.js";
+import { registerShiftPolicies } from "./routes/shift-policies.js";
+import { registerPeople } from "./routes/people.js";
 import { registerSecurity } from "./routes/security.js";
 import { registerEngagement } from "./routes/engagement.js";
 import { registerInsights } from "./routes/insights.js";
+import { scheduleRetention } from "./retention.js";
 import { createNotifier, notifyFromAudit } from "./notify.js";
 
 const publicDir = new URL("../public/", import.meta.url);
@@ -38,6 +41,7 @@ const STATIC = {
   "/hiring.js": ["hiring.js", "text/javascript"],
   "/engage.js": ["engage.js", "text/javascript"],
   "/more.js": ["more.js", "text/javascript"],
+  "/people.js": ["people.js", "text/javascript"],
   "/letter.html": ["letter.html", "text/html"],
   "/letter.js": ["letter.js", "text/javascript"],
   "/payslip.html": ["payslip.html", "text/html"],
@@ -132,6 +136,8 @@ export function createApp({
     registerExit,
     registerEngagement,
     registerSecurity,
+    registerPeople,
+    registerShiftPolicies,
     registerDocuments,
     registerPerformance,
     registerInsights,
@@ -302,6 +308,7 @@ export function createApp({
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { server, db } = createApp({ db: await openConfiguredDatabase() });
+  scheduleRetention(db);
   server.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () =>
     console.log(`HRMS listening on port ${process.env.PORT || 3000}`),
   );

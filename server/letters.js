@@ -50,3 +50,39 @@ export function exitLetter(kind, { company, person, joined, lastDay, today }) {
     signoff: `For ${company}`,
   };
 }
+
+const KIND_TITLE = {
+  promotion: "Promotion letter",
+  transfer: "Transfer letter",
+  increment: "Salary revision letter",
+  confirmation: "Confirmation letter",
+};
+export function changeLetter({ company, person, change, names, today }) {
+  const lines = [`Dear ${person.name},`];
+  const at = `with effect from ${longDate(change.effective_date)}`;
+  if (change.kind === "promotion")
+    lines.push(
+      `We are pleased to inform you that you have been promoted${names.designation ? ` to ${names.designation}` : ""}${names.department ? ` in ${names.department}` : ""}, ${at}.`,
+    );
+  else if (change.kind === "transfer")
+    lines.push(
+      `You are transferred${names.branch ? ` to ${names.branch}` : ""}${names.department ? `, ${names.department}` : ""}${names.manager ? `, reporting to ${names.manager}` : ""}, ${at}.`,
+    );
+  else if (change.kind === "increment")
+    lines.push(
+      `Your monthly gross salary is revised to ${inr(change.monthly_gross)} (${inr(change.monthly_gross * 12)} a year), ${at}.`,
+    );
+  else
+    lines.push(
+      `We are pleased to confirm your services as a permanent employee of ${company}, ${at}.`,
+    );
+  if (change.note) lines.push(change.note);
+  lines.push("All other terms of your employment remain unchanged.");
+  return {
+    title: KIND_TITLE[change.kind],
+    date: longDate(today),
+    to: person.name,
+    paragraphs: lines,
+    signoff: `For ${company}`,
+  };
+}

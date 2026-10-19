@@ -13,7 +13,9 @@ const esc = (v) =>
   const path =
     q.get("type") === "offer"
       ? `/api/admin/offers/${id}/letter`
-      : `/api/admin/exits/${id}/letter?kind=${encodeURIComponent(q.get("kind") || "experience")}`;
+      : q.get("type") === "change"
+        ? `/api/admin/changes/${id}/letter`
+        : `/api/admin/exits/${id}/letter?kind=${encodeURIComponent(q.get("kind") || "experience")}`;
   const res = await fetch(path);
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));

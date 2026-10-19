@@ -75,3 +75,9 @@ Still to do:
 - 360-degree feedback, calibration, goal cascading, learning paths.
 - Scale out beyond one instance (write ordering in the database, shared counters); background jobs. Reads already run in parallel, backups/restore drill and monitoring are in `docs/OPERATIONS.md`.
 - Real device attestation (Play Integrity, App Attest).
+
+## Stage 6 — Match Addetto HRMS (in progress)
+
+Done: phone self-service screens, selfie at punch, shift rules per branch or employee, directory, referrals, career changes with letters, forgot password, employee tax statement.
+
+Still to do: see "Still to build to match" in `docs/COMPARISON.md` (biometric import, rotating rosters, Labour Welfare Fund, ESI challans, KRA/KPI and feedback, phone push, customisable dashboard, LMS content, minimum-app-version gate).

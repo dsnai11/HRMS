@@ -23,7 +23,7 @@ const time = (v, label) => {
 };
 
 export function registerRegularization(router, app) {
-  const { db, transaction, clock, dayOf, timezone, policy } = app;
+  const { db, transaction, clock, dayOf, timezone } = app;
   const nowIso = () => new Date(clock()).toISOString();
   const today = () => dayOf(nowIso());
   const SELECT = `SELECT r.*,u.name employee_name,u.employee_code FROM regularizations r JOIN users u ON u.id=r.user_id`;
@@ -175,6 +175,7 @@ export function registerRegularization(router, app) {
         422,
         "Assign this employee a workplace before approving.",
       );
+    const policy = await app.policyFor(person);
     const inMs = localToUtcMs(
       r.date,
       r.in_time || hhmm(policy.startMinutes),
