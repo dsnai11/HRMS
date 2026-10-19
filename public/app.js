@@ -160,6 +160,7 @@ function shell() {
     me.is_manager && ["team", "☷", "My team"],
     me.role !== "super_admin" && ["timeoff", "☼", "Time off"],
     me.role !== "super_admin" && ["payslips", "❒", "Payslips"],
+    me.role !== "super_admin" && ["myclaims", "₹", "Claims & loans"],
     me.role !== "super_admin" && ["mine", "◎", "My attendance"],
     ["profile", "☺", "My profile"],
   ].filter(Boolean);
@@ -246,6 +247,7 @@ async function render() {
     if (page === "muster") return await musterPage(id);
     if (page === "payroll") return await payrollPage(id);
     if (page === "payslips") return await payslipsPage(id);
+    if (page === "myclaims") return await myClaimsPage(id);
     if (page === "overview") {
       const [stats, active, sites] = await Promise.all([
         api("/admin/overview"),

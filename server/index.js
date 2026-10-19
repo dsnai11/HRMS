@@ -18,6 +18,7 @@ import { registerRegularization } from "./routes/regularization.js";
 import { registerSummary } from "./routes/summary.js";
 import { registerPayrollSetup } from "./routes/payroll-setup.js";
 import { registerPayrollRuns } from "./routes/payroll-runs.js";
+import { registerPayrollExtras } from "./routes/payroll-extras.js";
 
 const publicDir = new URL("../public/", import.meta.url);
 const STATIC = {
@@ -25,6 +26,7 @@ const STATIC = {
   "/app.js": ["app.js", "text/javascript"],
   "/timeoff.js": ["timeoff.js", "text/javascript"],
   "/payroll.js": ["payroll.js", "text/javascript"],
+  "/payroll-more.js": ["payroll-more.js", "text/javascript"],
   "/payslip.html": ["payslip.html", "text/html"],
   "/payslip.js": ["payslip.js", "text/javascript"],
   "/styles.css": ["styles.css", "text/css"],
@@ -96,6 +98,7 @@ export function createApp({
     registerSummary,
     registerPayrollSetup,
     registerPayrollRuns,
+    registerPayrollExtras,
   ])
     register(router, app);
 

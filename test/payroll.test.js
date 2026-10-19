@@ -792,7 +792,7 @@ test("a payroll run computes pay, locks on approval, and gives employees their p
   assert.equal(
     (await call(`/admin/employees/${people.e1.id}/salary`, frozen, pay)).status,
     409,
-    "cannot revise a locked month",
+    "cannot revise a locked month without confirming arrears",
   );
   assert.equal(
     (
@@ -1242,4 +1242,480 @@ test("payroll can require a second person to approve, and stays within its compa
       .data.length,
     0,
   );
+});
+
+test("a back-dated revision pays the difference, and the PF on it, as arrears", async (t) => {
+  const w = await prepared(t);
+  const { call, people } = w;
+  const pay = people.pay.token;
+  const run = (await call("/admin/payroll/runs", { month: "2026-10" }, pay))
+    .data.id;
+  assert.equal(
+    (await call(`/admin/payroll/runs/${run}/approve`, {}, people.boss.token))
+      .status,
+    200,
+  );
+
+  const revise = (key, body, extra = {}) =>
+    call(
+      `/admin/employees/${people[key].id}/salary${extra.preview ? "-arrears" : ""}`,
+      { effective_from: "2026-10-01", ...body },
+      pay,
+    );
+  const raise = { monthly_gross: 22000, esi_applicable: true };
+  // A preview shows what would be paid, month by month, without changing anything.
+  const preview = (await revise("e2", raise, { preview: true })).data;
+  assert.deepEqual(
+    preview.rows.map((r) => [
+      r.month,
+      r.old_gross,
+      r.new_gross,
+      r.gross_diff,
+      r.pf_diff,
+    ]),
+    [["2026-10", 15484, 17032, 1548, 93]],
+  );
+  assert.deepEqual(
+    [preview.total_gross, preview.total_pf, preview.pay_in_month],
+    [1548, 93, "2026-11"],
+  );
+  assert.equal(
+    (await call(`/admin/employees/${people.e2.id}/salary`, undefined, pay)).data
+      .length,
+    1,
+    "nothing was saved",
+  );
+  // Without confirmation a back-dated revision is refused.
+  const refused = await revise("e2", raise);
+  assert.equal(refused.status, 409);
+  assert.match(refused.data.error, /arrears/);
+  const done = await revise("e2", { ...raise, arrears: true });
+  assert.equal(done.status, 201);
+  assert.equal(done.data.arrears.total_gross, 1548);
+  const adjustments = (
+    await call("/admin/payroll/adjustments?month=2026-11", undefined, pay)
+  ).data;
+  assert.deepEqual(
+    adjustments
+      .filter((a) => a.employee_name === "E2")
+      .map((a) => [a.kind, a.name, a.amount, a.taxable]),
+    [
+      ["earning", "Arrears Oct 2026", 1548, 1],
+      ["deduction", "PF on arrears (employee)", 93, 0],
+    ],
+  );
+  // The approved October run is untouched.
+  assert.equal((await itemOf(w, pay, run, "e2")).gross_earnings, 15484);
+
+  // A retrospective reduction becomes a recovery.
+  const cut = await revise("e1", { monthly_gross: 54000, arrears: true });
+  assert.equal(cut.data.arrears.total_gross, -6000);
+  const recovery = (
+    await call("/admin/payroll/adjustments?month=2026-11", undefined, pay)
+  ).data.find((a) => a.employee_name === "E1");
+  assert.deepEqual([recovery.kind, recovery.amount], ["deduction", 6000]);
+
+  // November's payroll carries both, and the new salary ends ESI cover (22,000 is above the 21,000 limit).
+  w.setNow("2026-12-05T10:00:00+05:30");
+  await w.attend("e1", "2026-11");
+  await w.attend("e2", "2026-11");
+  const nov = (await call("/admin/payroll/runs", { month: "2026-11" }, pay))
+    .data.id;
+  const e2 = await itemOf(w, pay, nov, "e2");
+  assert.equal(e2.gross_earnings, 22000 + 1548);
+  assert.deepEqual(
+    [e2.esi.employee, e2.esi.employer],
+    [0, 0],
+    "no longer covered",
+  );
+  assert.deepEqual(
+    e2.deductions.map((d) => [d.code, d.amount]),
+    [
+      ["PF", 1320],
+      ["ADJ", 93],
+    ],
+  );
+  assert.equal(e2.net_pay, 23548 - 1320 - 93);
+  const e1 = await itemOf(w, pay, nov, "e1");
+  assert.equal(
+    e1.net_pay,
+    54000 - 6000 - 3000 - 200,
+    "reduced pay, less the recovery, PF and professional tax",
+  );
+});
+
+test("loans are recovered by instalment, and reimbursement claims are paid with the run", async (t) => {
+  const w = await prepared(t);
+  const { call, people } = w;
+  const pay = people.pay.token;
+  const e1 = people.e1.token;
+
+  // A 30,000 loan over three months from October.
+  const loan = await call(
+    "/admin/payroll/loans",
+    {
+      user_id: people.e1.id,
+      principal: 30000,
+      installments: 3,
+      start_month: "2026-10",
+    },
+    pay,
+  );
+  assert.equal(loan.status, 201, JSON.stringify(loan.data));
+  const detail = (
+    await call(`/admin/payroll/loans/${loan.data.id}`, undefined, pay)
+  ).data;
+  assert.deepEqual(
+    detail.schedule.map((s) => [s.month, s.amount]),
+    [
+      ["2026-10", 10000],
+      ["2026-11", 10000],
+      ["2026-12", 10000],
+    ],
+  );
+  assert.equal(
+    (await call("/loans", undefined, e1)).data[0].schedule.length,
+    3,
+  );
+
+  // A claim type with a yearly limit; the limit is enforced per tax year.
+  const type = (
+    await call(
+      "/admin/claim-types",
+      { name: "Travel", annual_limit: 5000 },
+      pay,
+    )
+  ).data.id;
+  const claim = await call(
+    "/claims",
+    {
+      claim_type_id: type,
+      expense_date: "2026-10-10",
+      amount: 3000,
+      description: "Client visit",
+      reference: "BILL-1",
+    },
+    e1,
+  );
+  assert.equal(claim.status, 201, JSON.stringify(claim.data));
+  const over = await call(
+    "/claims",
+    {
+      claim_type_id: type,
+      expense_date: "2026-10-11",
+      amount: 2500,
+      description: "Another",
+    },
+    e1,
+  );
+  assert.equal(over.status, 409);
+  assert.match(over.data.error, /yearly limit/);
+  // You cannot decide your own claim; payroll can, and a rejection needs a reason.
+  assert.equal(
+    (
+      await call(
+        `/claims/${claim.data.id}/decide`,
+        { decision: "approved" },
+        e1,
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await call(
+        `/claims/${claim.data.id}/decide`,
+        { decision: "rejected" },
+        pay,
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await call(
+        `/claims/${claim.data.id}/decide`,
+        { decision: "approved", approved_amount: 2800 },
+        pay,
+      )
+    ).status,
+    200,
+  );
+
+  // October's run recovers the instalment and pays the claim, neither being taxed.
+  const run = (await call("/admin/payroll/runs", { month: "2026-10" }, pay))
+    .data.id;
+  const slip = await itemOf(w, pay, run, "e1");
+  assert.deepEqual(
+    slip.deductions
+      .filter((d) => d.code === "ADJ")
+      .map((d) => [d.name, d.amount]),
+    [["Loan recovery", 10000]],
+  );
+  const reimb = slip.earnings.find((e) => e.name === "Reimbursement: Travel");
+  assert.equal(reimb.amount, 2800);
+  assert.equal(
+    slip.taxable_earnings,
+    slip.gross_earnings - 2800 - 0,
+    "reimbursement is not taxable",
+  );
+  assert.equal(
+    (await call(`/admin/payroll/runs/${run}/approve`, {}, people.boss.token))
+      .status,
+    200,
+  );
+  const after = (
+    await call(`/admin/payroll/loans/${loan.data.id}`, undefined, pay)
+  ).data;
+  assert.deepEqual(
+    after.schedule.map((s) => s.status),
+    ["deducted", "pending", "pending"],
+  );
+  assert.equal((await call("/claims", undefined, e1)).data[0].status, "paid");
+
+  // Skipping November's instalment pushes it to the end; cancelling stops the rest.
+  assert.equal(
+    (
+      await call(
+        `/admin/payroll/loans/${loan.data.id}/skip`,
+        { month: "2026-11" },
+        pay,
+      )
+    ).status,
+    200,
+  );
+  const skipped = (
+    await call(`/admin/payroll/loans/${loan.data.id}`, undefined, pay)
+  ).data;
+  assert.deepEqual(skipped.schedule.map((s) => s.month).sort(), [
+    "2026-10",
+    "2026-12",
+    "2027-01",
+  ]);
+  assert.equal(
+    (
+      await call(
+        `/admin/payroll/loans/${loan.data.id}`,
+        undefined,
+        pay,
+        "DELETE",
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    (await call(`/admin/payroll/loans/${loan.data.id}`, undefined, pay)).data
+      .status,
+    "cancelled",
+  );
+});
+
+test("leave encashment, statutory bonus, gratuity and the statutory files", async (t) => {
+  const w = await prepared(t);
+  const { call, people, db } = w;
+  const pay = people.pay.token;
+
+  // ---- leave encashment: only for types marked encashable, and it can be reversed
+  const el = await call(
+    "/admin/leave-types",
+    {
+      name: "Earned leave",
+      code: "EL",
+      quota_per_year: 24,
+      accrual: "monthly",
+      encashable: true,
+    },
+    people.hr.token,
+  );
+  assert.equal(el.status, 201, JSON.stringify(el.data));
+  const tooMany = await call(
+    `/admin/employees/${people.e1.id}/leave-encashment`,
+    { leave_type_id: el.data.id, days: 200, pay_in_month: "2026-11" },
+    pay,
+  );
+  assert.equal(tooMany.status, 409);
+  const enc = await call(
+    `/admin/employees/${people.e1.id}/leave-encashment`,
+    { leave_type_id: el.data.id, days: 2, pay_in_month: "2026-11" },
+    pay,
+  );
+  assert.equal(enc.status, 201, JSON.stringify(enc.data));
+  assert.deepEqual([enc.data.amount, enc.data.rate], [2000, 1000]);
+  const bal = async () =>
+    (await call("/leave/balances", undefined, people.e1.token)).data[0].balance;
+  assert.equal(await bal(), 20, "two days came off the balance");
+  assert.equal(
+    (
+      await call(
+        `/admin/payroll/encashments/${enc.data.id}`,
+        undefined,
+        pay,
+        "DELETE",
+      )
+    ).status,
+    200,
+  );
+  assert.equal(await bal(), 22, "reversing gives the days back");
+
+  // ---- an approved run to report on
+  const run = (await call("/admin/payroll/runs", { month: "2026-10" }, pay))
+    .data.id;
+  assert.equal(
+    (await call(`/admin/payroll/runs/${run}/approve`, {}, people.boss.token))
+      .status,
+    200,
+  );
+  // Identity numbers are needed for the statutory files.
+  const original = process.env.DATA_ENCRYPTION_KEY;
+  process.env.DATA_ENCRYPTION_KEY = randomBytes(32).toString("base64");
+  t.after(() =>
+    original === undefined
+      ? delete process.env.DATA_ENCRYPTION_KEY
+      : (process.env.DATA_ENCRYPTION_KEY = original),
+  );
+  const file = (type, q = "") =>
+    call(`/admin/payroll/runs/${run}/export?type=${type}${q}`, undefined, pay);
+  assert.equal((await file("ecr")).status, 409, "no UANs yet");
+  const ident = {
+    e1: { pan: "ABCDE1234F", uan: "101234567890" },
+    e2: { pan: "BCDEF2345G", uan: "101234567891", esi_ip: "1234567890" },
+    e4: { pan: "CDEFG3456H", uan: "101234567892" },
+  };
+  for (const [k, v] of Object.entries(ident))
+    assert.equal(
+      (await call(`/admin/employees/${people[k].id}/private`, v, pay, "PUT"))
+        .status,
+      200,
+    );
+
+  // ECR: eleven fields per member, joined with #~#.
+  const ecr = (await file("ecr")).data.split("\r\n");
+  assert.equal(ecr.length, 3);
+  const e2 = ecr.find((l) => l.startsWith("101234567891")).split("#~#");
+  assert.equal(e2.length, 11);
+  assert.deepEqual(e2.slice(0, 2).concat(e2.slice(2, 4)), [
+    "101234567891",
+    "E",
+    "15484",
+    "7742",
+  ]);
+  assert.equal(e2[9], "7", "days of non-contributory service");
+
+  // ESIC upload: six columns; only the ESI-covered employee, days as whole numbers.
+  const esic = (await file("esic")).data.replace(/^\uFEFF/, "").split("\r\n");
+  assert.equal(esic.length, 2);
+  assert.equal(esic[0].split(",").length, 6);
+  assert.deepEqual(
+    esic[1]
+      .split(",")
+      .slice(0, 4)
+      .map((x) => x.replaceAll('"', "")),
+    ["1234567890", "E2", "24", "15484"],
+  );
+
+  // Form 130 data and the Form 138 quarter, taken from approved runs and opening balances.
+  const stmt = (
+    await call("/admin/payroll/tax-statement?year=2026", undefined, pay)
+  ).data;
+  const s4 = stmt.rows.find((r) => r.name === "E4");
+  assert.deepEqual(
+    [s4.gross, s4.taxable, s4.tds, s4.pt],
+    [200000, 1400000, 48750, 200],
+    "this month plus the opening balance",
+  );
+  const q3 = (await file("x")).status; // unknown export type
+  assert.equal(q3, 400);
+  const f138 = await call(
+    "/admin/payroll/tax-statement?year=2026&form=138&quarter=3&format=csv",
+    undefined,
+    pay,
+  );
+  assert.equal(f138.status, 200);
+  assert.match(f138.data, /CDEFG3456H/);
+  assert.match(f138.data, /2026-10/);
+  const f138q1 = (
+    await call(
+      "/admin/payroll/tax-statement?year=2026&form=138&quarter=1&format=csv",
+      undefined,
+      pay,
+    )
+  ).data;
+  assert.doesNotMatch(
+    f138q1,
+    /CDEFG3456H/,
+    "October is not in the first quarter",
+  );
+
+  // ---- bonus needs 30 days of work; with two months E2 qualifies on wages capped at 7,000
+  w.setNow("2026-12-05T10:00:00+05:30");
+  for (const k of ["e1", "e2", "e4"]) await w.attend(k, "2026-11");
+  const nov = (await call("/admin/payroll/runs", { month: "2026-11" }, pay))
+    .data.id;
+  assert.equal(
+    (await call(`/admin/payroll/runs/${nov}/approve`, {}, people.boss.token))
+      .status,
+    200,
+  );
+  const bonus = (await call("/admin/payroll/bonus?year=2026", undefined, pay))
+    .data;
+  const b2 = bonus.rows.find((r) => r.name === "E2");
+  assert.deepEqual(
+    [b2.eligible, b2.days, b2.base, b2.amount],
+    [true, 54, 12419, 1035],
+    "7,000 x 24/31 + 7,000 x 30/30, at 8.33%",
+  );
+  assert.equal(
+    bonus.rows.find((r) => r.name === "E1").eligible,
+    false,
+    "wages above 21,000",
+  );
+  const apply = await call(
+    "/admin/payroll/bonus",
+    { year: 2026, pay_in_month: "2026-12" },
+    pay,
+  );
+  assert.deepEqual(apply.data, { added: 1 });
+  assert.equal(
+    (
+      await call(
+        "/admin/payroll/bonus",
+        { year: 2026, pay_in_month: "2026-12" },
+        pay,
+      )
+    ).status,
+    409,
+    "cannot be added twice",
+  );
+  const line = (
+    await call("/admin/payroll/adjustments?month=2026-12", undefined, pay)
+  ).data;
+  assert.deepEqual(
+    line.map((a) => [a.name, a.amount, a.taxable]),
+    [["Statutory bonus 2026-27", 1035, 1]],
+  );
+
+  // ---- gratuity: eligible after five years, wages at least half of gross
+  await db
+    .prepare("UPDATE users SET date_of_joining='2018-03-01' WHERE id=?")
+    .run(people.e1.id);
+  const g = (
+    await call(
+      `/admin/employees/${people.e1.id}/gratuity?as_of=2026-10-05`,
+      undefined,
+      pay,
+    )
+  ).data;
+  assert.deepEqual(
+    [g.wages, g.service_years, g.counted_years, g.eligible, g.payable],
+    [30000, 8, 9, true, 155769],
+  );
+  const liability = (
+    await call(
+      "/admin/payroll/gratuity-liability?as_of=2026-10-05",
+      undefined,
+      pay,
+    )
+  ).data;
+  assert.equal(liability.rows.find((r) => r.name === "E1").payable, 155769);
+  assert.equal(liability.rows.find((r) => r.name === "E4").error, undefined);
 });

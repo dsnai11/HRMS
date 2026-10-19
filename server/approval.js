@@ -38,5 +38,12 @@ export async function pendingApprovals(app, user) {
         )
         .get(user.company_id, user.id, ...scope.params)
     ).n;
+  n += (
+    await app.db
+      .prepare(
+        `SELECT COUNT(*) n FROM reimbursement_claims r WHERE r.company_id=? AND r.status='pending' AND r.user_id<>?${scope.sql}`,
+      )
+      .get(user.company_id, user.id, ...scope.params)
+  ).n;
   return n;
 }
