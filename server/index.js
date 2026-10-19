@@ -31,6 +31,7 @@ import { registerSecurity } from "./routes/security.js";
 import { registerEngagement } from "./routes/engagement.js";
 import { registerInsights } from "./routes/insights.js";
 import { scheduleRetention } from "./retention.js";
+import { createPush } from "./push.js";
 import { createNotifier, notifyFromAudit } from "./notify.js";
 
 const publicDir = new URL("../public/", import.meta.url);
@@ -104,6 +105,7 @@ export function createApp({
         ),
   };
   app.notify = createNotifier(app);
+  app.push = createPush(app);
   const writeAudit = app.audit;
   app.audit = async (
     actor,

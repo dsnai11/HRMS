@@ -1,3 +1,9 @@
+const fs = require("node:fs");
+// Android push needs the Firebase file; without it the app still builds, just without push.
+const googleServices = fs.existsSync(`${__dirname}/google-services.json`)
+  ? "./google-services.json"
+  : undefined;
+
 module.exports = {
   expo: {
     name: "Laxmi India HRMS",
@@ -12,6 +18,7 @@ module.exports = {
       infoPlist: { ITSAppUsesNonExemptEncryption: false },
     },
     android: {
+      ...(googleServices ? { googleServicesFile: googleServices } : {}),
       package: process.env.ANDROID_PACKAGE || "com.laxmiindia.hrms",
       blockedPermissions: [
         "android.permission.ACCESS_BACKGROUND_LOCATION",
@@ -21,6 +28,7 @@ module.exports = {
     plugins: [
       "expo-router",
       "expo-secure-store",
+      "expo-notifications",
       [
         "expo-camera",
         {

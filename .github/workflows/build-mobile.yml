@@ -27,6 +27,12 @@ jobs:
           distribution: temurin
           java-version: 17
       - run: npm ci
+      # Optional: Firebase file for Android push (repository secret GOOGLE_SERVICES_JSON).
+      - name: Add Firebase config
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then printf '%s' "$GOOGLE_SERVICES_JSON" > google-services.json; fi
       - run: npx expo prebuild --platform android --no-install
       - name: Build release APK
         working-directory: mobile/android

@@ -53,6 +53,27 @@ export function registerEngagement(router, app) {
     return send(200, { ok: true });
   });
 
+  // ---- phone push tokens ---------------------------------------------------------------------------
+  router.post("/api/push/register", async ({ user, body, send }) => {
+    const b = await body();
+    const token = string(b.token, "Token", 400);
+    const platform = oneOf(b.platform, "Platform", ["android", "ios"]);
+    // A token belongs to one person: signing in as someone else on the same phone moves it.
+    await db
+      .prepare(
+        "INSERT INTO push_tokens(user_id,token,platform,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT (token) DO UPDATE SET user_id=EXCLUDED.user_id,platform=EXCLUDED.platform,updated_at=EXCLUDED.updated_at",
+      )
+      .run(user.id, token, platform, nowIso(), nowIso());
+    return send(200, { ok: true });
+  });
+  router.post("/api/push/unregister", async ({ user, body, send }) => {
+    const token = string((await body()).token, "Token", 400);
+    await db
+      .prepare("DELETE FROM push_tokens WHERE token=? AND user_id=?")
+      .run(token, user.id);
+    return send(200, { ok: true });
+  });
+
   // ---- announcements ---------------------------------------------------------------------------
   // An announcement reaches everyone, or one branch, or one department.
   const audienceSql = `(a.branch_id IS NULL OR a.branch_id=?) AND (a.department_id IS NULL OR a.department_id=?)`;
