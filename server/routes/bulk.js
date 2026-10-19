@@ -35,7 +35,8 @@ export function registerBulk(router, app) {
       if (b.rows.length > MAX_ROWS)
         throw new HttpError(413, `Send at most ${MAX_ROWS} rows at a time.`);
       const dry = b.dry_run === true,
-        createMissing = b.create_missing === true;
+        createMissing = b.create_missing === true,
+        update = b.update_existing === true;
       const lookup = async (table) =>
         new Map(
           (
@@ -55,7 +56,7 @@ export function registerBulk(router, app) {
       ];
       const people = await db
         .prepare(
-          `SELECT id,employee_code,email FROM users WHERE company_id=? ${wanted.length ? `OR lower(email) IN (${wanted.map(() => "?").join(",")})` : ""}`,
+          `SELECT id,employee_code,email,company_id FROM users WHERE company_id=? ${wanted.length ? `OR lower(email) IN (${wanted.map(() => "?").join(",")})` : ""}`,
         )
         .all(companyId, ...wanted);
       const codes = new Map(
@@ -64,6 +65,12 @@ export function registerBulk(router, app) {
           .map((p) => [key(p.employee_code), p.id]),
       );
       const emails = new Set(people.map((p) => key(p.email)));
+      const emailIds = new Map(
+        people
+          .filter((p) => p.company_id === companyId)
+          .map((p) => [key(p.email), p.id]),
+      );
+      const touchedIds = new Set();
       const report = [],
         accepted = [],
         batchCodes = new Set(),
@@ -82,14 +89,29 @@ export function registerBulk(router, app) {
           });
         const name = String(r.name ?? "").trim(),
           email = key(r.email);
-        if (!name) return fail("Name is missing");
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-          return fail("Email is missing or not valid");
-        if (emails.has(email) || batchEmails.has(email))
-          return fail("Email is already registered");
         const code = String(r.employee_code ?? "").trim();
-        if (code && (codes.has(key(code)) || batchCodes.has(key(code))))
-          return fail("Employee code is already in use");
+        let existingId = null;
+        if (update) {
+          // Update mode: the row names an existing person by code or email.
+          const byCode = code ? codes.get(key(code)) : undefined;
+          const byEmail = email ? emailIds.get(email) : undefined;
+          if (byCode && byEmail && byCode !== byEmail)
+            return fail("Employee code and email belong to different people");
+          existingId = byCode ?? byEmail ?? null;
+          if (!existingId)
+            return fail("No existing employee matches this code or email");
+          if (touchedIds.has(existingId))
+            return fail("This person appears twice in the file");
+          touchedIds.add(existingId);
+        } else {
+          if (!name) return fail("Name is missing");
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+            return fail("Email is missing or not valid");
+          if (emails.has(email) || batchEmails.has(email))
+            return fail("Email is already registered");
+          if (code && (codes.has(key(code)) || batchCodes.has(key(code))))
+            return fail("Employee code is already in use");
+        }
         for (const k of ["date_of_birth", "date_of_joining"])
           if (r[k] && !isDate(r[k]))
             return fail(`${k.replaceAll("_", " ")} must be YYYY-MM-DD`);
@@ -129,8 +151,8 @@ export function registerBulk(router, app) {
             `Unknown workplace "${wp}" (workplaces need map coordinates, so add them first)`,
           );
         batchEmails.add(email);
-        if (code) batchCodes.add(key(code));
-        accepted.push({ line, r, name, email, code, refs, wp });
+        if (code && !existingId) batchCodes.add(key(code));
+        accepted.push({ line, r, name, email, code, refs, wp, existingId });
       });
       // Reporting managers must exist, in the company or in this file.
       for (const a of accepted) {
@@ -150,7 +172,8 @@ export function registerBulk(router, app) {
       if (dry)
         return send(200, {
           dry_run: true,
-          would_create: todo.length,
+          would_create: todo.filter((a) => !a.existingId).length,
+          would_update: todo.filter((a) => a.existingId).length,
           failed: report.length,
           report: report.slice(0, 300),
         });
@@ -218,6 +241,38 @@ export function registerBulk(router, app) {
           if (a.refs.branch)
             body2.branch_id = await ensure("branches", a.refs.branch);
           if (a.wp) body2.workplace_id = workplaces.get(key(a.wp));
+          if (a.existingId) {
+            // Update mode: only the columns the row actually fills in change.
+            const cols = {};
+            if (a.name) cols.name = a.name;
+            for (const k of [
+              "phone",
+              "gender",
+              "date_of_birth",
+              "date_of_joining",
+              "employment_type",
+              "department_id",
+              "designation_id",
+              "branch_id",
+              "workplace_id",
+            ])
+              if (body2[k] !== undefined) cols[k] = body2[k];
+            const names = Object.keys(cols);
+            if (names.length)
+              await db
+                .prepare(
+                  `UPDATE users SET ${names.map((n) => `${n}=?`).join(",")} WHERE id=? AND company_id=?`,
+                )
+                .run(...names.map((n) => cols[n]), a.existingId, companyId);
+            created.push({ id: a.existingId, a });
+            report.push({
+              line: a.line,
+              name: a.name,
+              email: a.email,
+              status: "updated",
+            });
+            continue;
+          }
           const id = await app.createEmployee(user, companyId, body2, audit);
           const row = await db
             .prepare("SELECT employee_code FROM users WHERE id=?")
@@ -279,13 +334,16 @@ export function registerBulk(router, app) {
             .prepare("UPDATE users SET manager_id=? WHERE id=?")
             .run(managerId, id);
       }
+      const made = created.filter((c) => !c.a.existingId).length;
       await audit("employees_imported", {
-        created: created.length,
+        created: made,
+        updated: created.length - made,
         failed: report.filter((r) => r.status === "failed").length,
       });
       return send(200, {
         dry_run: false,
-        created: created.length,
+        created: made,
+        updated: created.length - made,
         failed: report.filter((r) => r.status === "failed").length,
         report: report.slice(0, 300),
         credentials,
