@@ -24,6 +24,42 @@ export const WIDGETS = [
 export function registerInsights(router, app) {
   const { db, clock } = app;
 
+  // How full the database is, and what is using it. Neon's free plan caps a database at 1 GB.
+  router.get(
+    "/api/admin/storage",
+    { perm: "audit.read" },
+    async ({ companyId, send }) => {
+      const limit = Number(process.env.DB_SIZE_LIMIT_BYTES) || 1073741824;
+      const size = Number(
+        (
+          await db
+            .prepare("SELECT pg_database_size(current_database()) n")
+            .get()
+        ).n,
+      );
+      const docs = await db
+        .prepare(
+          "SELECT COUNT(*) n,COALESCE(SUM(size),0) b FROM documents WHERE company_id=? AND deleted_at IS NULL",
+        )
+        .get(companyId);
+      const selfies = await db
+        .prepare(
+          "SELECT COUNT(*) n,COALESCE(SUM(length(p.data)),0) b FROM punch_photos p JOIN shifts s ON s.id=p.shift_id JOIN users u ON u.id=s.user_id WHERE u.company_id=?",
+        )
+        .get(companyId);
+      return send(200, {
+        database_bytes: size,
+        limit_bytes: limit,
+        percent: Math.round((size / limit) * 1000) / 10,
+        documents: { count: Number(docs.n), bytes: Number(docs.b) },
+        selfies: {
+          count: Number(selfies.n),
+          bytes: Math.round(Number(selfies.b) * 0.75),
+        },
+      });
+    },
+  );
+
   router.get(
     "/api/dashboard-prefs",
     { perm: "insights.read" },

@@ -1,0 +1,50 @@
+name: Database backup
+# Daily encrypted backup of the production database, kept for 14 days as a workflow artifact.
+# Needs two repository secrets (Settings > Secrets and variables > Actions):
+#   DATABASE_URL        the Neon (or other PostgreSQL) connection string
+#   BACKUP_PASSPHRASE   a long passphrase used to encrypt the file; keep a copy somewhere safe
+# Without both, the job exits quietly. Restore steps are in docs/OPERATIONS.md.
+on:
+  schedule:
+    - cron: "17 20 * * *"
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check configuration
+        id: cfg
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "DATABASE_URL or BACKUP_PASSPHRASE is not set; skipping."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install PostgreSQL 18 client
+        if: steps.cfg.outputs.go == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -qq postgresql-client-18
+      - name: Dump and encrypt
+        if: steps.cfg.outputs.go == 'true'
+        run: |
+          mkdir out
+          scripts/backup.sh out
+          f=$(ls out/*.sql.gz)
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BACKUP_PASSPHRASE -in "$f" -out "$f.enc"
+          rm "$f"
+          ls -l out
+      - uses: actions/upload-artifact@v4
+        if: steps.cfg.outputs.go == 'true'
+        with:
+          name: hrms-backup
+          path: out/*.enc
+          retention-days: 14

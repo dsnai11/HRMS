@@ -453,13 +453,18 @@ async function render() {
             : empty("Nothing to review", "No refused or flagged punches yet.")
         }</div>`;
     } else {
-      const logs = await api("/admin/audit");
+      const [logs, store] = await Promise.all([
+        api("/admin/audit"),
+        api("/admin/storage"),
+      ]);
       if (id !== renderId) return;
+      const mb = (n) => (n / 1048576).toFixed(n >= 104857600 ? 0 : 1);
       document.querySelector("#content").innerHTML =
         heading(
           "Activity log",
           "Latest 100 account, workplace, and attendance events.",
         ) +
+        `<div class="card"><h2>Storage</h2><p>${mb(store.database_bytes)} MB of ${mb(store.limit_bytes)} MB used (${store.percent}%)${store.percent >= 80 ? ' <span class="pill">Nearly full</span>' : ""}</p><p class="muted">${store.documents.count} documents (${mb(store.documents.bytes)} MB) · ${store.selfies.count} punch selfies (${mb(store.selfies.bytes)} MB, deleted after 90 days).</p></div>` +
         `<div class="card">${logs.map((l) => `<div class="activity"><strong>${esc(l.actor_name)}</strong> · ${esc(l.action.replaceAll("_", " "))}<br><small>${time(l.created_at)} · ${esc(l.detail)}</small></div>`).join("") || empty("No events yet", "Activity will appear here.")}</div>`;
     }
   } catch (e) {

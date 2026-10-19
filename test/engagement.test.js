@@ -682,3 +682,18 @@ test("the page policy allows images made in the browser (selfie previews) and no
     "no inline code and no remote hosts",
   );
 });
+
+test("storage shows database size and what documents and selfies use", async (t) => {
+  const w = await world(t);
+  const { call, people } = w;
+  assert.equal(
+    (await call("/admin/storage", undefined, people.hr.token)).status,
+    403,
+    "admin only",
+  );
+  await w.add("boss", { role: "admin" });
+  const s = (await call("/admin/storage", undefined, people.boss.token)).data;
+  assert.ok(s.database_bytes > 0 && s.limit_bytes === 1073741824);
+  assert.deepEqual([s.documents.count, s.selfies.count], [0, 0]);
+  assert.ok(s.percent >= 0 && s.percent < 100);
+});
