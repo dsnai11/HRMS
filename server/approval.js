@@ -47,7 +47,7 @@ export async function pendingApprovals(app, user) {
   ).n;
   const scope = await inboxScope(app, user);
   if (!scope) return n;
-  for (const table of ["leave_requests", "regularizations"])
+  for (const table of ["leave_requests", "regularizations", "comp_off_credits"])
     n += (
       await app.db
         .prepare(

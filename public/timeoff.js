@@ -113,6 +113,7 @@ async function timeOffPage(id) {
     );
   cancel("data-cancel-leave", "/leave/requests");
   cancel("data-cancel-reg", "/regularizations");
+  await compOffCard(id);
 }
 function applyLeaveDialog(bal) {
   if (!bal.length) return notice("No leave types are available yet.", true);
@@ -197,6 +198,7 @@ async function approvalsPage(id) {
   );
   await claimsApprovals(id);
   await hiringApprovals(id);
+  await compOffApprovals(id);
 }
 
 // ---- HR: leave types, holidays, settings, requests, balances ------------------

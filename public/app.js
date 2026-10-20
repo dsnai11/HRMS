@@ -182,6 +182,11 @@ function shell() {
         : "Approvals",
     ],
     me.is_manager && ["team", "☷", "My team"],
+    (me.is_manager || has("leave.approve")) && [
+      "teamcal",
+      "▦",
+      "Team calendar",
+    ],
     me.is_manager &&
       !has("recruitment.manage") && ["requisitions", "✚", "Requisitions"],
     me.role !== "super_admin" && ["timeoff", "☼", "Time off"],
@@ -291,6 +296,7 @@ async function render() {
     if (page === "requisitions") return await requisitionsPage(id);
     if (page === "directory") return await directoryPage(id);
     if (page === "orgchart") return await orgChartPage(id);
+    if (page === "teamcal") return await teamCalendarPage(id);
     if (page === "refer") return await referPage(id);
     if (page === "documents") return await documentsPage(id);
     if (page === "announcements") return await announcementsPage(id);

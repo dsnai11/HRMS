@@ -243,9 +243,9 @@ async function shiftPolicyCard(id) {
   const manage = has("org.manage");
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = `<div class="card-head"><div><h2>Shift rules</h2><p class="muted">Punch in by the start time plus grace, work the full hours and not before the earliest punch-out, or the day is a half day. A rule on an employee beats their branch, which beats the company default; with none, the server default (9:30, 15 minutes, 9 hours, 6:30 pm) applies.</p></div>${manage ? '<div class="actions"><button class="secondary" id="assign-policy">Assign</button><button id="new-policy">New rule</button></div>' : ""}</div>${
+  card.innerHTML = `<div class="card-head"><div><h2>Shift rules</h2><p class="muted">Punch in by the start time plus grace, work the full hours and not before the earliest punch-out, or the day is a half day. A rule on a roster day beats an employee rule, which beats their department, then their branch, then the company default; with none, the server default (9:30, 15 minutes, 9 hours, 6:30 pm) applies.</p></div>${manage ? '<div class="actions"><button class="secondary" id="seed-shifts">Add standard shifts</button><button class="secondary" id="assign-policy">Assign</button><button id="new-policy">New rule</button></div>' : ""}</div>${
     rows.length
-      ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Start</th><th>Grace</th><th>Hours</th><th>Earliest out</th><th>Used by</th><th></th></tr></thead><tbody>${rows.map((p) => `<tr><td>${esc(p.name)}${p.is_default ? ' <span class="pill">Company default</span>' : ""}</td><td>${p.start_time}</td><td>${p.grace_minutes} min</td><td>${p.hours}</td><td>${p.earliest_out}</td><td>${p.employees} people · ${p.branches} branches</td><td>${manage ? `<button class="ghost" data-edit-policy="${p.id}">Edit</button> <button class="ghost" data-del-policy="${p.id}">Remove</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+      ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Start</th><th>Grace</th><th>Hours</th><th>Earliest out</th><th>Used by</th><th></th></tr></thead><tbody>${rows.map((p) => `<tr><td>${esc(p.name)}${p.is_default ? ' <span class="pill">Company default</span>' : ""}</td><td>${esc(p.kind || "fixed")}</td><td>${p.start_time}</td><td>${p.grace_minutes} min</td><td>${p.hours}</td><td>${p.earliest_out}</td><td>${p.employees} people · ${p.departments ?? 0} departments · ${p.branches} branches</td><td>${manage ? `<button class="ghost" data-edit-policy="${p.id}">Edit</button> <button class="ghost" data-del-policy="${p.id}">Remove</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
       : empty(
           "Using the server default",
           "Add a rule to change the times for a branch, a person or everyone.",
@@ -253,13 +253,24 @@ async function shiftPolicyCard(id) {
   }`;
   document.querySelector("#content").append(card);
   const fieldsHtml = (p = {}) =>
-    `${input("name", "Name", p.name || "", "required maxlength=60")}${input("start_time", "Start time", p.start_time || "09:30", 'type="time" required')}${input("grace_minutes", "Grace (minutes)", p.grace_minutes ?? 15, 'type="number" min="0" max="240"')}${input("hours", "Shift hours", p.hours ?? 9, 'type="number" min="1" max="16" step="0.5"')}${input("earliest_out", "Earliest punch-out", p.earliest_out || "18:30", 'type="time" required')}`;
+    `${input("name", "Name", p.name || "", "required maxlength=60")}${input("start_time", "Start time", p.start_time || "09:30", 'type="time" required')}${input("grace_minutes", "Grace (minutes)", p.grace_minutes ?? 15, 'type="number" min="0" max="240"')}${input("hours", "Shift hours", p.hours ?? 9, 'type="number" min="1" max="16" step="0.5"')}${input("earliest_out", "Earliest punch-out", p.earliest_out || "18:30", 'type="time" required')}${sel(
+      "kind",
+      "Type",
+      [
+        ["fixed", "Fixed"],
+        ["flexible", "Flexible"],
+        ["rotational", "Rotational"],
+        ["night", "Night"],
+      ],
+      p.kind || "fixed",
+    )}`;
   const body = (b) => ({
     name: b.name,
     start_time: b.start_time,
     grace_minutes: Number(b.grace_minutes),
     hours: Number(b.hours),
     earliest_out: b.earliest_out,
+    kind: b.kind,
   });
   card.querySelector("#new-policy")?.addEventListener("click", () =>
     dialog("New shift rule", fieldsHtml(), async (b) => {
@@ -294,6 +305,15 @@ async function shiftPolicyCard(id) {
         render();
       }),
   );
+  card.querySelector("#seed-shifts")?.addEventListener("click", async () => {
+    const r = await api("/admin/shift-policies/seed-templates", {});
+    notice(
+      r.added
+        ? `${r.added} shift rules added (fixed, flexible, rotational morning and afternoon, night).`
+        : "The standard shifts are already there.",
+    );
+    render();
+  });
   card.querySelector("#assign-policy")?.addEventListener("click", async () => {
     const [org, people] = await Promise.all([api("/admin/org"), peopleList()]);
     dialog(
@@ -301,8 +321,9 @@ async function shiftPolicyCard(id) {
       `${sel("target", "Applies to", [
         ["company", "Whole company (default)"],
         ["branch", "One branch"],
+        ["department", "One department"],
         ["employee", "One employee"],
-      ])}<label>Branch<select name="branch">${options(org.branches, null, "—")}</select></label><label>Employee<select name="employee">${options(people, null, "—")}</select></label>${sel("policy_id", "Rule", [["", "Remove the rule (use the next level)"], ...rows.map((p) => [p.id, p.name])])}`,
+      ])}<label>Branch<select name="branch">${options(org.branches, null, "—")}</select></label><label>Department<select name="department">${options(org.departments, null, "—")}</select></label><label>Employee<select name="employee">${options(people, null, "—")}</select></label>${sel("policy_id", "Rule", [["", "Remove the rule (use the next level)"], ...rows.map((p) => [p.id, p.name])])}`,
       async (b) => {
         const target = b.target;
         const body2 = {
@@ -310,6 +331,7 @@ async function shiftPolicyCard(id) {
           policy_id: b.policy_id ? Number(b.policy_id) : null,
         };
         if (target === "branch") body2.id = Number(b.branch);
+        if (target === "department") body2.id = Number(b.department);
         if (target === "employee") body2.id = Number(b.employee);
         if (target !== "company" && !body2.id)
           throw new Error("Choose who it applies to.");
