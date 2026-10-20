@@ -460,71 +460,6 @@ export function registerRecruitment(router, app) {
   );
 
   // ---- interviews -------------------------------------------------------------------------
-  router.post(
-    "/api/admin/candidates/:id/interviews",
-    { perm: "recruitment.manage" },
-    async ({ user, params, companyId, body, send, audit }) => {
-      const c = await owned("candidates", params.id, companyId, "candidate");
-      if (!OPEN.includes(c.stage))
-        throw new HttpError(
-          409,
-          "This candidate is no longer in the pipeline.",
-        );
-      const b = await body();
-      const interviewer = await owned(
-        "users",
-        b.interviewer_id,
-        companyId,
-        "interviewer",
-      );
-      if (!interviewer.active)
-        throw new HttpError(400, "Choose an active interviewer.");
-      const at = string(b.scheduled_at, "Date and time", 30);
-      if (Number.isNaN(Date.parse(at)))
-        throw new HttpError(400, "Date and time is invalid.");
-      const id = await transaction(async () => {
-        const id = Number(
-          (
-            await db
-              .prepare(
-                "INSERT INTO interviews(company_id,candidate_id,round_name,interviewer_id,scheduled_at,mode,location,created_at) VALUES(?,?,?,?,?,?,?,?)",
-              )
-              .run(
-                companyId,
-                c.id,
-                string(b.round_name ?? "Interview", "Round", 60),
-                interviewer.id,
-                new Date(at).toISOString(),
-                oneOf(b.mode ?? "in_person", "Mode", [
-                  "in_person",
-                  "phone",
-                  "video",
-                ]),
-                optionalString(b.location, "Location or link", 300),
-                nowIso(),
-              )
-          ).lastInsertRowid,
-        );
-        if (c.stage !== "interview" && c.stage !== "offer")
-          await db
-            .prepare("UPDATE candidates SET stage='interview' WHERE id=?")
-            .run(c.id);
-        await touch(c.id);
-        await event(
-          c.id,
-          "interview_scheduled",
-          `${b.round_name ?? "Interview"} with ${interviewer.name}`,
-          user.id,
-        );
-        await audit("interview_scheduled", { id, candidateId: c.id });
-        return id;
-      });
-      await candidateMail(app, c, "interview_call", {
-        details: `Round: ${b.round_name ?? "Interview"}\nWhen: ${new Date(at).toLocaleString("en-IN", { timeZone: app.timezone, dateStyle: "full", timeStyle: "short" })}\nMode: ${(b.mode ?? "in_person").replace("_", " ")}${b.location ? `\nWhere / link: ${b.location}` : ""}`,
-      });
-      return send(201, { id });
-    },
-  );
   router.patch(
     "/api/admin/interviews/:id",
     { perm: "recruitment.manage" },
@@ -598,6 +533,17 @@ export function registerRecruitment(router, app) {
             "UPDATE interviews SET status='completed',rating=?,recommendation=?,feedback=? WHERE id=?",
           )
           .run(rating, rec, string(b.feedback, "Feedback", 2000), i.id);
+        if (Array.isArray(b.scores))
+          for (const x of b.scores.slice(0, 20)) {
+            const r = number(x?.rating, "Question score", 1, 5);
+            if (!Number.isInteger(r))
+              throw new HttpError(400, "Question scores must be 1 to 5.");
+            await db
+              .prepare(
+                "UPDATE interview_questions SET rating=? WHERE id=? AND interview_id=?",
+              )
+              .run(r, integer(Number(x.id)), i.id);
+          }
         await event(
           i.candidate_id,
           "feedback",

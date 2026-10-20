@@ -12,6 +12,7 @@ async function loadMe() {
     ...p.user,
     permissions: p.permissions,
     is_manager: p.is_manager,
+    approvals_pending: p.approvals_pending,
     company: p.company,
   };
   companies = me.role === "super_admin" ? await api("/admin/companies") : [];

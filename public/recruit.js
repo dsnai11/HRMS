@@ -46,8 +46,9 @@ async function recruitTabHtml(tab) {
     )}${stat("Avg days to hire", a.avg_days_to_hire)}${stat("Avg days to fill", a.avg_days_to_fill)}${stat("Days to first interview", a.avg_days_to_first_interview)}${stat("Offer acceptance", a.offer_acceptance_rate == null ? null : `${a.offer_acceptance_rate}%`)}${stat("Requisitions waiting", a.pending_requisitions)}</div>
     <div class="card"><h2>Hiring funnel</h2><svg class="funnel" viewBox="0 0 600 ${a.funnel.length * 36}" role="img" aria-label="Hiring funnel">${a.funnel.map((f, i) => `<text x="0" y="${i * 36 + 22}" class="funnel-label">${f.stage}</text><rect x="110" y="${i * 36 + 6}" width="${Math.max((f.count / max) * 420, 2)}" height="22" rx="4" class="funnel-bar"/><text x="${116 + (f.count / max) * 420}" y="${i * 36 + 22}" class="funnel-label">${f.count}</text>`).join("")}</svg></div>
     <div class="card"><h2>Source of hire</h2>${a.sources.length ? `<div class="table-wrap"><table><thead><tr><th>Source</th><th>Candidates</th><th>Hired</th></tr></thead><tbody>${a.sources.map((s) => `<tr><td>${esc(s.source)}</td><td>${s.candidates}</td><td>${s.hired}</td></tr>`).join("")}</tbody></table></div>` : empty("No data", "Sources appear as candidates are added.")}</div>
-    <div class="card"><h2>Open positions</h2>${a.open_positions.length ? `<div class="table-wrap"><table><thead><tr><th>Role</th><th>Days open</th><th>Positions</th><th>In process</th><th>Filled</th></tr></thead><tbody>${a.open_positions.map((o) => `<tr><td>${esc(o.title)}</td><td>${o.days_open}</td><td>${o.positions}</td><td>${o.candidates}</td><td>${o.filled}</td></tr>`).join("")}</tbody></table></div>` : empty("Nothing open", "Open positions appear here.")}</div>`;
+    <div class="card"><h2>Open positions</h2>${a.open_positions.length ? `<div class="table-wrap"><table><thead><tr><th>Role</th><th>Days open</th><th>Positions</th><th>In process</th><th>Filled</th></tr></thead><tbody>${a.open_positions.map((o) => `<tr><td>${esc(o.title)}</td><td>${o.days_open}</td><td>${o.positions}</td><td>${o.candidates}</td><td>${o.filled}</td></tr>`).join("")}</tbody></table></div>` : empty("Nothing open", "Open positions appear here.")}</div>${await interviewAnalyticsHtml()}`;
   }
+  if (tab === "questions") return await questionBankHtml();
   const rows = await api("/admin/recruitment/templates");
   return `<div class="card"><h2>Candidate emails</h2><p class="muted">Sent automatically when a candidate applies, is invited to interview, is not taken forward, or receives an offer. They go out only when email is set up on the server; otherwise the candidate's timeline notes that nothing was sent. You can use: ${TEMPLATE_VARS}.</p>${rows.map((t) => `<div class="activity"><strong>${esc(t.label)}</strong> ${t.enabled ? "" : '<span class="pill neutral">Off</span>'}<br><small>${esc(t.subject)}</small><br><button class="secondary" data-template="${t.key}">Edit</button></div>`).join("")}</div>`;
 }
@@ -99,6 +100,7 @@ async function recruitWire(tab) {
     });
     return;
   }
+  if (tab === "questions") return questionBankWire();
   document.querySelectorAll("[data-template]").forEach((b) => {
     b.onclick = async () => {
       const t = (await api("/admin/recruitment/templates")).find(
@@ -253,4 +255,286 @@ async function requisitionsPage(id) {
       },
     );
   };
+}
+
+// ---- interviews: panel scheduling, interviewer view, scorecard, question bank -----------------------
+const Q_CATEGORY = {
+  technical: "Technical",
+  behavioural: "Behavioural",
+  situational: "Situational",
+  domain: "Domain-specific",
+};
+const Q_DIFFICULTY = { easy: "Easy", medium: "Medium", hard: "Hard" };
+const TL_STATE = {
+  upcoming: "Upcoming",
+  partial: "Partly reviewed",
+  complete: "All feedback in",
+  feedback_overdue: "Feedback overdue",
+  cancelled: "Cancelled",
+};
+
+async function interviewScheduleDialog(candidateId, onDone) {
+  const people = await peopleList();
+  dialog(
+    "Schedule an interview",
+    `${input("round_name", "Round", "Round 1", "required maxlength=60")}${input("scheduled_at", "Date and time", "", 'type="datetime-local" required')}${sel(
+      "mode",
+      "Mode",
+      [
+        ["in_person", "In person"],
+        ["phone", "Phone"],
+        ["video", "Video"],
+      ],
+    )}${input("duration_minutes", "Minutes", 60, 'type="number" min="10" max="480"')}<label class="full">Place or meeting link<input name="location" maxlength="300"></label><fieldset class="full"><legend>Panel (choose one or more)</legend><div class="panel-pick">${people.map((p) => `<label class="check"><input type="checkbox" name="iv_${p.id}"> ${esc(p.name)}${p.employee_code ? ` (${esc(p.employee_code)})` : ""}</label>`).join("")}</div></fieldset><p class="full muted">Four or five questions from your question bank for this department are chosen automatically. Panel members and the candidate get a calendar invite by email when email is set up.</p>`,
+    async (f) => {
+      const ids = Object.keys(f)
+        .filter((k) => k.startsWith("iv_"))
+        .map((k) => Number(k.slice(3)));
+      if (!ids.length) throw new Error("Choose at least one panel member.");
+      const r = await api(`/admin/candidates/${candidateId}/interviews`, {
+        round_name: f.round_name,
+        interviewer_ids: ids,
+        scheduled_at: new Date(f.scheduled_at).toISOString(),
+        mode: f.mode,
+        duration_minutes: Number(f.duration_minutes),
+        location: f.location || undefined,
+      });
+      notice(
+        `Scheduled with ${ids.length} panel member(s). ${r.questions} suggested question(s) attached.`,
+      );
+      await onDone?.();
+    },
+  );
+}
+
+async function scorecardDialog(candidateId) {
+  const [tl, card] = await Promise.all([
+    api(`/admin/candidates/${candidateId}/interview-timeline`),
+    api(`/admin/candidates/${candidateId}/scorecard`),
+  ]);
+  const REC_TEXT = {
+    strong_yes: "Strong yes",
+    yes: "Yes",
+    no: "No",
+    strong_no: "Strong no",
+  };
+  viewDialog(
+    `Scorecard · ${card.candidate.name}`,
+    `<p><strong>${esc(card.summary)}</strong>${card.overall_rating != null ? ` · average ${card.overall_rating}/5` : ""} · feedback ${card.feedback_given} of ${card.feedback_expected}</p>
+    <h3>Timeline</h3>${tl.length ? tl.map((r) => `<div class="activity"><strong>${esc(r.round_name)}</strong> · ${new Date(r.scheduled_at).toLocaleString("en-IN")} · <span class="pill ${r.state === "complete" ? "" : "neutral"}">${TL_STATE[r.state]}</span><br>${r.panel.map((p) => `<small>${esc(p.name)}: ${p.status === "completed" ? `${p.rating}/5 · ${REC_TEXT[p.recommendation]}` : esc(p.status)}</small>`).join("<br>")}</div>`).join("") : '<p class="muted">No interviews yet.</p>'}
+    <h3>Panel comments</h3>${
+      card.rounds
+        .map(
+          (r) =>
+            `<div class="activity"><strong>${esc(r.round_name)}</strong>${r.avg_rating != null ? ` · average ${r.avg_rating}/5` : ""}${r.panel
+              .filter((p) => p.feedback)
+              .map(
+                (p) =>
+                  `<br><small><strong>${esc(p.name)}</strong> (${p.rating}/5): ${esc(p.feedback)}</small>`,
+              )
+              .join("")}</div>`,
+        )
+        .join("") || '<p class="muted">Nothing yet.</p>'
+    }
+    ${card.question_scores.length ? `<h3>Question scores</h3><div class="table-wrap"><table><thead><tr><th>Question</th><th>Average</th></tr></thead><tbody>${card.question_scores.map((q) => `<tr><td>${esc(q.question)}<small>${Q_CATEGORY[q.category] || ""}</small></td><td>${q.avg_rating}/5</td></tr>`).join("")}</tbody></table></div>` : ""}`,
+  );
+}
+
+// What an interviewer sees: the candidate, suggested questions, and the form to score them.
+async function interviewDialog(id, onDone) {
+  const i = await api(`/interviews/${id}`);
+  const c = i.candidate;
+  const done = i.status === "completed";
+  viewDialog(
+    `${i.round_name} · ${c.name}`,
+    `<p class="muted">${new Date(i.scheduled_at).toLocaleString("en-IN")} · ${i.duration_minutes} min · ${esc(i.mode.replace("_", " "))}${i.location ? ` · ${esc(i.location)}` : ""}</p>
+    <p>${i.opening ? `For <strong>${esc(i.opening.title)}</strong>. ` : ""}${i.panel.length > 1 ? `Panel: ${i.panel.map((p) => esc(p.name)).join(", ")}.` : ""}</p>
+    <div class="actions"><a class="button secondary" href="/api/interviews/${id}/calendar.ics">Download calendar file</a><a class="button secondary" target="_blank" rel="noopener" href="${esc(i.calendar_link)}">Add to Google Calendar</a>${i.files.map((f) => `<button class="secondary" data-ifile="${f.id}">View ${esc(f.name)}</button>`).join("")}${c.resume_url ? `<a class="button secondary" target="_blank" rel="noopener noreferrer" href="${esc(c.resume_url)}">Resume link</a>` : ""}</div>
+    <p>${c.qualification ? `${esc(c.qualification)} · ` : ""}${c.experience_years != null ? `${c.experience_years} yrs · ` : ""}${c.match_score != null ? `${c.match_score}% match · ` : ""}${c.skills.length ? `Skills: ${c.skills.map(esc).join(", ")}` : ""}</p>${c.notes ? `<p>${esc(c.notes)}</p>` : ""}
+    <form id="iv-form"><h3>Suggested questions</h3>${i.questions.length ? i.questions.map((q) => `<div class="activity"><strong>${q.position}. ${esc(q.question)}</strong> <small>${Q_CATEGORY[q.category] || ""}</small><br>${done ? (q.rating ? `<small>Your score: ${q.rating}/5</small>` : "") : `<label class="inline">How well answered<select name="qs_${q.id}"><option value="">Not asked</option>${[1, 2, 3, 4, 5].map((n) => `<option value="${n}">${n}</option>`).join("")}</select></label>`}</div>`).join("") : '<p class="muted">No questions were suggested. Add some under Hiring → Question bank.</p>'}
+    ${
+      done
+        ? "<p>Feedback submitted. Thank you.</p>"
+        : `<div class="form-grid"><label>Overall rating (5 is best)<select name="rating">${[1, 2, 3, 4, 5].map((n) => `<option value="${n}" ${n === 3 ? "selected" : ""}>${n}</option>`).join("")}</select></label><label>Recommendation<select name="recommendation">${Object.entries(
+            REC,
+          )
+            .map(
+              ([k, v]) =>
+                `<option value="${k}" ${k === "yes" ? "selected" : ""}>${v}</option>`,
+            )
+            .join(
+              "",
+            )}</select></label><label class="full">Feedback<textarea name="feedback" rows="4" maxlength="2000" required></textarea></label></div><p class="error-text" id="iv-error" role="alert"></p><div class="actions"><button type="submit">Submit feedback</button></div>`
+    }</form>`,
+  );
+  document
+    .querySelectorAll("dialog [data-ifile]")
+    .forEach(
+      (b) =>
+        (b.onclick = () =>
+          openFile(`/api/interviews/${id}/files/${b.dataset.ifile}`)),
+    );
+  const form = document.querySelector("dialog #iv-form");
+  if (done) return;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    e.submitter.disabled = true;
+    try {
+      const f = Object.fromEntries(new FormData(form));
+      const scores = Object.keys(f)
+        .filter((k) => k.startsWith("qs_") && f[k])
+        .map((k) => ({ id: Number(k.slice(3)), rating: Number(f[k]) }));
+      await api(`/interviews/${id}/feedback`, {
+        rating: Number(f.rating),
+        recommendation: f.recommendation,
+        feedback: f.feedback,
+        scores,
+      });
+      document.querySelector("dialog")?.remove();
+      notice("Feedback saved.");
+      await onDone?.();
+      render();
+    } catch (err) {
+      document.querySelector("dialog #iv-error").textContent = err.message;
+      e.submitter.disabled = false;
+    }
+  };
+}
+
+let bankFilter = { department_id: "", category: "", q: "" };
+async function questionBankHtml() {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(bankFilter)) if (v) qs.set(k, v);
+  const [rows, org] = await Promise.all([
+    api(`/admin/question-bank?${qs}`),
+    api("/admin/org"),
+  ]);
+  hiringCache.depts = org.departments;
+  return `<div class="card"><div class="card-head"><div><h2>Interview question bank</h2><p class="muted">When an interview is scheduled, four or five of these are chosen for the candidate's department and attached for the panel. Questions with no department apply everywhere.</p></div><div class="actions"><button class="secondary" id="import-q">Paste several</button><button id="new-q">Add a question</button></div></div>
+  <div class="actions spaced"><label class="inline">Department<select id="bank-dept"><option value="">All</option><option value="none" ${bankFilter.department_id === "none" ? "selected" : ""}>General only</option>${org.departments.map((d) => `<option value="${d.id}" ${String(d.id) === bankFilter.department_id ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></label><label class="inline">Type<select id="bank-cat"><option value="">All</option>${Object.entries(
+    Q_CATEGORY,
+  )
+    .map(
+      ([k, v]) =>
+        `<option value="${k}" ${k === bankFilter.category ? "selected" : ""}>${v}</option>`,
+    )
+    .join(
+      "",
+    )}</select></label><label class="inline">Search<input id="bank-q" value="${esc(bankFilter.q)}"></label></div>${
+    rows.length
+      ? `<div class="table-wrap"><table><thead><tr><th>Question</th><th>Department</th><th>Type</th><th>Level</th><th>Used</th><th>Avg score</th><th></th></tr></thead><tbody>${rows.map((q) => `<tr><td>${esc(q.question)}</td><td>${esc(q.department_name || "All")}</td><td>${Q_CATEGORY[q.category]}</td><td>${Q_DIFFICULTY[q.difficulty]}</td><td>${q.used}</td><td>${q.avg_rating ?? "—"}</td><td><button class="ghost" data-edit-q="${q.id}">Edit</button> <button class="ghost" data-archive-q="${q.id}">Archive</button></td></tr>`).join("")}</tbody></table></div>`
+      : empty(
+          "No questions",
+          "Add questions by department so interviews start with a consistent set.",
+        )
+  }</div>`;
+}
+function questionFields(q = {}) {
+  const depts = hiringCache.depts || [];
+  return `<label class="full">Question<input name="question" value="${esc(q.question || "")}" maxlength="500" required></label><label>Department<select name="department_id"><option value="">All departments</option>${depts.map((d) => `<option value="${d.id}" ${d.id === q.department_id ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></label>${sel("category", "Type", Object.entries(Q_CATEGORY), q.category || "technical")}${sel("difficulty", "Level", Object.entries(Q_DIFFICULTY), q.difficulty || "medium")}`;
+}
+async function questionBankWire() {
+  const on = (s, fn) =>
+    document.querySelector(s)?.addEventListener("click", fn);
+  const refresh = () => {
+    bankFilter = {
+      department_id: document.querySelector("#bank-dept").value,
+      category: document.querySelector("#bank-cat").value,
+      q: document.querySelector("#bank-q").value.trim(),
+    };
+    render();
+  };
+  document.querySelector("#bank-dept").onchange = refresh;
+  document.querySelector("#bank-cat").onchange = refresh;
+  document.querySelector("#bank-q").onchange = refresh;
+  const body = (f) => ({
+    question: f.question,
+    department_id: f.department_id ? Number(f.department_id) : null,
+    category: f.category,
+    difficulty: f.difficulty,
+  });
+  on("#new-q", () =>
+    dialog("Add a question", questionFields(), async (f) => {
+      await api("/admin/question-bank", body(f));
+      notice("Added.");
+    }),
+  );
+  on("#import-q", () =>
+    dialog(
+      "Paste questions",
+      `<label class="full">One question per line<textarea name="text" rows="10" required></textarea></label><label>Department<select name="department_id"><option value="">All departments</option>${(hiringCache.depts || []).map((d) => `<option value="${d.id}">${esc(d.name)}</option>`).join("")}</select></label>${sel("category", "Type", Object.entries(Q_CATEGORY))}${sel("difficulty", "Level", Object.entries(Q_DIFFICULTY), "medium")}`,
+      async (f) => {
+        const r = await api("/admin/question-bank/import", {
+          text: f.text,
+          department_id: f.department_id ? Number(f.department_id) : null,
+          category: f.category,
+          difficulty: f.difficulty,
+        });
+        notice(`${r.added} added, ${r.skipped} skipped (already there).`);
+      },
+    ),
+  );
+  document.querySelectorAll("[data-edit-q]").forEach((b) => {
+    b.onclick = async () => {
+      const q = (await api("/admin/question-bank?active=all")).find(
+        (x) => x.id === Number(b.dataset.editQ),
+      );
+      dialog("Edit question", questionFields(q), async (f) => {
+        await api(`/admin/question-bank/${q.id}`, body(f), "PATCH");
+        notice("Saved.");
+      });
+    };
+  });
+  document.querySelectorAll("[data-archive-q]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        busy(b, async () => {
+          await api(
+            `/admin/question-bank/${b.dataset.archiveQ}`,
+            { active: false },
+            "PATCH",
+          );
+          render();
+        })),
+  );
+}
+async function interviewAnalyticsHtml() {
+  const a = await api("/admin/interviews/analytics");
+  const t = (head, rows) =>
+    rows.length
+      ? `<div class="table-wrap"><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${c ?? "—"}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`
+      : empty("No interviews yet", "Scores appear after panels give feedback.");
+  return `<div class="card"><h2>Interview quality</h2><p class="muted">${a.interviews} interviews · ${a.feedback_rate ?? "—"}% have feedback · average rating ${a.avg_rating ?? "—"}/5</p><h3>By department</h3>${t(
+    ["Department", "Interviews", "Feedback in", "Avg rating"],
+    a.departments.map((d) => [
+      esc(d.department),
+      d.interviews,
+      d.completed,
+      d.avg_rating,
+    ]),
+  )}<h3>Panel consistency</h3><p class="muted">Deviation is how far a person's rating sits from the rest of the same panel's average (lower means more consistent).</p>${t(
+    [
+      "Interviewer",
+      "Interviews",
+      "Feedback in",
+      "Avg rating given",
+      "Avg deviation",
+    ],
+    a.panelists.map((p) => [
+      esc(p.name),
+      p.scheduled,
+      p.completed,
+      p.avg_rating,
+      p.avg_deviation,
+    ]),
+  )}<h3>Question effectiveness</h3>${t(
+    ["Question", "Department", "Times used", "Scored", "Avg score"],
+    a.questions.map((q) => [
+      esc(q.question),
+      esc(q.department),
+      q.used,
+      q.scored,
+      q.avg_rating,
+    ]),
+  )}</div>`;
 }

@@ -6,6 +6,7 @@ const HIRING_TABS = {
   board: "Pipeline board",
   insights: "Recruitment insights",
   templates: "Email templates",
+  questions: "Question bank",
   onboarding: "Onboarding",
   assets: "Assets",
   exits: "Exits",
@@ -110,7 +111,7 @@ async function hiringTabHtml(tab) {
         : empty("No candidates", "Add candidates as they apply.")
     }</div>`;
   }
-  if (["board", "insights", "templates"].includes(tab))
+  if (["board", "insights", "templates", "questions"].includes(tab))
     return await recruitTabHtml(tab);
   if (tab === "onboarding") {
     const [people, template, pipeline, probation] = await Promise.all([
@@ -158,7 +159,7 @@ async function hiringWire(tab) {
     document.querySelector(s)?.addEventListener("click", fn);
   const each = (s, fn) =>
     document.querySelectorAll(s).forEach((b) => (b.onclick = () => fn(b)));
-  if (["board", "insights", "templates"].includes(tab)) {
+  if (["board", "insights", "templates", "questions"].includes(tab)) {
     await recruitWire(tab);
   } else if (tab === "openings") {
     recruitOpeningsWire();
@@ -329,7 +330,7 @@ async function candidateView(id) {
             )}<button class="secondary" id="sched">Schedule interview</button>${offer ? "" : '<button class="secondary" id="new-offer">Make an offer</button>'}<button class="ghost" id="reject">Reject</button></div>`
         : ""
     }
-    <h3>Interviews</h3>${c.interviews.length ? c.interviews.map((i) => `<div class="activity"><strong>${esc(i.round_name)}</strong> · ${esc(i.interviewer_name)} · ${new Date(i.scheduled_at).toLocaleString("en-IN")} · ${esc(i.status)}${i.rating ? `<br><small>${i.rating}/5 · ${REC[i.recommendation]} · ${esc(i.feedback || "")}</small>` : ""}${i.status === "scheduled" ? ` <button class="ghost" data-cancel-iv="${i.id}">Cancel</button>` : ""}</div>`).join("") : '<p class="muted">None yet.</p>'}
+    <h3>Interviews</h3>${c.interviews.length ? '<div class="actions"><button class="ghost" id="scorecard">Timeline and scorecard</button></div>' : ""}${c.interviews.length ? c.interviews.map((i) => `<div class="activity"><strong>${esc(i.round_name)}</strong> · ${esc(i.interviewer_name)} · ${new Date(i.scheduled_at).toLocaleString("en-IN")} · ${esc(i.status)}${i.rating ? `<br><small>${i.rating}/5 · ${REC[i.recommendation]} · ${esc(i.feedback || "")}</small>` : ""}${i.status === "scheduled" ? ` <button class="ghost" data-cancel-iv="${i.id}">Cancel</button>` : ""}</div>`).join("") : '<p class="muted">None yet.</p>'}
     <h3>Offers</h3>${c.offers.length ? c.offers.map((o) => `<div class="activity"><strong>${esc(o.designation)}</strong> · ${inr(o.monthly_gross)} a month · joins ${fmtDate(o.joining_date)} · ${OFFER_STATUS[o.status]}<br>${o.status === "draft" ? `<button class="ghost" data-offer="${o.id}" data-st="sent">Mark as sent</button>` : ""}${o.status === "sent" ? `<button class="ghost" data-offer="${o.id}" data-st="accepted">Accepted</button><button class="ghost" data-offer="${o.id}" data-st="declined">Declined</button>` : ""}${["draft", "sent", "accepted"].includes(o.status) && !c.user_id ? `<button class="ghost" data-offer="${o.id}" data-st="withdrawn">Withdraw</button>` : ""} <a class="button secondary" href="/letter.html?type=offer&id=${o.id}" target="_blank" rel="noopener">Offer letter</a></div>`).join("") : '<p class="muted">None yet.</p>'}
     ${pre ? preboardingPanel(pre) : ""}
     ${offer?.status === "accepted" && !c.user_id ? '<div class="actions spaced"><button id="hire">Hire and create the employee</button></div>' : ""}
@@ -408,32 +409,8 @@ async function candidateView(id) {
       },
     ),
   );
-  on("#sched", async () => {
-    const people = await peopleList();
-    dialog(
-      "Schedule an interview",
-      `${input("round_name", "Round", "Round 1", "required maxlength=60")}${personSel("interviewer_id", "Interviewer", people)}${input("scheduled_at", "Date and time", "", 'type="datetime-local" required')}${sel(
-        "mode",
-        "Mode",
-        [
-          ["in_person", "In person"],
-          ["phone", "Phone"],
-          ["video", "Video"],
-        ],
-      )}${input("location", "Place or link")}`,
-      async (b) => {
-        await api(`/admin/candidates/${id}/interviews`, {
-          round_name: b.round_name,
-          interviewer_id: Number(b.interviewer_id),
-          scheduled_at: new Date(b.scheduled_at).toISOString(),
-          mode: b.mode,
-          location: b.location || undefined,
-        });
-        notice("Interview scheduled.");
-        await reopen();
-      },
-    );
-  });
+  on("#sched", () => interviewScheduleDialog(id, reopen));
+  on("#scorecard", () => scorecardDialog(id));
   on("#new-offer", () =>
     dialog(
       "Make an offer",
@@ -958,26 +935,11 @@ async function hiringApprovals(id) {
         await loadMe();
       }),
   );
-  card.querySelectorAll("[data-feedback]").forEach(
-    (b) =>
-      (b.onclick = () =>
-        dialog(
-          "Interview feedback",
-          `${sel(
-            "rating",
-            "Rating (5 is best)",
-            [1, 2, 3, 4, 5].map((n) => [n, n]),
-            3,
-          )}${sel("recommendation", "Recommendation", Object.entries(REC), "yes")}<label class="full">Feedback<input name="feedback" maxlength="2000" required></label>`,
-          async (f) => {
-            await api(`/interviews/${b.dataset.feedback}/feedback`, {
-              rating: Number(f.rating),
-              recommendation: f.recommendation,
-              feedback: f.feedback,
-            });
-            notice("Feedback saved.");
-            await loadMe();
-          },
-        )),
-  );
+  card
+    .querySelectorAll("[data-feedback]")
+    .forEach(
+      (b) =>
+        (b.onclick = () =>
+          interviewDialog(Number(b.dataset.feedback), () => loadMe())),
+    );
 }

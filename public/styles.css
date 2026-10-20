@@ -1227,3 +1227,11 @@ label.inline {
 label.inline select {
   width: auto;
 }
+
+.panel-pick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
+}

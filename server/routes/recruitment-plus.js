@@ -171,7 +171,13 @@ const render = (text, vars) =>
   text.replace(/\{\{(\w+)\}\}/g, (_, k) => (vars[k] ?? "").toString());
 
 /** Sends a templated email to a candidate and records it on their timeline. */
-export async function candidateMail(app, candidate, key, vars = {}) {
+export async function candidateMail(
+  app,
+  candidate,
+  key,
+  vars = {},
+  attachments,
+) {
   const { db } = app;
   const def = DEFAULT_TEMPLATES[key];
   const row = await db
@@ -201,6 +207,7 @@ export async function candidateMail(app, candidate, key, vars = {}) {
         candidate.email,
         render(row?.subject ?? def.subject, all),
         render(row?.body ?? def.body, all),
+        attachments,
       )
     : false;
   await db
