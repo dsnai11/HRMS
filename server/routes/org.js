@@ -28,7 +28,32 @@ const KINDS = {
     fields: [],
     max: {},
   },
+  grades: {
+    label: "grade",
+    userColumn: "grade_id",
+    fields: ["level", "salary_min", "salary_max"],
+    max: {},
+    numeric: ["level", "salary_min", "salary_max"],
+  },
+  cost_centres: {
+    label: "cost centre",
+    userColumn: "cost_centre_id",
+    fields: ["code"],
+    max: { code: 20 },
+  },
+  business_units: {
+    label: "business unit",
+    userColumn: "business_unit_id",
+    fields: ["code"],
+    max: { code: 20 },
+  },
 };
+const fieldValue = (spec, f, v) =>
+  spec.numeric?.includes(f)
+    ? v === undefined || v === null || v === ""
+      ? null
+      : number(v, f, 0, 1e9)
+    : optionalString(v, f, spec.max[f]);
 
 export function registerOrg(router, app) {
   const { db, transaction } = app;
@@ -54,9 +79,7 @@ export function registerOrg(router, app) {
       async ({ companyId, body, send, audit }) => {
         const b = await body();
         const name = string(b.name, `${spec.label} name`);
-        const extra = spec.fields.map((f) =>
-          optionalString(b[f], f, spec.max[f]),
-        );
+        const extra = spec.fields.map((f) => fieldValue(spec, f, b[f]));
         const id = await transaction(async () => {
           const id = Number(
             (
@@ -90,8 +113,18 @@ export function registerOrg(router, app) {
                   throw new HttpError(400, "Active must be true or false.");
                 })();
         const values = spec.fields.map((f) =>
-          b[f] === undefined ? row[f] : optionalString(b[f], f, spec.max[f]),
+          b[f] === undefined ? row[f] : fieldValue(spec, f, b[f]),
         );
+        const hi = spec.fields.includes("salary_max") ? "salary_max" : null;
+        if (hi) {
+          const lo = values[spec.fields.indexOf("salary_min")];
+          const up = values[spec.fields.indexOf(hi)];
+          if (lo != null && up != null && lo > up)
+            throw new HttpError(
+              400,
+              "The band minimum cannot be above its maximum.",
+            );
+        }
         await transaction(async () => {
           await db
             .prepare(
@@ -120,6 +153,9 @@ export function registerOrg(router, app) {
         branches: await active("branches"),
         departments: await active("departments"),
         designations: await active("designations"),
+        grades: await active("grades"),
+        cost_centres: await active("cost_centres"),
+        business_units: await active("business_units"),
         workplaces: await db
           .prepare(
             "SELECT id,name,branch_id FROM workplaces WHERE company_id=? ORDER BY name",

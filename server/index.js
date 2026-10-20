@@ -36,6 +36,7 @@ import {
   registerLearning,
   scheduleLearningReminders,
 } from "./routes/learning.js";
+import { registerPeoplePlus } from "./routes/people-plus.js";
 import { registerOnboardingPlus } from "./routes/onboarding-plus.js";
 import { registerCredit } from "./routes/credit.js";
 import { registerInterviewsPlus } from "./routes/interviews-plus.js";
@@ -62,6 +63,7 @@ const STATIC = {
   "/bulk.js": ["bulk.js", "text/javascript"],
   "/learning.js": ["learning.js", "text/javascript"],
   "/recruit.js": ["recruit.js", "text/javascript"],
+  "/profile360.js": ["profile360.js", "text/javascript"],
   "/join.html": ["join.html", "text/html"],
   "/join.js": ["join.js", "text/javascript"],
   "/careers.html": ["careers.html", "text/html"],
@@ -162,6 +164,7 @@ export function createApp({
     registerInterviewsPlus,
     registerCredit,
     registerOnboardingPlus,
+    registerPeoplePlus,
     registerPreboarding,
     registerProbation,
     registerLearning,

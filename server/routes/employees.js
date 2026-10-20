@@ -1,4 +1,5 @@
 import { passwordHash, passwordHashAsync } from "../db.js";
+import { cleanCustom } from "./people-plus.js";
 import {
   HttpError,
   string,
@@ -59,10 +60,12 @@ const SELF_EDITABLE = [
 
 const SELECT = `u.id,u.name,u.email,u.role,u.employee_code,u.phone,u.active,u.must_change_password,
   u.workplace_id,w.name workplace_name,u.branch_id,b.name branch_name,u.department_id,d.name department_name,
-  u.designation_id,g.name designation_name,u.manager_id,m.name manager_name,u.date_of_joining,u.employment_type`;
+  u.designation_id,g.name designation_name,u.manager_id,m.name manager_name,u.date_of_joining,u.employment_type,
+  u.grade_id,gr.name grade_name,u.cost_centre_id,cc.name cost_centre_name,u.business_unit_id,bu.name business_unit_name,u.custom`;
 const FULL = `${SELECT},u.date_of_birth,u.gender,u.address,u.emergency_name,u.emergency_phone,u.emergency_relation,u.company_id`;
 const JOINS = `FROM users u LEFT JOIN workplaces w ON w.id=u.workplace_id LEFT JOIN branches b ON b.id=u.branch_id
-  LEFT JOIN departments d ON d.id=u.department_id LEFT JOIN designations g ON g.id=u.designation_id LEFT JOIN users m ON m.id=u.manager_id`;
+  LEFT JOIN departments d ON d.id=u.department_id LEFT JOIN designations g ON g.id=u.designation_id LEFT JOIN users m ON m.id=u.manager_id
+  LEFT JOIN grades gr ON gr.id=u.grade_id LEFT JOIN cost_centres cc ON cc.id=u.cost_centre_id LEFT JOIN business_units bu ON bu.id=u.business_unit_id`;
 
 function canManage(caller, target) {
   if (caller.role === "super_admin") return true;
@@ -90,6 +93,9 @@ export function registerEmployees(router, app) {
       branch_id: ["branches", "branch"],
       department_id: ["departments", "department"],
       designation_id: ["designations", "designation"],
+      grade_id: ["grades", "grade"],
+      cost_centre_id: ["cost_centres", "cost centre"],
+      business_unit_id: ["business_units", "business unit"],
     };
     for (const [key, [table, label]] of Object.entries(tables))
       if (b[key] !== undefined) {
@@ -203,6 +209,10 @@ export function registerEmployees(router, app) {
       throw new HttpError(403, "You cannot assign that role.");
     const profile = profileValues(b);
     const refs = await references(b, companyId);
+    const custom =
+      b.custom === undefined
+        ? null
+        : await cleanCustom(db, companyId, b.custom);
     const managerId = optionalId(b.manager_id, "Reporting manager");
     await checkManager(managerId, null, companyId);
     if (await db.prepare("SELECT id FROM users WHERE email=?").get(mail))
@@ -223,6 +233,7 @@ export function registerEmployees(router, app) {
         employee_code: code,
         ...refs,
         manager_id: managerId,
+        ...(custom ? { custom: JSON.stringify(custom) } : {}),
       };
       const keys = Object.keys(cols);
       const id = Number(
@@ -303,6 +314,15 @@ export function registerEmployees(router, app) {
           "You cannot change your own role or deactivate yourself.",
         );
       Object.assign(set, profileValues(b), await references(b, companyId));
+      if (b.custom !== undefined)
+        set.custom = JSON.stringify(
+          await cleanCustom(
+            db,
+            companyId,
+            b.custom,
+            JSON.parse(target.custom || "{}"),
+          ),
+        );
       if (set.employee_code && set.employee_code !== target.employee_code) {
         if (
           await db
