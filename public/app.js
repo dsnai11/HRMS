@@ -159,6 +159,16 @@ function shell() {
     has("attendance.read") && ["overview", "◫", "Overview"],
     has("insights.read") && ["insights", "▨", "Insights"],
     ["announcements", "✉", "Announcements"],
+    me.role !== "super_admin" && [
+      "chat",
+      "✆",
+      'Messages<span id="chat-n" class="nav-n"></span>',
+    ],
+    (me.role !== "super_admin" || has("bot.manage")) && [
+      "laxmi",
+      "✦",
+      "Ask Laxmi",
+    ],
     has("employees.read") && ["employees", "♙", "Employees"],
     has("org.read") && ["organization", "▦", "Organization"],
     has("attendance.read") && ["attendance", "▤", "Attendance"],
@@ -210,6 +220,7 @@ function shell() {
     : "Employee workspace";
   app.innerHTML = `<div class="layout"><aside class="sidebar">${brand()}<div class="nav-label">WORKSPACE</div><nav class="nav">${items.map(([id, icon, label]) => `<button data-page="${id}" class="${page === id ? "selected" : ""}"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="sidebar-foot"><strong>${esc(me.company?.name || config.company)}</strong>Location-verified attendance<br>${esc(config.timezone)}</div></aside><main class="main"><header class="topbar"><span>${esc(workspace)}</span><div class="user">${companies.length > 1 ? `<select id="company" aria-label="Company">${companies.map((c) => `<option value="${c.id}" ${c.id === scope ? "selected" : ""}>${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("")}</select>` : ""}<button class="ghost bell" id="bell" aria-label="Notifications">🔔<span id="bell-n" class="bell-n"></span></button><span class="avatar">${initials(me.name)}</span><span class="name">${esc(me.name)}</span><button class="ghost" id="password">Password</button><button class="ghost" id="logout">Sign out</button></div></header><section class="content" id="content"><div class="loading">Loading…</div></section></main></div>`;
   bellInit();
+  chatInit();
   document.querySelector("#company")?.addEventListener("change", async (e) => {
     activeCompany =
       Number(e.target.value) === me.company_id ? null : Number(e.target.value);
@@ -302,6 +313,8 @@ async function render() {
     if (page === "announcements") return await announcementsPage(id);
     if (page === "helpdesk") return await helpdeskPage(id);
     if (page === "policies") return await policiesPage(id);
+    if (page === "chat") return await chatPage(id);
+    if (page === "laxmi") return await laxmiPage(id);
     if (page === "hiring") return await hiringPage(id);
     if (page === "overview") {
       const [stats, active, sites] = await Promise.all([

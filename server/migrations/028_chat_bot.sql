@@ -18,10 +18,11 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 CREATE INDEX IF NOT EXISTS chat_messages_room ON chat_messages(room_id, id);
 
+-- Day of the month salary is credited (1-31; a later day than the month has means its last day).
 ALTER TABLE companies ADD COLUMN IF NOT EXISTS pay_day INTEGER;
 CREATE TABLE IF NOT EXISTS bot_knowledge (
   id SERIAL PRIMARY KEY, company_id INTEGER NOT NULL REFERENCES companies(id),
-  title TEXT NOT NULL, body TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+  title TEXT NOT NULL, body TEXT NOT NULL, keywords TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1,
   created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS bot_log (

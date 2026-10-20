@@ -12,6 +12,7 @@
     "bootstrap": "node --env-file-if-exists=.env server/bootstrap.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "pg": "^8.23.1"
   },
   "devDependencies": {

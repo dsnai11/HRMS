@@ -1,4 +1,4 @@
-import { HttpError, integer, optionalString, string } from "../http.js";
+import { HttpError, integer, string } from "../http.js";
 import { can } from "../rbac.js";
 
 const MAX_GROUP = 100;
@@ -160,14 +160,13 @@ export function registerChat(router, app) {
       const m = await membership(user, params.id);
       if (m.kind !== "group" || !m.is_admin)
         throw new HttpError(403, "Only the group's admin can add people.");
+      const wanted = (await body()).user_ids;
       const ids = [
         ...new Set(
-          (Array.isArray((await body()).user_ids)
-            ? (await body()).user_ids
-            : []
-          ).map((x) => integer(Number(x))),
+          (Array.isArray(wanted) ? wanted : []).map((x) => integer(Number(x))),
         ),
       ];
+      if (!ids.length) throw new HttpError(400, "Choose people to add.");
       const have = (
         await db
           .prepare("SELECT COUNT(*) n FROM chat_members WHERE room_id=?")
@@ -279,14 +278,27 @@ export function registerChat(router, app) {
   );
   // Polled every few seconds while the portal is open: anything new in my conversations.
   router.get("/api/chat/updates", async ({ user, query, send }) => {
-    const since = query.get("since") ? integer(Number(query.get("since"))) : 0;
-    const messages = await db
+    // The first poll (no "since") only learns where the conversation stands.
+    const since = query.get("since") ? Number(query.get("since")) : null;
+    if (since !== null && (!Number.isSafeInteger(since) || since < 0))
+      throw new HttpError(400, "Invalid identifier.");
+    const messages = since === null ? [] : await db
       .prepare(
         `SELECT c.id,c.room_id,c.user_id,u.name author,c.body,c.created_at,r.kind,r.name room_name
          FROM chat_messages c JOIN chat_members m ON m.room_id=c.room_id AND m.user_id=? JOIN chat_rooms r ON r.id=c.room_id
          JOIN users u ON u.id=c.user_id WHERE c.id>? AND c.deleted_at IS NULL AND r.company_id=? ORDER BY c.id LIMIT 200`,
       )
       .all(user.id, since, user.company_id);
+    const latest =
+      since === null
+        ? ((
+            await db
+              .prepare(
+                "SELECT MAX(c.id) n FROM chat_messages c JOIN chat_members m ON m.room_id=c.room_id AND m.user_id=?",
+              )
+              .get(user.id)
+          ).n ?? 0)
+        : (messages.at(-1)?.id ?? since);
     const unread = (
       await db
         .prepare(
@@ -298,8 +310,7 @@ export function registerChat(router, app) {
     return send(200, {
       messages,
       unread,
-      latest: messages.at(-1)?.id ?? since,
+      latest,
     });
   });
-  void optionalString;
 }

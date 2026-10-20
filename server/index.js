@@ -40,6 +40,8 @@ import { registerCompOff, scheduleCompOffExpiry } from "./routes/compoff.js";
 import { registerTaxDeclarations } from "./routes/tax-declarations.js";
 import { registerPayrollReports } from "./routes/payroll-reports.js";
 import { registerChat } from "./routes/chat.js";
+import { registerBot } from "./routes/bot.js";
+import { createLlm } from "./bot.js";
 import { registerEssPlus } from "./routes/ess-plus.js";
 import { registerPeoplePlus } from "./routes/people-plus.js";
 import { registerOnboardingPlus } from "./routes/onboarding-plus.js";
@@ -72,6 +74,7 @@ const STATIC = {
   "/profile360.js": ["profile360.js", "text/javascript"],
   "/timeplus.js": ["timeplus.js", "text/javascript"],
   "/ess-plus.js": ["ess-plus.js", "text/javascript"],
+  "/chat.js": ["chat.js", "text/javascript"],
   "/join.html": ["join.html", "text/html"],
   "/join.js": ["join.js", "text/javascript"],
   "/careers.html": ["careers.html", "text/html"],
@@ -136,6 +139,8 @@ export function createApp({
         ),
   };
   app.notify = createNotifier(app);
+  // Laxmi's free-text fallback; null unless ANTHROPIC_API_KEY is set (tests replace it).
+  app.botLlm = createLlm();
   app.push = createPush(app);
   const writeAudit = app.audit;
   app.audit = async (
@@ -178,6 +183,7 @@ export function createApp({
     registerTaxDeclarations,
     registerEssPlus,
     registerChat,
+    registerBot,
     registerPreboarding,
     registerProbation,
     registerLearning,
@@ -351,7 +357,14 @@ export function createApp({
     req.setTimeout(20000, () => req.destroy());
     void db
       .serialized(() => timed(req, res, () => handle(req, res)), {
-        concurrent: req.method === "GET",
+        // GETs, and routes marked { concurrent: true } (slow, self-contained work
+        // such as the assistant's fallback), do not wait behind other writes.
+        concurrent:
+          req.method === "GET" ||
+          Boolean(
+            router.match(req.method, (req.url || "/").split("?")[0]).route
+              ?.options.concurrent,
+          ),
       })
       .catch(() => {
         if (!res.headersSent)
