@@ -39,6 +39,7 @@ import {
 import { registerCompOff, scheduleCompOffExpiry } from "./routes/compoff.js";
 import { registerTaxDeclarations } from "./routes/tax-declarations.js";
 import { registerPayrollReports } from "./routes/payroll-reports.js";
+import { registerChat } from "./routes/chat.js";
 import { registerEssPlus } from "./routes/ess-plus.js";
 import { registerPeoplePlus } from "./routes/people-plus.js";
 import { registerOnboardingPlus } from "./routes/onboarding-plus.js";
@@ -176,6 +177,7 @@ export function createApp({
     registerCompOff,
     registerTaxDeclarations,
     registerEssPlus,
+    registerChat,
     registerPreboarding,
     registerProbation,
     registerLearning,
