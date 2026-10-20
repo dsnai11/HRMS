@@ -9,6 +9,17 @@ const longDate = (d) =>
     timeZone: "UTC",
   }).format(new Date(`${d}T00:00:00Z`));
 
+/** Basic 50% of gross, HRA 50% of basic, the rest special allowance. */
+export function defaultBreakup(gross) {
+  const basic = Math.round(gross * 0.5);
+  const hra = Math.round(basic * 0.5);
+  return [
+    { name: "Basic", monthly: basic },
+    { name: "House rent allowance", monthly: hra },
+    { name: "Special allowance", monthly: gross - basic - hra },
+  ];
+}
+
 export function offerLetter({ company, candidate, offer, today }) {
   return {
     title: "Offer of employment",
@@ -18,6 +29,7 @@ export function offerLetter({ company, candidate, offer, today }) {
       `Dear ${candidate.name},`,
       `We are pleased to offer you the position of ${offer.designation} at ${company}. This offer is subject to verification of your documents and references.`,
       `Your monthly gross salary will be ${inr(offer.monthly_gross)} (${inr(offer.monthly_gross * 12)} a year), with statutory deductions as applicable. The detailed breakup is shared with your first payslip.`,
+      `Monthly salary breakup: ${(offer.ctc_breakup ? JSON.parse(offer.ctc_breakup) : defaultBreakup(offer.monthly_gross)).map((c) => `${c.name} ${inr(c.monthly)} (${inr(c.monthly * 12)} a year)`).join("; ")}.`,
       `Your date of joining will be ${longDate(offer.joining_date)}.${offer.valid_until ? ` This offer is valid until ${longDate(offer.valid_until)}.` : ""}`,
       ...(offer.note ? [offer.note] : []),
       "Please confirm your acceptance in the manner communicated by HR. We look forward to welcoming you.",

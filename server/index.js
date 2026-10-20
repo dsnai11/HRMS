@@ -36,6 +36,7 @@ import {
   registerLearning,
   scheduleLearningReminders,
 } from "./routes/learning.js";
+import { registerRecruitmentPlus } from "./routes/recruitment-plus.js";
 import { registerPreboarding } from "./routes/preboarding.js";
 import {
   registerProbation,
@@ -57,8 +58,11 @@ const STATIC = {
   "/people.js": ["people.js", "text/javascript"],
   "/bulk.js": ["bulk.js", "text/javascript"],
   "/learning.js": ["learning.js", "text/javascript"],
+  "/recruit.js": ["recruit.js", "text/javascript"],
   "/join.html": ["join.html", "text/html"],
   "/join.js": ["join.js", "text/javascript"],
+  "/careers.html": ["careers.html", "text/html"],
+  "/careers.js": ["careers.js", "text/javascript"],
   "/letter.html": ["letter.html", "text/html"],
   "/letter.js": ["letter.js", "text/javascript"],
   "/payslip.html": ["payslip.html", "text/html"],
@@ -151,6 +155,7 @@ export function createApp({
     registerPayrollRuns,
     registerPayrollExtras,
     registerRecruitment,
+    registerRecruitmentPlus,
     registerPreboarding,
     registerProbation,
     registerLearning,

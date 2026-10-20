@@ -1172,3 +1172,58 @@ fieldset {
   border-radius: 8px;
   background: #e8f5ef;
 }
+
+/* ---- recruitment board and insights ---- */
+.board {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(200px, 1fr);
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+.board-col {
+  background: #f3f7f5;
+  border-radius: 10px;
+  padding: 10px;
+  min-height: 220px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.board-col h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+.board-card {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  cursor: grab;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.board-card small {
+  color: var(--muted);
+}
+.funnel {
+  width: 100%;
+  max-width: 640px;
+}
+.funnel-label {
+  font-size: 13px;
+  fill: #233b35;
+}
+.funnel-bar {
+  fill: var(--green);
+}
+label.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+label.inline select {
+  width: auto;
+}

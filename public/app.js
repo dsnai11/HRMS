@@ -181,6 +181,8 @@ function shell() {
         : "Approvals",
     ],
     me.is_manager && ["team", "☷", "My team"],
+    me.is_manager &&
+      !has("recruitment.manage") && ["requisitions", "✚", "Requisitions"],
     me.role !== "super_admin" && ["timeoff", "☼", "Time off"],
     me.role !== "super_admin" && ["payslips", "❒", "Payslips"],
     me.role !== "super_admin" && ["myclaims", "₹", "Claims & loans"],
@@ -284,6 +286,7 @@ async function render() {
     if (page === "insights") return await insightsPage(id);
     if (page === "performance") return await performancePage(id);
     if (page === "learning") return await learningPage(id);
+    if (page === "requisitions") return await requisitionsPage(id);
     if (page === "directory") return await directoryPage(id);
     if (page === "refer") return await referPage(id);
     if (page === "documents") return await documentsPage(id);

@@ -94,6 +94,38 @@ export function cleanForm(b, base = {}) {
   return f;
 }
 
+/** Issues (or re-issues) the candidate's private joining link; returns the link and its expiry. */
+export async function createInvite(app, actorId, companyId, candidate) {
+  const { db, clock } = app;
+  const token = randomBytes(32).toString("base64url");
+  const expires = new Date(clock() + LINK_DAYS * 86400000).toISOString();
+  const existing = await db
+    .prepare("SELECT id FROM preboarding WHERE candidate_id=?")
+    .get(candidate.id);
+  if (existing)
+    await db
+      .prepare("UPDATE preboarding SET token_hash=?,expires_at=? WHERE id=?")
+      .run(tokenHash(token), expires, existing.id);
+  else
+    await db
+      .prepare(
+        "INSERT INTO preboarding(company_id,candidate_id,token_hash,expires_at,created_by,created_at) VALUES(?,?,?,?,?,?)",
+      )
+      .run(
+        companyId,
+        candidate.id,
+        tokenHash(token),
+        expires,
+        actorId,
+        new Date(clock()).toISOString(),
+      );
+  const base = (process.env.APP_URL || process.env.PUBLIC_URL || "").replace(
+    /\/$/,
+    "",
+  );
+  return { link: `${base}/join.html?t=${token}`, expires };
+}
+
 export function registerPreboarding(router, app) {
   const { db, transaction, clock, rateLimit } = app;
   const nowIso = () => new Date(clock()).toISOString();
@@ -503,29 +535,7 @@ export function registerPreboarding(router, app) {
           409,
           "Mark the offer as sent before inviting the candidate to the joining portal.",
         );
-      const token = randomBytes(32).toString("base64url");
-      const expires = new Date(clock() + LINK_DAYS * 86400000).toISOString();
-      const existing = await db
-        .prepare("SELECT id FROM preboarding WHERE candidate_id=?")
-        .get(c.id);
-      if (existing)
-        await db
-          .prepare(
-            "UPDATE preboarding SET token_hash=?,expires_at=? WHERE id=?",
-          )
-          .run(tokenHash(token), expires, existing.id);
-      else
-        await db
-          .prepare(
-            "INSERT INTO preboarding(company_id,candidate_id,token_hash,expires_at,created_by,created_at) VALUES(?,?,?,?,?,?)",
-          )
-          .run(companyId, c.id, tokenHash(token), expires, user.id, nowIso());
-      const base = (
-        process.env.APP_URL ||
-        process.env.PUBLIC_URL ||
-        ""
-      ).replace(/\/$/, "");
-      const link = `${base}/join.html?t=${token}`;
+      const { link, expires } = await createInvite(app, user.id, companyId, c);
       const company = await db
         .prepare("SELECT name FROM companies WHERE id=?")
         .get(companyId);

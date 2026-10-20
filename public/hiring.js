@@ -3,6 +3,9 @@ let hiringTab = "openings";
 const HIRING_TABS = {
   openings: "Openings",
   candidates: "Candidates",
+  board: "Pipeline board",
+  insights: "Recruitment insights",
+  templates: "Email templates",
   onboarding: "Onboarding",
   assets: "Assets",
   exits: "Exits",
@@ -89,9 +92,9 @@ async function hiringTabHtml(tab) {
       api("/admin/openings"),
       api("/admin/recruitment/summary"),
     ]);
-    return `<div class="stats"><div class="stat"><div class="stat-label">Open positions</div><div class="stat-value">${summary.open_positions}</div></div>${["applied", "screening", "interview", "offer", "hired"].map((s) => `<div class="stat"><div class="stat-label">${STAGE[s]}</div><div class="stat-value">${summary.stages[s] ?? 0}</div></div>`).join("")}</div><div class="card"><div class="card-head"><div><h2>Job openings</h2></div><button id="new-opening">New opening</button></div>${
+    return `${requisitionsCard(rows)}${careersCard()}<div class="stats"><div class="stat"><div class="stat-label">Open positions</div><div class="stat-value">${summary.open_positions}</div></div>${["applied", "screening", "interview", "offer", "hired"].map((s) => `<div class="stat"><div class="stat-label">${STAGE[s]}</div><div class="stat-value">${summary.stages[s] ?? 0}</div></div>`).join("")}</div><div class="card"><div class="card-head"><div><h2>Job openings</h2></div><button id="new-opening">New opening</button></div>${
       rows.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Title</th><th>Department</th><th>Positions</th><th>In process</th><th>Filled</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((o) => `<tr><td>${esc(o.title)}<small>${esc(o.branch_name || "")}${o.hiring_manager_name ? ` · ${esc(o.hiring_manager_name)}` : ""}</small></td><td>${esc(o.department_name || "—")}</td><td>${o.positions}</td><td>${o.in_process}</td><td>${o.filled}</td><td><span class="pill ${o.status === "open" ? "" : "neutral"}">${esc(o.status.replace("_", " "))}</span></td><td><button class="secondary" data-opening="${o.id}" data-status="${o.status}">${o.status === "open" ? "Close" : "Reopen"}</button> <button class="ghost" data-add-cand="${o.id}">Add candidate</button></td></tr>`).join("")}</tbody></table></div>`
+        ? `<div class="table-wrap"><table><thead><tr><th>Title</th><th>Department</th><th>Positions</th><th>In process</th><th>Filled</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((o) => `<tr><td>${esc(o.title)}<small>${esc(o.branch_name || "")}${o.hiring_manager_name ? ` · ${esc(o.hiring_manager_name)}` : ""}</small></td><td>${esc(o.department_name || "—")}</td><td>${o.positions}</td><td>${o.in_process}</td><td>${o.filled}</td><td><span class="pill ${o.status === "open" ? "" : "neutral"}">${esc(o.status.replace("_", " "))}</span>${o.published ? ' <span class="pill">Public</span>' : ""}${o.approval_status === "pending_approval" ? ' <span class="pill neutral">Needs approval</span>' : ""}</td><td><button class="secondary" data-opening="${o.id}" data-status="${o.status}">${o.status === "open" ? "Close" : "Reopen"}</button> <button class="ghost" data-add-cand="${o.id}">Add candidate</button> <button class="ghost" data-opening-details="${o.id}">Details</button> <button class="ghost" data-posting="${o.id}">Posting text</button></td></tr>`).join("")}</tbody></table></div>`
         : empty("No openings", "Create an opening, then add candidates to it.")
     }</div>`;
   }
@@ -103,10 +106,12 @@ async function hiringTabHtml(tab) {
     hiringCache.openings = openings;
     return `<div class="card"><div class="card-head"><div><h2>Candidates</h2></div><button id="new-cand">Add candidate</button></div>${
       rows.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Opening</th><th>Stage</th><th>Source</th><th>Updated</th><th></th></tr></thead><tbody>${rows.map((c) => `<tr><td>${esc(c.name)}<small>${esc(c.email || c.phone || "")}</small></td><td>${esc(c.opening_title || "—")}</td><td>${stagePill(c.stage)}</td><td>${esc(c.source || "—")}</td><td>${fmtDate(c.updated_at.slice(0, 10))}</td><td><button class="secondary" data-cand="${c.id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
+        ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Opening</th><th>Stage</th><th>Source</th><th>Match</th><th>Updated</th><th></th></tr></thead><tbody>${rows.map((c) => `<tr><td>${esc(c.name)}<small>${esc(c.email || c.phone || "")}</small></td><td>${esc(c.opening_title || "—")}</td><td>${stagePill(c.stage)}</td><td>${esc(c.source || "—")}</td><td>${matchPill(c) || "—"}</td><td>${fmtDate(c.updated_at.slice(0, 10))}</td><td><button class="secondary" data-cand="${c.id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
         : empty("No candidates", "Add candidates as they apply.")
     }</div>`;
   }
+  if (["board", "insights", "templates"].includes(tab))
+    return await recruitTabHtml(tab);
   if (tab === "onboarding") {
     const [people, template, pipeline, probation] = await Promise.all([
       api("/admin/onboarding"),
@@ -153,7 +158,10 @@ async function hiringWire(tab) {
     document.querySelector(s)?.addEventListener("click", fn);
   const each = (s, fn) =>
     document.querySelectorAll(s).forEach((b) => (b.onclick = () => fn(b)));
-  if (tab === "openings") {
+  if (["board", "insights", "templates"].includes(tab)) {
+    await recruitWire(tab);
+  } else if (tab === "openings") {
+    recruitOpeningsWire();
     on("#new-opening", openingDialog);
     each("[data-opening]", (b) =>
       busy(b, async () => {
@@ -277,12 +285,17 @@ async function candidateDialogNew(openingId) {
   );
   dialog(
     "Add a candidate",
-    `${input("name", "Name", "", "required maxlength=100")}${input("email", "Email", "", 'type="email"')}${input("phone", "Phone")}<label>Opening<select name="opening_id"><option value="">— None —</option>${openings.map((o) => `<option value="${o.id}" ${o.id === openingId ? "selected" : ""}>${esc(o.title)}</option>`).join("")}</select></label>${input("source", "Source (referral, portal…)")}${input("expected_ctc", "Expected pay (₹ a year)", "", 'type="number" min="0"')}${input("notice_days", "Notice period (days)", "", 'type="number" min="0" max="365"')}${input("resume_url", "Resume link")}<label class="full">Notes<input name="notes" maxlength="2000"></label>`,
+    `${input("name", "Name", "", "required maxlength=100")}${input("email", "Email", "", 'type="email"')}${input("phone", "Phone")}<label>Opening<select name="opening_id"><option value="">— None —</option>${openings.map((o) => `<option value="${o.id}" ${o.id === openingId ? "selected" : ""}>${esc(o.title)}</option>`).join("")}</select></label>${input("source", "Source (referral, portal…)")}${input("expected_ctc", "Expected pay (₹ a year)", "", 'type="number" min="0"')}${input("notice_days", "Notice period (days)", "", 'type="number" min="0" max="365"')}${input("resume_url", "Resume link")}${input("qualification", "Qualification")}${input("experience_years", "Experience (years)", "", 'type="number" min="0" step="0.5"')}<label class="full">Skills, separated by commas<input name="skills" maxlength="600"></label><label class="full">Notes<input name="notes" maxlength="2000"></label>`,
     async (b) => {
       const body = {};
       for (const [k, v] of Object.entries(b))
         if (v !== "")
-          body[k] = ["opening_id", "expected_ctc", "notice_days"].includes(k)
+          body[k] = [
+            "opening_id",
+            "expected_ctc",
+            "notice_days",
+            "experience_years",
+          ].includes(k)
             ? Number(v)
             : v;
       await api("/admin/candidates", body);
@@ -297,11 +310,12 @@ async function candidateView(id) {
   const offer = c.offers.find((o) =>
     ["draft", "sent", "accepted"].includes(o.status),
   );
+  const files = await api(`/admin/candidates/${id}/files`);
   const pre =
     !c.user_id && c.offers.some((o) => ["sent", "accepted"].includes(o.status))
       ? await api(`/admin/candidates/${id}/preboarding`)
       : null;
-  const html = `<p class="muted">${esc(c.email || "")} ${esc(c.phone || "")} · ${esc(c.opening_title || "No opening")} · ${stagePill(c.stage)}${c.user_id ? " · now an employee" : ""}</p>${c.notes ? `<p>${esc(c.notes)}</p>` : ""}${c.resume_url ? `<p><a href="${esc(c.resume_url)}" target="_blank" rel="noopener noreferrer">Resume</a></p>` : ""}
+  const html = `<p class="muted">${esc(c.email || "")} ${esc(c.phone || "")} · ${esc(c.opening_title || "No opening")} · ${stagePill(c.stage)}${c.user_id ? " · now an employee" : ""}</p>${matchPill(c)} ${c.qualification ? `<small>${esc(c.qualification)}</small>` : ""} ${c.experience_years != null ? `<small>${c.experience_years} yrs experience</small>` : ""}${JSON.parse(c.skills || "[]").length ? `<p><strong>Skills:</strong> ${JSON.parse(c.skills).map(esc).join(", ")}</p>` : ""}${files.map((f) => `<button class="ghost" data-cfile="${f.id}">View ${esc(f.name)}</button>`).join(" ")} <button class="ghost" id="edit-skills">Edit skills</button>${c.notes ? `<p>${esc(c.notes)}</p>` : ""}${c.resume_url ? `<p><a href="${esc(c.resume_url)}" target="_blank" rel="noopener noreferrer">Resume</a></p>` : ""}
     ${
       live
         ? `<div class="actions spaced">${["applied", "screening", "interview"]
@@ -357,6 +371,30 @@ async function candidateView(id) {
         })),
   );
   wirePreboarding(id, pre, reopen);
+  document
+    .querySelectorAll("dialog [data-cfile]")
+    .forEach(
+      (b) =>
+        (b.onclick = () =>
+          openFile(`/api/admin/candidate-files/${b.dataset.cfile}`)),
+    );
+  on("#edit-skills", () =>
+    dialog(
+      "Skills and experience",
+      `<label class="full">Skills, separated by commas<input name="skills" value="${esc(JSON.parse(c.skills || "[]").join(", "))}" maxlength="600"></label>${input("experience_years", "Experience (years)", c.experience_years ?? "", 'type="number" min="0" step="0.5"')}${input("qualification", "Qualification", c.qualification || "")}`,
+      async (f) => {
+        const r = await api(`/admin/candidates/${id}/rescore`, {
+          skills: f.skills,
+          experience_years:
+            f.experience_years === "" ? null : Number(f.experience_years),
+          qualification: f.qualification,
+        });
+        notice(
+          r.match_score == null ? "Saved." : `Saved. Match ${r.match_score}%.`,
+        );
+      },
+    ),
+  );
   on("#reject", () =>
     dialog(
       "Close this candidate",
@@ -399,10 +437,22 @@ async function candidateView(id) {
   on("#new-offer", () =>
     dialog(
       "Make an offer",
-      `${input("designation", "Designation", "", "required maxlength=100")}${input("monthly_gross", "Monthly gross (₹)", "", 'type="number" min="1" required')}${input("joining_date", "Joining date", "", 'type="date" required')}${input("valid_until", "Offer valid until", "", 'type="date"')}${input("probation_months", "Probation (months)", 6, 'type="number" min="0" max="24"')}<label class="full">Note for the letter<input name="note" maxlength="1000"></label>`,
+      `${input("designation", "Designation", "", "required maxlength=100")}${input("monthly_gross", "Monthly gross (₹)", "", 'type="number" min="1" required')}${input("joining_date", "Joining date", "", 'type="date" required')}${input("valid_until", "Offer valid until", "", 'type="date"')}${input("probation_months", "Probation (months)", 6, 'type="number" min="0" max="24"')}<label class="full">Monthly salary breakup, one per line like <em>Basic: 24000</em> (leave empty for the standard split)<textarea name="breakup" rows="4"></textarea></label><label class="full">Note for the letter<input name="note" maxlength="1000"></label>`,
       async (b) => {
         await api(`/admin/candidates/${id}/offers`, {
           probation_months: Number(b.probation_months),
+          breakup: b.breakup.trim()
+            ? b.breakup
+                .trim()
+                .split("\n")
+                .map((l) => {
+                  const [name, amount] = l.split(":");
+                  return {
+                    name: (name || "").trim(),
+                    monthly: Number((amount || "").replace(/[^0-9.]/g, "")),
+                  };
+                })
+            : undefined,
           designation: b.designation,
           monthly_gross: Number(b.monthly_gross),
           joining_date: b.joining_date,

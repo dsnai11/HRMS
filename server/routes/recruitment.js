@@ -11,6 +11,14 @@ import {
 import { requireOwned } from "../scope.js";
 import { can } from "../rbac.js";
 import { offerLetter } from "../letters.js";
+import {
+  candidateExtras,
+  candidateMail,
+  openingExtras,
+  rescoreCandidate,
+  setColumns,
+} from "./recruitment-plus.js";
+import { createInvite } from "./preboarding.js";
 import { assignJoinerCourses } from "./learning.js";
 import { preboardingForHire } from "./preboarding.js";
 import { storePrivate } from "./payroll-setup.js";
@@ -144,7 +152,9 @@ export function registerRecruitment(router, app) {
     "/api/admin/openings",
     { perm: "recruitment.manage" },
     async ({ user, companyId, body, send, audit }) => {
-      const f = await openingFields(await body(), companyId);
+      const b = await body();
+      const f = await openingFields(b, companyId);
+      const extras = openingExtras(b);
       if (!f.title) throw new HttpError(400, "Title is required.");
       const id = await transaction(async () => {
         const id = Number(
@@ -168,6 +178,7 @@ export function registerRecruitment(router, app) {
               )
           ).lastInsertRowid,
         );
+        await setColumns(db, "job_openings", id, extras);
         await audit("opening_created", { id, title: f.title });
         return id;
       });
@@ -181,6 +192,12 @@ export function registerRecruitment(router, app) {
       const row = await owned("job_openings", params.id, companyId, "opening");
       const b = await body();
       const f = await openingFields(b, companyId, row);
+      const extras = openingExtras(b);
+      if (extras.published === 1 && row.approval_status !== "approved")
+        throw new HttpError(
+          409,
+          "Approve the requisition before publishing it.",
+        );
       const status =
         b.status === undefined
           ? row.status
@@ -202,13 +219,22 @@ export function registerRecruitment(router, app) {
           status === "closed" ? (row.closed_at ?? nowIso()) : null,
           row.id,
         );
+      await setColumns(db, "job_openings", row.id, extras);
+      if (
+        extras.skills !== undefined ||
+        extras.min_experience_years !== undefined
+      )
+        for (const c of await db
+          .prepare("SELECT id FROM candidates WHERE opening_id=?")
+          .all(row.id))
+          await rescoreCandidate(db, c.id);
       await audit("opening_updated", { id: row.id, status });
       return send(200, { ok: true });
     },
   );
 
   // ---- candidates -------------------------------------------------------------------------
-  const CAND = `SELECT c.*,o.title opening_title FROM candidates c LEFT JOIN job_openings o ON o.id=c.opening_id`;
+  const CAND = `SELECT c.*,o.title opening_title,o.min_score opening_min_score FROM candidates c LEFT JOIN job_openings o ON o.id=c.opening_id`;
   router.get(
     "/api/admin/candidates",
     { perm: "recruitment.manage" },
@@ -286,7 +312,9 @@ export function registerRecruitment(router, app) {
     "/api/admin/candidates",
     { perm: "recruitment.manage" },
     async ({ user, companyId, body, send, audit }) => {
-      const f = await candidateFields(await body(), companyId);
+      const b = await body();
+      const f = await candidateFields(b, companyId);
+      const extras = candidateExtras(b);
       if (!f.name) throw new HttpError(400, "Name is required.");
       if (
         f.email &&
@@ -330,9 +358,17 @@ export function registerRecruitment(router, app) {
           f.source ? `Source: ${f.source}` : null,
           user.id,
         );
+        await setColumns(db, "candidates", id, extras);
+        await rescoreCandidate(db, id);
         await audit("candidate_added", { id, name: f.name });
         return id;
       });
+      if (f.email)
+        await candidateMail(
+          app,
+          await db.prepare("SELECT * FROM candidates WHERE id=?").get(id),
+          "acknowledgement",
+        );
       return send(201, { id });
     },
   );
@@ -364,7 +400,9 @@ export function registerRecruitment(router, app) {
     { perm: "recruitment.manage" },
     async ({ params, companyId, body, send, audit }) => {
       const c = await owned("candidates", params.id, companyId, "candidate");
-      const f = await candidateFields(await body(), companyId, c);
+      const b = await body();
+      const f = await candidateFields(b, companyId, c);
+      const extras = candidateExtras(b);
       await db
         .prepare(
           "UPDATE candidates SET name=?,email=?,phone=?,source=?,opening_id=?,expected_ctc=?,notice_days=?,resume_url=?,notes=?,updated_at=? WHERE id=?",
@@ -382,6 +420,8 @@ export function registerRecruitment(router, app) {
           nowIso(),
           c.id,
         );
+      await setColumns(db, "candidates", c.id, extras);
+      await rescoreCandidate(db, c.id);
       await audit("candidate_updated", { id: c.id });
       return send(200, { ok: true });
     },
@@ -413,6 +453,8 @@ export function registerRecruitment(router, app) {
         await event(c.id, `stage_${stage}`, reason, user.id);
         await audit("candidate_stage", { id: c.id, stage });
       });
+      if (stage === "rejected" && c.stage !== "rejected")
+        await candidateMail(app, c, "rejection");
       return send(200, { ok: true });
     },
   );
@@ -476,6 +518,9 @@ export function registerRecruitment(router, app) {
         );
         await audit("interview_scheduled", { id, candidateId: c.id });
         return id;
+      });
+      await candidateMail(app, c, "interview_call", {
+        details: `Round: ${b.round_name ?? "Interview"}\nWhen: ${new Date(at).toLocaleString("en-IN", { timeZone: app.timezone, dateStyle: "full", timeStyle: "short" })}\nMode: ${(b.mode ?? "in_person").replace("_", " ")}${b.location ? `\nWhere / link: ${b.location}` : ""}`,
       });
       return send(201, { id });
     },
@@ -593,12 +638,37 @@ export function registerRecruitment(router, app) {
       if (!joining || joining < today())
         throw new HttpError(400, "Joining date must be today or later.");
       const validUntil = isoDate(b.valid_until, "Valid until");
+      let breakup = null;
+      if (b.breakup !== undefined && b.breakup !== null) {
+        const parts = Array.isArray(b.breakup) ? b.breakup : [];
+        if (parts.length < 1 || parts.length > 12)
+          throw new HttpError(400, "Give 1 to 12 salary components.");
+        const clean = parts.map((x) => ({
+          name: string(x?.name, "Component name", 60),
+          monthly: Math.round(
+            number(x?.monthly, "Component amount", 0, 100000000),
+          ),
+        }));
+        if (
+          Math.abs(
+            clean.reduce((a, x) => a + x.monthly, 0) -
+              Math.round(
+                number(b.monthly_gross, "Monthly gross", 1, 100000000),
+              ),
+          ) > 1
+        )
+          throw new HttpError(
+            400,
+            "The components must add up to the monthly gross.",
+          );
+        breakup = JSON.stringify(clean);
+      }
       const id = await transaction(async () => {
         const id = Number(
           (
             await db
               .prepare(
-                "INSERT INTO offers(company_id,candidate_id,designation,monthly_gross,joining_date,valid_until,note,probation_months,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO offers(company_id,candidate_id,designation,monthly_gross,joining_date,valid_until,note,probation_months,ctc_breakup,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
               )
               .run(
                 companyId,
@@ -615,6 +685,7 @@ export function registerRecruitment(router, app) {
                   : Math.round(
                       number(b.probation_months, "Probation months", 0, 24),
                     ),
+                breakup,
                 user.id,
                 nowIso(),
               )
@@ -684,7 +755,13 @@ export function registerRecruitment(router, app) {
         await event(cand.id, `offer_${status}`, null, user.id);
         await audit("offer_status", { id: o.id, status });
       });
-      return send(200, { ok: true });
+      let link = null;
+      if (status === "sent") {
+        // Sending the offer also issues the candidate's private joining link and emails it.
+        link = (await createInvite(app, user.id, companyId, cand)).link;
+        await candidateMail(app, cand, "offer_sent", { link });
+      }
+      return send(200, { ok: true, link });
     },
   );
   router.get(
