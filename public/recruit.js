@@ -680,3 +680,112 @@ async function creditTabWire() {
     );
   };
 }
+
+// ---- onboarding: readiness, team owners, joining documents ---------------------------------------
+function readinessCard(rows) {
+  return `<div class="card"><div class="card-head"><div><h2>New joiner readiness</h2><p class="muted">Everyone who joined in the last 60 days: documents, policies, tasks, assets and training at a glance.</p></div></div>${
+    rows.length
+      ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Joined</th><th>Documents verified</th><th>Policies signed</th><th>Tasks</th><th>Assets</th><th>Training</th><th>Buddy</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.name)}<small>${esc(r.employee_code || "")}</small></td><td>${fmtDate(r.date_of_joining)}</td><td>${r.docs ? `${r.docs_verified} of ${r.docs}` : "—"}</td><td>${r.policies_signed || "—"}</td><td>${r.tasks_done} of ${r.tasks}</td><td>${r.assets || "—"}</td><td>${r.trainings ? `${r.trainings_done} of ${r.trainings}` : "—"}</td><td>${esc(r.buddy_name || "—")}</td></tr>`).join("")}</tbody></table></div>`
+      : empty("No recent joiners", "People you hire appear here.")
+  }</div>`;
+}
+function ownersCard(owners) {
+  const GROUPS = { it: "IT", finance: "Finance", admin: "Admin" };
+  return `<div class="card"><div class="card-head"><div><h2>Who handles joining tasks</h2><p class="muted">When someone is hired, these teams are told what is waiting for them (laptop and accounts, payroll and bank advice, ID card and desk). They see and tick their tasks under Approvals.</p></div></div>${Object.entries(
+    GROUPS,
+  )
+    .map(
+      ([k, l]) =>
+        `<div class="activity"><strong>${l}</strong>: ${owners[k].length ? owners[k].map((p) => esc(p.name)).join(", ") : '<span class="muted">nobody yet</span>'} <button class="ghost" data-owners="${k}">Change</button></div>`,
+    )
+    .join("")}</div>`;
+}
+function joiningDocsCard(rows) {
+  return `<div class="card"><div class="card-head"><div><h2>Joining documents</h2><p class="muted">NDA and policies candidates read and sign on their joining link before day one. Each signature records their typed name, time and address, and keeps the text as it was when signed.</p></div><button id="new-joining-doc">Add a document</button></div>${
+    rows.length
+      ? `<div class="table-wrap"><table><thead><tr><th>Title</th><th>Type</th><th>Required</th><th>Signed</th><th></th></tr></thead><tbody>${rows.map((d) => `<tr><td>${esc(d.title)}${d.active ? "" : ' <span class="pill neutral">Off</span>'}</td><td>${{ nda: "NDA", policy: "Policy", other: "Other" }[d.kind]}</td><td>${d.required ? "Yes" : "No"}</td><td>${d.signed}</td><td><button class="ghost" data-edit-jdoc="${d.id}">Edit</button> <button class="ghost" data-toggle-jdoc="${d.id}" data-active="${d.active ? 0 : 1}">${d.active ? "Turn off" : "Turn on"}</button></td></tr>`).join("")}</tbody></table></div>`
+      : empty("No documents", "Add your NDA and policy acknowledgements.")
+  }</div>`;
+}
+function jdocFields(d = {}) {
+  return `${input("title", "Title", d.title || "", "required maxlength=150")}${sel(
+    "kind",
+    "Type",
+    [
+      ["nda", "NDA"],
+      ["policy", "Policy"],
+      ["other", "Other"],
+    ],
+    d.kind || "policy",
+  )}<label class="full">Text the candidate reads<textarea name="body" rows="10" required maxlength="20000">${esc(d.body || "")}</textarea></label><label class="check"><input type="checkbox" name="required" ${d.required === 0 ? "" : "checked"}> Required before they can submit their joining details</label>`;
+}
+function onboardingPlusWire() {
+  document.querySelectorAll("[data-owners]").forEach((b) => {
+    b.onclick = async () => {
+      const [people, owners] = await Promise.all([
+        peopleList(),
+        api("/admin/onboarding/owners"),
+      ]);
+      const group = b.dataset.owners;
+      const chosen = new Set(owners[group].map((p) => p.id));
+      dialog(
+        `People who handle ${{ it: "IT", finance: "Finance", admin: "Admin" }[group]} tasks`,
+        `<fieldset class="full"><legend>Choose one or more</legend><div class="panel-pick">${people.map((p) => `<label class="check"><input type="checkbox" name="u_${p.id}" ${chosen.has(p.id) ? "checked" : ""}> ${esc(p.name)}${p.employee_code ? ` (${esc(p.employee_code)})` : ""}</label>`).join("")}</div></fieldset>`,
+        async (f) => {
+          const ids = Object.keys(f)
+            .filter((k) => k.startsWith("u_"))
+            .map((k) => Number(k.slice(2)));
+          await api(
+            `/admin/onboarding/owners/${group}`,
+            { user_ids: ids },
+            "PUT",
+          );
+          notice("Saved.");
+        },
+      );
+    };
+  });
+  document.querySelector("#new-joining-doc")?.addEventListener("click", () =>
+    dialog("Add a joining document", jdocFields(), async (f) => {
+      await api("/admin/joining-documents", {
+        title: f.title,
+        kind: f.kind,
+        body: f.body,
+        required: "required" in f,
+      });
+      notice("Added.");
+    }),
+  );
+  document.querySelectorAll("[data-edit-jdoc]").forEach((b) => {
+    b.onclick = async () => {
+      const d = (await api("/admin/joining-documents")).find(
+        (x) => x.id === Number(b.dataset.editJdoc),
+      );
+      dialog(`Edit · ${d.title}`, jdocFields(d), async (f) => {
+        await api(
+          `/admin/joining-documents/${d.id}`,
+          {
+            title: f.title,
+            kind: f.kind,
+            body: f.body,
+            required: "required" in f,
+          },
+          "PATCH",
+        );
+        notice("Saved. People who already signed keep the text they signed.");
+      });
+    };
+  });
+  document.querySelectorAll("[data-toggle-jdoc]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        busy(b, async () => {
+          await api(
+            `/admin/joining-documents/${b.dataset.toggleJdoc}`,
+            { active: b.dataset.active === "1" },
+            "PATCH",
+          );
+          render();
+        })),
+  );
+}

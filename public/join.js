@@ -100,6 +100,17 @@ function draw() {
     html += `<div class="join-ok">Your details are with HR for review. We will email you if anything needs correcting.</div>`;
   if (d.status === "changes_requested" && d.hr_note)
     html += `<div class="join-note"><strong>HR asked for a correction:</strong> ${esc(d.hr_note)}</div>`;
+  if (d.agreements?.length)
+    html += `<div class="card"><h2>Documents to sign</h2><p class="muted">Read each one, then type your full name to sign it.</p>${d.agreements
+      .map(
+        (a) =>
+          `<form class="agreement" data-agreement="${a.id}"><h3>${esc(a.title)}${a.required ? "" : " (optional)"}</h3><p class="prewrap agreement-text">${esc(a.body)}</p>${
+            a.signed_at
+              ? `<div class="join-ok">Signed on ${fmt(a.signed_at.slice(0, 10))}.</div>`
+              : `<label class="check"><input type="checkbox" name="agree" required> I have read and agree</label><label>Type your full name: <em>${esc(d.name)}</em><input name="full_name" required maxlength="100" autocomplete="name"></label><div class="actions spaced"><button type="submit">Sign</button></div>`
+          }</form>`,
+      )
+      .join("")}</div>`;
   const ro = d.editable ? "" : "disabled";
   html += `<form id="details" class="card"><h2>Your details</h2><div class="form-grid">
     <label>Date of birth<input type="date" name="date_of_birth" value="${esc(f.date_of_birth)}" ${ro}></label>
@@ -260,6 +271,16 @@ function wire() {
         await reload("Consent recorded. Thank you.");
       },
     );
+  box.querySelectorAll(".agreement").forEach((f) => {
+    if (!f.elements.agree) return;
+    f.onsubmit = guard(f.querySelector("button[type=submit]"), async () => {
+      await call(`/agreements/${f.dataset.agreement}/acknowledge`, {
+        full_name: f.elements.full_name.value,
+        agree: f.elements.agree.checked,
+      });
+      await reload("Signed. Thank you.");
+    });
+  });
   const details = box.querySelector("#details");
   if (!details) return;
   box.querySelector("#save")?.addEventListener(

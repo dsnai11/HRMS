@@ -46,6 +46,11 @@ export const DEFAULT_TEMPLATES = {
     subject: "Update on your application for {{position}}",
     body: "Dear {{name}},\n\nThank you for your interest in {{company}} and for the time you spent with us. After careful consideration we will not be taking your application for {{position}} forward at this time. We will keep your details for future openings.\n\nWe wish you the very best.\n\n{{company}}",
   },
+  welcome: {
+    label: "Welcome and login details",
+    subject: "Welcome to {{company}}",
+    body: "Dear {{name}},\n\nWelcome to {{company}}. We are delighted to have you join us on {{joining_date}}.\n\nYour login for the HR portal:\nAddress: {{login_url}}\nEmail: {{email}}\nTemporary password: {{password}}\nYou will be asked to choose a new password the first time you sign in.\n\nReporting manager: {{manager}} ({{manager_email}})\nOnboarding buddy: {{buddy}}\nWorkstation: {{workstation}}\n\nWe look forward to seeing you.\n\n{{company}}",
+  },
   offer_sent: {
     label: "Offer sent",
     subject: "Your offer from {{company}}",

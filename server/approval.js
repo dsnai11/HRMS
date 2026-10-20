@@ -39,9 +39,11 @@ export async function pendingApprovals(app, user) {
     await app.db
       .prepare(
         `SELECT COUNT(*) n FROM onboarding_tasks t JOIN users u ON u.id=t.user_id
-         WHERE t.company_id=? AND t.done=0 AND ((t.owner='manager' AND u.manager_id=?) ${can(user, "recruitment.manage") ? "OR t.owner IN ('hr','it')" : ""})`,
+         WHERE t.company_id=? AND t.done=0 AND ((t.owner='manager' AND u.manager_id=?)
+           OR (t.owner IN ('it','finance','admin') AND EXISTS (SELECT 1 FROM onboarding_owner_members m WHERE m.company_id=t.company_id AND m.owner=t.owner AND m.user_id=?))
+           ${can(user, "recruitment.manage") ? "OR t.owner IN ('hr','it','finance','admin')" : ""})`,
       )
-      .get(user.company_id, user.id)
+      .get(user.company_id, user.id, user.id)
   ).n;
   const scope = await inboxScope(app, user);
   if (!scope) return n;

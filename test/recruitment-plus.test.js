@@ -307,7 +307,7 @@ test("requisitions, careers page, skill match, tracker, templates, offer breakup
   const tpls = (await call("/admin/recruitment/templates", undefined, hr)).data;
   assert.deepEqual(
     tpls.map((x) => x.key),
-    ["acknowledgement", "interview_call", "rejection", "offer_sent"],
+    ["acknowledgement", "interview_call", "rejection", "welcome", "offer_sent"],
   );
   assert.equal(
     (

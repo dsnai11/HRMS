@@ -20,6 +20,7 @@ import {
 } from "./recruitment-plus.js";
 import { createInvite } from "./preboarding.js";
 import { creditGate } from "./credit.js";
+import { notifyOwnerGroups } from "./onboarding-plus.js";
 import { assignJoinerCourses } from "./learning.js";
 import { preboardingForHire } from "./preboarding.js";
 import { storePrivate } from "./payroll-setup.js";
@@ -37,6 +38,7 @@ const STAGES = [
 // Where a candidate may be moved by hand; offer and hired follow from offers and hiring.
 const MANUAL = ["applied", "screening", "interview", "rejected", "withdrawn"];
 const OPEN = ["applied", "screening", "interview", "offer"];
+const OWNERS = ["hr", "manager", "employee", "it", "finance", "admin"];
 const DEFAULT_TASKS = [
   ["Collect signed offer and ID documents", "documents", "hr", 0],
   ["Collect bank details and PAN, UAN and ESI numbers", "documents", "hr", 0],
@@ -47,6 +49,8 @@ const DEFAULT_TASKS = [
   ["Complete personal profile and emergency contact", "profile", "employee", 3],
   ["Meet the team and share the first-week plan", "induction", "manager", 3],
   ["Company policy induction", "induction", "hr", 7],
+  ["Issue ID card and allot a workstation", "assets", "admin", 1],
+  ["Add to payroll and bank advice", "payroll", "finance", 2],
 ];
 
 export function registerRecruitment(router, app) {
@@ -861,6 +865,9 @@ export function registerRecruitment(router, app) {
               nowIso(),
             );
         await assignJoinerCourses(app, userId, companyId, offer.joining_date);
+        await db
+          .prepare("UPDATE joining_acks SET user_id=? WHERE candidate_id=?")
+          .run(userId, c.id);
         await audit("candidate_hired", { id: c.id, userId });
         return userId;
       });
@@ -878,6 +885,41 @@ export function registerRecruitment(router, app) {
           `You are ${c.name}'s onboarding buddy`,
           `${c.name} joins on ${offer.joining_date}. Please help them settle in.`,
         );
+      await notifyOwnerGroups(
+        app,
+        companyId,
+        userId,
+        c.name,
+        offer.joining_date,
+      );
+      if (b.send_welcome !== false) {
+        const mgrRow =
+          (b.manager_id ?? opening?.hiring_manager_id)
+            ? await db
+                .prepare("SELECT name,email FROM users WHERE id=?")
+                .get(b.manager_id ?? opening?.hiring_manager_id)
+            : null;
+        const buddyRow = buddyId
+          ? await db.prepare("SELECT name FROM users WHERE id=?").get(buddyId)
+          : null;
+        const base = (
+          process.env.APP_URL ||
+          process.env.PUBLIC_URL ||
+          ""
+        ).replace(/\/$/, "");
+        await candidateMail(app, { ...c, email: c.email ?? mail }, "welcome", {
+          email: mail,
+          password: b.password,
+          login_url: base || "your HR portal address",
+          joining_date: offer.joining_date,
+          manager: mgrRow?.name ?? "to be confirmed",
+          manager_email: mgrRow?.email ?? "",
+          buddy: buddyRow?.name ?? "to be confirmed",
+          workstation:
+            optionalString(b.workstation, "Workstation details", 300) ||
+            "to be shared by IT",
+        });
+      }
       const mgr = b.manager_id ?? opening?.hiring_manager_id;
       if (mgr)
         await notice(
@@ -939,12 +981,7 @@ export function registerRecruitment(router, app) {
               companyId,
               string(b.title, "Task", 120),
               optionalString(b.category, "Category", 40) ?? "general",
-              oneOf(b.owner ?? "hr", "Owner", [
-                "hr",
-                "manager",
-                "employee",
-                "it",
-              ]),
+              oneOf(b.owner ?? "hr", "Owner", OWNERS),
               number(b.due_days ?? 0, "Due after (days)", 0, 365),
               nowIso(),
             )
@@ -1035,12 +1072,7 @@ export function registerRecruitment(router, app) {
               p.id,
               string(b.title, "Task", 120),
               optionalString(b.category, "Category", 40) ?? "general",
-              oneOf(b.owner ?? "hr", "Owner", [
-                "hr",
-                "manager",
-                "employee",
-                "it",
-              ]),
+              oneOf(b.owner ?? "hr", "Owner", OWNERS),
               isoDate(b.due_date, "Due date"),
               nowIso(),
             )
@@ -1060,10 +1092,12 @@ export function registerRecruitment(router, app) {
       await db
         .prepare(
           `SELECT t.*,u.name employee_name FROM onboarding_tasks t JOIN users u ON u.id=t.user_id
-           WHERE t.company_id=? AND t.done=0 AND ((t.owner='manager' AND u.manager_id=?) ${can(user, "recruitment.manage") ? "OR t.owner IN ('hr','it')" : ""})
+           WHERE t.company_id=? AND t.done=0 AND ((t.owner='manager' AND u.manager_id=?)
+             OR (t.owner IN ('it','finance','admin') AND EXISTS (SELECT 1 FROM onboarding_owner_members m WHERE m.company_id=t.company_id AND m.owner=t.owner AND m.user_id=?))
+             ${can(user, "recruitment.manage") ? "OR t.owner IN ('hr','it','finance','admin')" : ""})
            ORDER BY t.due_date,t.id LIMIT 200`,
         )
-        .all(user.company_id, user.id),
+        .all(user.company_id, user.id, user.id),
     ),
   );
   router.post(
@@ -1078,8 +1112,16 @@ export function registerRecruitment(router, app) {
       const subject = await db
         .prepare("SELECT manager_id FROM users WHERE id=?")
         .get(t.user_id);
+      const member =
+        ["it", "finance", "admin"].includes(t.owner) &&
+        (await db
+          .prepare(
+            "SELECT 1 x FROM onboarding_owner_members WHERE company_id=? AND owner=? AND user_id=?",
+          )
+          .get(user.company_id, t.owner, user.id));
       const allowed =
         can(user, "recruitment.manage") ||
+        Boolean(member) ||
         (t.owner === "employee" && t.user_id === user.id) ||
         (t.owner === "manager" && subject.manager_id === user.id);
       if (!allowed) throw new HttpError(403, "You cannot complete this task.");

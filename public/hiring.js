@@ -43,7 +43,14 @@ const EXIT_STATUS = {
   withdrawn: "Withdrawn",
   completed: "Completed",
 };
-const OWNER = { hr: "HR", manager: "Manager", employee: "Employee", it: "IT" };
+const OWNER = {
+  hr: "HR",
+  manager: "Manager",
+  employee: "Employee",
+  it: "IT",
+  finance: "Finance",
+  admin: "Admin",
+};
 const REC = {
   strong_yes: "Strong yes",
   yes: "Yes",
@@ -125,7 +132,11 @@ async function hiringTabHtml(tab) {
       api("/admin/onboarding/joiners"),
       has("changes.manage") ? api("/admin/probation") : [],
     ]);
-    return `${joiningSoonCard(pipeline.pending)}${probationCard(probation)}<div class="card"><h2>New joiners</h2>${
+    const [owners, joiningDocs] = await Promise.all([
+      api("/admin/onboarding/owners"),
+      api("/admin/joining-documents"),
+    ]);
+    return `${joiningSoonCard(pipeline.pending)}${readinessCard(pipeline.joined)}${probationCard(probation)}${ownersCard(owners)}${joiningDocsCard(joiningDocs)}<div class="card"><h2>New joiners</h2>${
       people.length
         ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Joining</th><th>Progress</th><th>Overdue</th><th></th></tr></thead><tbody>${people.map((p) => `<tr><td>${esc(p.name)}<small>${esc(p.employee_code || "")}</small></td><td>${fmtDate(p.date_of_joining)}</td><td>${p.done || 0} of ${p.total}</td><td>${p.overdue ? `<span class="pill">${p.overdue}</span>` : "—"}</td><td><button class="secondary" data-onboard="${p.id}" data-name="${esc(p.name)}">Checklist</button></td></tr>`).join("")}</tbody></table></div>`
         : empty(
@@ -187,6 +198,7 @@ async function hiringWire(tab) {
     each("[data-cand]", (b) => candidateView(Number(b.dataset.cand)));
   } else if (tab === "onboarding") {
     each("[data-pre-cand]", (b) => candidateView(Number(b.dataset.preCand)));
+    onboardingPlusWire();
     probationWire();
     each("[data-onboard]", (b) =>
       onboardingDialog(Number(b.dataset.onboard), b.dataset.name),
@@ -457,7 +469,7 @@ async function candidateView(id) {
     ] = await Promise.all([api("/admin/org"), peopleList()]);
     dialog(
       "Hire " + c.name,
-      `${input("email", "Login email", c.email || "", 'type="email" required')}${input("password", "Temporary password", "", 'type="password" minlength="10" required')}<label>Workplace (for punching)<select name="workplace_id">${options(sites, null)}</select></label><label>Department<select name="department_id">${options(deps, null)}</select></label><label>Branch<select name="branch_id">${options(branches, null)}</select></label><label>Designation<select name="designation_id">${options(desigs, null)}</select></label><label>Reporting manager<select name="manager_id">${options(people, null)}</select></label><label>Onboarding buddy<select name="buddy_id">${options(people, null)}</select></label><label class="full">Credit check override note (only if a high-risk result is accepted)<input name="credit_override_note" maxlength="300"></label>${sel(
+      `${input("email", "Login email", c.email || "", 'type="email" required')}${input("password", "Temporary password", "", 'type="password" minlength="10" required')}<label>Workplace (for punching)<select name="workplace_id">${options(sites, null)}</select></label><label>Department<select name="department_id">${options(deps, null)}</select></label><label>Branch<select name="branch_id">${options(branches, null)}</select></label><label>Designation<select name="designation_id">${options(desigs, null)}</select></label><label>Reporting manager<select name="manager_id">${options(people, null)}</select></label><label>Onboarding buddy<select name="buddy_id">${options(people, null)}</select></label><label class="full">Workstation details for the welcome email (desk, laptop…)<input name="workstation" maxlength="300"></label><label class="check full"><input type="checkbox" name="send_welcome" checked> Email a welcome message with the login details to the candidate</label><label class="full">Credit check override note (only if a high-risk result is accepted)<input name="credit_override_note" maxlength="300"></label>${sel(
         "gender",
         "Gender",
         [
@@ -481,6 +493,8 @@ async function candidateView(id) {
         if (b.gender) body.gender = b.gender;
         if (b.credit_override_note)
           body.credit_override_note = b.credit_override_note;
+        if (b.workstation) body.workstation = b.workstation;
+        body.send_welcome = "send_welcome" in b;
         await api(`/admin/candidates/${id}/hire`, body);
         notice(
           "Hired. The onboarding checklist has been created; set their salary under Payroll.",
@@ -514,7 +528,7 @@ async function openFile(url) {
 function joiningSoonCard(rows) {
   return `<div class="card"><div class="card-head"><div><h2>Joining soon</h2><p class="muted">Candidates with an offer out: where their offer and joining details stand.</p></div></div>${
     rows.length
-      ? `<div class="table-wrap"><table><thead><tr><th>Candidate</th><th>Joining</th><th>Offer</th><th>Joining details</th><th>Documents</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.name)}<small>${esc(r.designation)}</small></td><td>${fmtDate(r.joining_date)}</td><td><span class="pill ${r.offer_status === "accepted" ? "" : "neutral"}">${OFFER_STATUS[r.offer_status]}</span></td><td>${r.preboarding_status ? `<span class="pill ${r.preboarding_status === "verified" ? "" : "neutral"}">${PRE_STATUS[r.preboarding_status]}</span>` : '<span class="muted">Not invited</span>'}</td><td>${r.docs ? `${r.docs_verified} of ${r.docs} verified` : "—"}</td><td><button class="secondary" data-pre-cand="${r.candidate_id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
+      ? `<div class="table-wrap"><table><thead><tr><th>Candidate</th><th>Joining</th><th>Offer</th><th>Joining details</th><th>Documents</th><th>Policies</th><th>Credit</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.name)}<small>${esc(r.designation)}</small></td><td>${fmtDate(r.joining_date)}</td><td><span class="pill ${r.offer_status === "accepted" ? "" : "neutral"}">${OFFER_STATUS[r.offer_status]}</span></td><td>${r.preboarding_status ? `<span class="pill ${r.preboarding_status === "verified" ? "" : "neutral"}">${PRE_STATUS[r.preboarding_status]}</span>` : '<span class="muted">Not invited</span>'}</td><td>${r.docs ? `${r.docs_verified} of ${r.docs} verified` : "—"}</td><td>${r.agreements_required ? `${r.agreements_signed} of ${r.agreements_required} signed` : "—"}</td><td>${r.credit_risk ? `<span class="pill ${RISK_PILL[r.credit_risk]}">${{ low: "Low", medium: "Medium", high: "High" }[r.credit_risk]} risk</span>` : r.credit_consent ? "Consent given" : "—"}</td><td><button class="secondary" data-pre-cand="${r.candidate_id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
       : empty("Nobody waiting to join", "Offers that are sent appear here.")
   }</div>`;
 }

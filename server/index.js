@@ -36,6 +36,7 @@ import {
   registerLearning,
   scheduleLearningReminders,
 } from "./routes/learning.js";
+import { registerOnboardingPlus } from "./routes/onboarding-plus.js";
 import { registerCredit } from "./routes/credit.js";
 import { registerInterviewsPlus } from "./routes/interviews-plus.js";
 import { registerRecruitmentPlus } from "./routes/recruitment-plus.js";
@@ -160,6 +161,7 @@ export function createApp({
     registerRecruitmentPlus,
     registerInterviewsPlus,
     registerCredit,
+    registerOnboardingPlus,
     registerPreboarding,
     registerProbation,
     registerLearning,

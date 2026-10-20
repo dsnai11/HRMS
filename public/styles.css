@@ -1249,3 +1249,17 @@ pre.report {
   font-size: 12px;
   white-space: pre-wrap;
 }
+
+.agreement-text {
+  max-height: 220px;
+  overflow: auto;
+  padding: 12px;
+  background: #f3f7f5;
+  border-radius: 8px;
+}
+.agreement {
+  display: grid;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
