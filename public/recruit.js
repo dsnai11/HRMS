@@ -49,6 +49,7 @@ async function recruitTabHtml(tab) {
     <div class="card"><h2>Open positions</h2>${a.open_positions.length ? `<div class="table-wrap"><table><thead><tr><th>Role</th><th>Days open</th><th>Positions</th><th>In process</th><th>Filled</th></tr></thead><tbody>${a.open_positions.map((o) => `<tr><td>${esc(o.title)}</td><td>${o.days_open}</td><td>${o.positions}</td><td>${o.candidates}</td><td>${o.filled}</td></tr>`).join("")}</tbody></table></div>` : empty("Nothing open", "Open positions appear here.")}</div>${await interviewAnalyticsHtml()}`;
   }
   if (tab === "questions") return await questionBankHtml();
+  if (tab === "credit") return await creditTabHtml();
   const rows = await api("/admin/recruitment/templates");
   return `<div class="card"><h2>Candidate emails</h2><p class="muted">Sent automatically when a candidate applies, is invited to interview, is not taken forward, or receives an offer. They go out only when email is set up on the server; otherwise the candidate's timeline notes that nothing was sent. You can use: ${TEMPLATE_VARS}.</p>${rows.map((t) => `<div class="activity"><strong>${esc(t.label)}</strong> ${t.enabled ? "" : '<span class="pill neutral">Off</span>'}<br><small>${esc(t.subject)}</small><br><button class="secondary" data-template="${t.key}">Edit</button></div>`).join("")}</div>`;
 }
@@ -101,6 +102,7 @@ async function recruitWire(tab) {
     return;
   }
   if (tab === "questions") return questionBankWire();
+  if (tab === "credit") return creditTabWire();
   document.querySelectorAll("[data-template]").forEach((b) => {
     b.onclick = async () => {
       const t = (await api("/admin/recruitment/templates")).find(
@@ -537,4 +539,144 @@ async function interviewAnalyticsHtml() {
       q.avg_rating,
     ]),
   )}</div>`;
+}
+
+// ---- credit (CIBIL) checks ---------------------------------------------------------------------------
+const RISK_PILL = { low: "", medium: "neutral", high: "danger" };
+const riskPill = (r) =>
+  r.risk
+    ? `<span class="pill ${RISK_PILL[r.risk]}">${r.score} · ${{ low: "Low risk", medium: "Medium risk", high: "High risk" }[r.risk]}</span>`
+    : r.status === "failed"
+      ? '<span class="pill neutral">Failed</span>'
+      : "—";
+
+function creditPanelHtml(cr) {
+  if (!cr.enabled) return "";
+  return `<h3>Credit check (${esc(cr.bureau)})</h3><p class="muted">${
+    cr.consent
+      ? `Consent ${cr.consent.source === "portal" ? `given online by ${esc(cr.consent.given_name)}` : `recorded by HR (${esc(cr.consent.note)})`} on ${time(cr.consent.given_at)}.`
+      : "No consent yet. The candidate can give it from their joining link, or you can record consent taken offline."
+  }</p>${cr.checks
+    .map(
+      (k) =>
+        `<div class="activity">${riskPill(k)} <small>${k.status === "manual" ? "Entered by hand" : k.status === "failed" ? esc(k.error || "") : "From the bureau"} · ${time(k.requested_at)}${k.requested_by_name ? ` · ${esc(k.requested_by_name)}` : ""}${k.pan_last4 ? ` · PAN ••••${esc(k.pan_last4)}` : ""}${k.note ? ` · ${esc(k.note)}` : ""}</small>${k.has_report ? ` <button class="ghost" data-credit-report="${k.id}">View report</button>` : ""}</div>`,
+    )
+    .join(
+      "",
+    )}<div class="actions spaced">${cr.consent ? `<button class="secondary" id="credit-run">${cr.automatic ? "Check with the bureau" : "Enter the score"}</button>${cr.automatic ? '<button class="ghost" id="credit-manual">Enter score by hand</button>' : ""}` : '<button class="secondary" id="credit-consent">Record consent taken offline</button>'}</div>`;
+}
+function wireCredit(id, cr, reopen) {
+  if (!cr?.enabled) return;
+  const on = (s, fn) =>
+    document.querySelector(`dialog ${s}`)?.addEventListener("click", fn);
+  const manual = () =>
+    dialog(
+      "Enter the credit score",
+      `${input("manual_score", "Score from the bureau report (300–900)", "", 'type="number" min="300" max="900" required')}${input("note", "Note (e.g. report date)", "", "maxlength=500")}`,
+      async (f) => {
+        const r = await api(`/admin/candidates/${id}/credit-check`, {
+          manual_score: Number(f.manual_score),
+          note: f.note || undefined,
+        });
+        notice(`Recorded: ${r.risk_label}.`);
+      },
+    );
+  on("#credit-manual", manual);
+  on("#credit-run", () => {
+    if (!cr.automatic) return manual();
+    dialog(
+      "Check with the bureau",
+      `${input("pan", "Candidate's PAN (leave empty to use the one they entered)", "", 'maxlength=10 autocapitalize="characters"')}${input("dob", "Date of birth (if your bureau needs it)", "", 'type="date"')}<p class="full muted">The request is made from the server and recorded in the audit log.</p>`,
+      async (f) => {
+        try {
+          const r = await api(`/admin/candidates/${id}/credit-check`, {
+            pan: f.pan || undefined,
+            dob: f.dob || undefined,
+          });
+          notice(`${r.risk_label}: ${r.score}.`);
+        } catch (e) {
+          throw e;
+        }
+      },
+    );
+  });
+  on("#credit-consent", () =>
+    dialog(
+      "Record consent",
+      '<label class="full">How was consent obtained? (form, email, date)<input name="note" maxlength="300" required></label>',
+      async (f) => {
+        await api(`/admin/candidates/${id}/credit-consent`, { note: f.note });
+        notice("Consent recorded.");
+      },
+    ),
+  );
+  document.querySelectorAll("dialog [data-credit-report]").forEach((b) => {
+    b.onclick = async () => {
+      const r = await api(
+        `/admin/credit-checks/${b.dataset.creditReport}/report`,
+      );
+      viewDialog(
+        "Bureau report",
+        `<p class="muted">Viewing is recorded in the audit log.</p><pre class="report">${esc(JSON.stringify(r, null, 2))}</pre>`,
+      );
+    };
+  });
+}
+
+async function creditTabHtml() {
+  const [d, s, log] = await Promise.all([
+    api("/admin/credit-checks"),
+    api("/admin/credit/settings"),
+    api("/admin/credit/audit"),
+  ]);
+  const stat = (l, v) =>
+    `<div class="stat"><div class="stat-label">${l}</div><div class="stat-value">${v}</div></div>`;
+  return `<div class="stats">${stat("Low risk", d.summary.low)}${stat("Medium risk", d.summary.medium)}${stat("High risk", d.summary.high)}${stat("Awaiting consent", d.summary.awaiting_consent)}${stat("Consent given, not checked", d.summary.not_checked)}</div>
+  <div class="card"><div class="card-head"><div><h2>Credit checks</h2><p class="muted">${s.enabled ? `On. ${s.url ? "Connected to your bureau API." : "No bureau connection: HR enters the score from the bureau's report."} ${s.required_before_hire ? "A check is required before hiring." : ""}` : "Off. Turn it on in Settings."}</p></div><button class="secondary" id="credit-settings">Settings</button></div>${
+    d.rows.length
+      ? `<div class="table-wrap"><table><thead><tr><th>Candidate</th><th>Stage</th><th>Consent</th><th>Result</th><th>Checked</th><th></th></tr></thead><tbody>${d.rows.map((r) => `<tr><td>${esc(r.name)}<small>${esc(r.opening_title || "")}</small></td><td>${stagePill(r.stage)}</td><td>${r.consent_at ? `<span class="pill">${r.consent_source === "portal" ? "Given" : "Recorded"}</span>` : '<span class="pill neutral">Waiting</span>'}</td><td>${riskPill({ risk: r.risk, score: r.score, status: r.status })}</td><td>${r.requested_at ? time(r.requested_at) : "—"}</td><td><button class="secondary" data-cand="${r.candidate_id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
+      : empty(
+          "No candidates yet",
+          "Candidates at the interview or offer stage appear here.",
+        )
+  }</div>
+  <div class="card"><h2>Audit log</h2>${log.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead><tbody>${log.map((a) => `<tr><td>${time(a.created_at)}</td><td>${esc(a.actor_name || "Candidate")}</td><td>${esc(a.action.replaceAll("_", " "))}<small>${esc(a.detail)}</small></td></tr>`).join("")}</tbody></table></div>` : empty("Nothing yet", "Every consent, check and report view is recorded here.")}</div>`;
+}
+async function creditTabWire() {
+  document
+    .querySelectorAll("[data-cand]")
+    .forEach((b) => (b.onclick = () => candidateView(Number(b.dataset.cand))));
+  document.querySelector("#credit-settings").onclick = async () => {
+    const s = await api("/admin/credit/settings");
+    dialog(
+      "Credit check settings",
+      `<label class="check full"><input type="checkbox" name="enabled" ${s.enabled ? "checked" : ""}> Ask candidates for consent and allow credit checks</label><label class="check full"><input type="checkbox" name="required_before_hire" ${s.required_before_hire ? "checked" : ""}> Require a check before a candidate can be hired</label>${input("provider_name", "Bureau name", s.provider_name, "maxlength=40")}${input("low_min", "Low risk from score", s.low_min, 'type="number" min="300" max="900"')}${input("medium_min", "Medium risk from score", s.medium_min, 'type="number" min="300" max="900"')}<label class="full">Consent wording shown to the candidate<textarea name="consent_text" rows="4" maxlength="2000">${esc(s.consent_text)}</textarea></label><h3 class="full">Bureau API (optional)</h3><p class="full muted">Your bureau or its integration partner gives you the address, key and request format. Leave empty to enter scores by hand. The address must be a public https website.</p>${input("url", "API address", s.url || "", 'type="url" maxlength=500')}${sel(
+        "method",
+        "Method",
+        [
+          ["POST", "POST"],
+          ["GET", "GET"],
+        ],
+        s.method,
+      )}${input("auth_header", "Header that carries the key", s.auth_header, "maxlength=60")}${input("api_key", s.api_key_set ? "API key (saved — type to replace)" : "API key", "", 'type="password" autocomplete="off"')}<label class="full">Request body (JSON; you can use {{pan}}, {{name}}, {{dob}}, {{phone}})<textarea name="body_template" rows="3" maxlength="2000">${esc(s.body_template || "")}</textarea></label>${input("score_path", "Where the score is in the answer (e.g. data.score)", s.score_path, "maxlength=100")}${s.encryption_configured ? "" : '<p class="error-text full">The server has no DATA_ENCRYPTION_KEY, so the API key cannot be saved.</p>'}`,
+      async (f) => {
+        const body = {
+          enabled: "enabled" in f,
+          required_before_hire: "required_before_hire" in f,
+          provider_name: f.provider_name,
+          low_min: Number(f.low_min),
+          medium_min: Number(f.medium_min),
+          consent_text: f.consent_text,
+          url: f.url,
+          method: f.method,
+          auth_header: f.auth_header,
+          body_template: f.body_template,
+          score_path: f.score_path,
+        };
+        if (f.api_key) body.api_key = f.api_key;
+        await api("/admin/credit/settings", body, "PUT");
+        notice("Saved.");
+      },
+    );
+  };
 }

@@ -19,6 +19,7 @@ import {
   setColumns,
 } from "./recruitment-plus.js";
 import { createInvite } from "./preboarding.js";
+import { creditGate } from "./credit.js";
 import { assignJoinerCourses } from "./learning.js";
 import { preboardingForHire } from "./preboarding.js";
 import { storePrivate } from "./payroll-setup.js";
@@ -751,6 +752,13 @@ export function registerRecruitment(router, app) {
       if (!offer)
         throw new HttpError(409, "Record an accepted offer before hiring.");
       const b = await body();
+      const blocked = await creditGate(
+        db,
+        companyId,
+        c.id,
+        optionalString(b.credit_override_note, "Note", 300),
+      );
+      if (blocked) throw new HttpError(409, blocked);
       const mail = b.email ?? c.email;
       if (!mail)
         throw new HttpError(400, "An email is needed to create the login.");

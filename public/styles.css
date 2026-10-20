@@ -1235,3 +1235,17 @@ label.inline select {
   max-height: 180px;
   overflow: auto;
 }
+
+.pill.danger {
+  background: #fbe9e6;
+  color: #a94335;
+}
+pre.report {
+  max-height: 320px;
+  overflow: auto;
+  background: #f3f7f5;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  white-space: pre-wrap;
+}

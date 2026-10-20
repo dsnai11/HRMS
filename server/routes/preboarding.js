@@ -19,6 +19,8 @@ import {
 } from "../crypto-store.js";
 import { KINDS, TYPES, checkFile } from "./documents.js";
 import { cleanPrivate } from "./payroll-setup.js";
+import { DEFAULT_CONSENT } from "../credit.js";
+import { loadCreditSettings } from "./credit.js";
 
 const LINK_DAYS = 30;
 const MAX_DOCS = 12;
@@ -141,6 +143,19 @@ export function registerPreboarding(router, app) {
         .all(companyId)
     ).map((r) => r.id);
 
+  async function creditInfo(p) {
+    const s = await loadCreditSettings(db, p.company_id);
+    if (!s.enabled) return null;
+    const given = await db
+      .prepare(
+        "SELECT given_at FROM credit_consents WHERE candidate_id=? ORDER BY id DESC LIMIT 1",
+      )
+      .get(p.candidate_id);
+    return {
+      text: s.consent_text || DEFAULT_CONSENT,
+      given_at: given?.given_at ?? null,
+    };
+  }
   async function byToken(token) {
     if (typeof token !== "string" || token.length < 20 || token.length > 100)
       throw new HttpError(404, "This link is not valid.");
@@ -229,6 +244,7 @@ export function registerPreboarding(router, app) {
         sensitive: maskedSensitive(p),
         documents: await docsOf(p.id),
         doc_kinds: KINDS.filter((k) => k !== "offer_letter"),
+        credit: await creditInfo(p),
       });
     },
   );

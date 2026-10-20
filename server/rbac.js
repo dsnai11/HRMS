@@ -23,6 +23,7 @@ const HR = [
   "performance.manage",
   "changes.manage",
   "attendance.import",
+  "credit.manage",
 ];
 const PAYROLL = ["payroll.manage", "payroll.read"];
 const ADMIN = [

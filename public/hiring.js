@@ -7,6 +7,7 @@ const HIRING_TABS = {
   insights: "Recruitment insights",
   templates: "Email templates",
   questions: "Question bank",
+  credit: "Credit checks",
   onboarding: "Onboarding",
   assets: "Assets",
   exits: "Exits",
@@ -73,7 +74,11 @@ async function hiringPage(id) {
       "Openings, candidates, joining checklists, company assets and exits.",
     ) +
     `<div class="tabbar">${Object.entries(HIRING_TABS)
-      .filter(([k]) => k !== "assets" || has("assets.manage"))
+      .filter(
+        ([k]) =>
+          (k !== "assets" || has("assets.manage")) &&
+          (k !== "credit" || has("credit.manage")),
+      )
       .map(
         ([k, l]) =>
           `<button class="${k === hiringTab ? "" : "secondary"}" data-tab="${k}">${l}</button>`,
@@ -111,7 +116,7 @@ async function hiringTabHtml(tab) {
         : empty("No candidates", "Add candidates as they apply.")
     }</div>`;
   }
-  if (["board", "insights", "templates", "questions"].includes(tab))
+  if (["board", "insights", "templates", "questions", "credit"].includes(tab))
     return await recruitTabHtml(tab);
   if (tab === "onboarding") {
     const [people, template, pipeline, probation] = await Promise.all([
@@ -159,7 +164,7 @@ async function hiringWire(tab) {
     document.querySelector(s)?.addEventListener("click", fn);
   const each = (s, fn) =>
     document.querySelectorAll(s).forEach((b) => (b.onclick = () => fn(b)));
-  if (["board", "insights", "templates", "questions"].includes(tab)) {
+  if (["board", "insights", "templates", "questions", "credit"].includes(tab)) {
     await recruitWire(tab);
   } else if (tab === "openings") {
     recruitOpeningsWire();
@@ -312,6 +317,9 @@ async function candidateView(id) {
     ["draft", "sent", "accepted"].includes(o.status),
   );
   const files = await api(`/admin/candidates/${id}/files`);
+  const credit = has("credit.manage")
+    ? await api(`/admin/candidates/${id}/credit`)
+    : null;
   const pre =
     !c.user_id && c.offers.some((o) => ["sent", "accepted"].includes(o.status))
       ? await api(`/admin/candidates/${id}/preboarding`)
@@ -332,7 +340,7 @@ async function candidateView(id) {
     }
     <h3>Interviews</h3>${c.interviews.length ? '<div class="actions"><button class="ghost" id="scorecard">Timeline and scorecard</button></div>' : ""}${c.interviews.length ? c.interviews.map((i) => `<div class="activity"><strong>${esc(i.round_name)}</strong> · ${esc(i.interviewer_name)} · ${new Date(i.scheduled_at).toLocaleString("en-IN")} · ${esc(i.status)}${i.rating ? `<br><small>${i.rating}/5 · ${REC[i.recommendation]} · ${esc(i.feedback || "")}</small>` : ""}${i.status === "scheduled" ? ` <button class="ghost" data-cancel-iv="${i.id}">Cancel</button>` : ""}</div>`).join("") : '<p class="muted">None yet.</p>'}
     <h3>Offers</h3>${c.offers.length ? c.offers.map((o) => `<div class="activity"><strong>${esc(o.designation)}</strong> · ${inr(o.monthly_gross)} a month · joins ${fmtDate(o.joining_date)} · ${OFFER_STATUS[o.status]}<br>${o.status === "draft" ? `<button class="ghost" data-offer="${o.id}" data-st="sent">Mark as sent</button>` : ""}${o.status === "sent" ? `<button class="ghost" data-offer="${o.id}" data-st="accepted">Accepted</button><button class="ghost" data-offer="${o.id}" data-st="declined">Declined</button>` : ""}${["draft", "sent", "accepted"].includes(o.status) && !c.user_id ? `<button class="ghost" data-offer="${o.id}" data-st="withdrawn">Withdraw</button>` : ""} <a class="button secondary" href="/letter.html?type=offer&id=${o.id}" target="_blank" rel="noopener">Offer letter</a></div>`).join("") : '<p class="muted">None yet.</p>'}
-    ${pre ? preboardingPanel(pre) : ""}
+    ${pre ? preboardingPanel(pre) : ""}${credit && !c.user_id ? creditPanelHtml(credit) : ""}
     ${offer?.status === "accepted" && !c.user_id ? '<div class="actions spaced"><button id="hire">Hire and create the employee</button></div>' : ""}
     <h3>History</h3>${c.events.map((e) => `<div class="activity"><small>${time(e.created_at)} · ${esc(e.kind.replaceAll("_", " "))}${e.detail ? ` · ${esc(e.detail)}` : ""}${e.actor_name ? ` · ${esc(e.actor_name)}` : ""}</small></div>`).join("")}`;
   viewDialog(c.name, html);
@@ -372,6 +380,7 @@ async function candidateView(id) {
         })),
   );
   wirePreboarding(id, pre, reopen);
+  wireCredit(id, credit, reopen);
   document
     .querySelectorAll("dialog [data-cfile]")
     .forEach(
@@ -448,7 +457,7 @@ async function candidateView(id) {
     ] = await Promise.all([api("/admin/org"), peopleList()]);
     dialog(
       "Hire " + c.name,
-      `${input("email", "Login email", c.email || "", 'type="email" required')}${input("password", "Temporary password", "", 'type="password" minlength="10" required')}<label>Workplace (for punching)<select name="workplace_id">${options(sites, null)}</select></label><label>Department<select name="department_id">${options(deps, null)}</select></label><label>Branch<select name="branch_id">${options(branches, null)}</select></label><label>Designation<select name="designation_id">${options(desigs, null)}</select></label><label>Reporting manager<select name="manager_id">${options(people, null)}</select></label><label>Onboarding buddy<select name="buddy_id">${options(people, null)}</select></label>${sel(
+      `${input("email", "Login email", c.email || "", 'type="email" required')}${input("password", "Temporary password", "", 'type="password" minlength="10" required')}<label>Workplace (for punching)<select name="workplace_id">${options(sites, null)}</select></label><label>Department<select name="department_id">${options(deps, null)}</select></label><label>Branch<select name="branch_id">${options(branches, null)}</select></label><label>Designation<select name="designation_id">${options(desigs, null)}</select></label><label>Reporting manager<select name="manager_id">${options(people, null)}</select></label><label>Onboarding buddy<select name="buddy_id">${options(people, null)}</select></label><label class="full">Credit check override note (only if a high-risk result is accepted)<input name="credit_override_note" maxlength="300"></label>${sel(
         "gender",
         "Gender",
         [
@@ -470,6 +479,8 @@ async function candidateView(id) {
         ])
           if (b[k]) body[k] = Number(b[k]);
         if (b.gender) body.gender = b.gender;
+        if (b.credit_override_note)
+          body.credit_override_note = b.credit_override_note;
         await api(`/admin/candidates/${id}/hire`, body);
         notice(
           "Hired. The onboarding checklist has been created; set their salary under Payroll.",
