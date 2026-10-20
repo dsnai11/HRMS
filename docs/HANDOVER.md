@@ -76,7 +76,7 @@ scripts/smoke/           browser smoke scripts (see its README)
 | `SETUP_TOKEN` | remove once the first admin exists | one-time admin setup |
 | `RESEND_API_KEY`, `MAIL_FROM` | **not set** | turns on email. Needs a Resend account and a verified sending domain. Until then nothing is emailed; HR copies links |
 | `FCM_SERVICE_ACCOUNT` | **not set** | Android push (Firebase). iPhone push is not possible with a free Apple ID |
-| `ANTHROPIC_API_KEY`, `BOT_MODEL` | not used yet | planned for the Laxmi assistant free-text fallback |
+| `ANTHROPIC_API_KEY`, `BOT_MODEL` | optional, **not set** | turns on Laxmi's free-text answers by Claude (default model `claude-opus-5-5`). Without it Laxmi answers from rules, the knowledge base and policies only |
 | `PHOTO_RETENTION_DAYS`, `DB_POOL_MAX`, `LOGIN_IP_LIMIT`, `DB_SIZE_LIMIT_BYTES`, `TRUST_PROXY_HOPS`, `CREDIT_ALLOW_PRIVATE` | optional | see `docs/OPERATIONS.md`; `CREDIT_ALLOW_PRIVATE=1` is for tests only, never in production |
 
 Secrets are never committed. GitHub repository secrets for the Actions: `DATABASE_URL` and `BACKUP_PASSPHRASE` (backups), `GOOGLE_SERVICES_JSON` (Android push build, optional).
@@ -106,7 +106,7 @@ Every module below is real, tested and in production code, not mock-up.
 ## 7. State of the branches (important)
 
 - **`main`** (commit `d033ccf` at the time of writing): everything above, 90 tests passing, deployed.
-- **`claude/stage7-bot`**: **work in progress, not merged**. It has the internal-chat backend (`server/routes/chat.js`, rooms, direct and group chats, polling updates) and migration `028_chat_bot.sql` (chat plus bot tables). No tests, no portal screens, no bot yet. Treat it as a head start, not a finished feature. Do not merge until it has tests and UI. Migration 028 has **not** been applied to Neon.
+- **`claude/stage7-bot`**: internal chat and the Laxmi assistant, finished and tested (`test/chat-bot.test.js`), **not merged yet**. Portal pages *Messages* and *Ask Laxmi* (`public/chat.js`). Migration `028_chat_bot.sql` runs on the next deploy after the merge (it has not been applied to Neon). The phone app does not have these pages yet.
 - Older `claude/*` branches are all merged into `main` and can be deleted.
 
 The Render deploy of `main` after the last merge may still have been building when this was written. Check https://hrms-hfsr.onrender.com/health returns `{"ok":true}`.
@@ -115,7 +115,7 @@ The Render deploy of `main` after the last merge may still have been building wh
 
 From the proposal (`docs/PROPOSAL-MATCH.md`), in the order I would do them:
 
-1. **Laxmi assistant and internal chat** (Module 11). Plan: rules for the common questions (leave balance, holidays, payday, payslip, attendance, team questions for managers), a company knowledge base plus the existing policies as searchable answers, a guided leave application that ends in a confirm button calling the existing leave API, an audit log of every question and answer, and an optional Claude API fallback for free text that only sees facts about the asking person (no tools, answers only from supplied context). Chat UI polls `/api/chat/updates` every few seconds and uses the browser Notification API.
+1. ~~Laxmi assistant and internal chat~~ (Module 11): built on `claude/stage7-bot` (see section 7). Left: the same two pages in the phone app, and HR filling the knowledge base and setting the pay day (*Ask Laxmi* page).
 2. **HR command centre** (RPT-01): one page with headcount by department, monthly attrition, open positions, joiners and leavers, demographics. Most numbers exist under Insights.
 3. **Multi-level approvals and escalation:** manager then HR for long leave, reminders when a request waits too long.
 4. **Anonymous 360° feedback rounds** (PER-05).
