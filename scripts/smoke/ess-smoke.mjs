@@ -1,0 +1,88 @@
+import { chromium } from "playwright-core";
+import { randomBytes } from "node:crypto";
+process.env.DATA_ENCRYPTION_KEY = randomBytes(32).toString("base64");
+const { createApp } = await import("/home/user/hrms/server/index.js");
+const { openPglite } = await import("/home/user/hrms/server/pglite.js");
+const { createAdmin, passwordHash } = await import("/home/user/hrms/server/db.js");
+const db = await openPglite();
+await createAdmin(db, { name: "Owner", email: "owner@example.test", password: "Owner-password-123", companyName: "Alpha Ltd" });
+const { server } = createApp({ db });
+await new Promise((r) => server.listen(0, "127.0.0.1", r));
+const base = `http://127.0.0.1:${server.address().port}`;
+const co = (await db.prepare("SELECT id FROM companies").get()).id;
+const branch = Number((await db.prepare("INSERT INTO branches(company_id,name,state,created_at) VALUES(?,?,?,?)").run(co, "Bengaluru", "Karnataka", new Date().toISOString())).lastInsertRowid);
+const site = Number((await db.prepare("INSERT INTO workplaces(company_id,name,latitude,longitude,radius,max_accuracy) VALUES(?,?,?,?,?,?)").run(co, "Office", 12.97, 77.59, 150, 50)).lastInsertRowid);
+const mk = async (name, email, role) => Number((await db.prepare("INSERT INTO users(name,email,password_hash,role,company_id,created_at,date_of_joining,gender,branch_id,workplace_id,employee_code) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(name, email, passwordHash("Temporary-pass-123"), role, co, new Date().toISOString(), "2026-01-01", "male", branch, site, "E" + Math.floor(Math.random() * 9000 + 1000))).lastInsertRowid);
+const pay = await mk("Pia Payroll", "pay@example.test", "payroll");
+const hr = await mk("Hana HR", "hr@example.test", "hr");
+const boss = await mk("Boss Admin", "boss@example.test", "admin");
+const emp = await mk("Esha Employee", "e@example.test", "employee");
+await db.prepare("UPDATE companies SET attendance_start_date='2026-09-01' WHERE id=?").run(co);
+for (let d = 1; d <= 30; d++) {
+  const date = `2026-09-${String(d).padStart(2, "0")}`;
+  if (new Date(date + "T00:00:00Z").getUTCDay() === 0) continue;
+  await db.prepare("INSERT INTO shifts(user_id,workplace_id,workplace_name,site_latitude,site_longitude,radius,max_accuracy,in_at,in_latitude,in_longitude,in_accuracy,out_at,day_type) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").run(emp, site, "Office", 12.97, 77.59, 150, 50, new Date(`${date}T04:00:00Z`).toISOString(), 12.97, 77.59, 10, new Date(`${date}T13:00:00Z`).toISOString(), "full_day");
+}
+const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const errors = [];
+const session = async (email, fn) => {
+  const ctx = await browser.newContext({ viewport: { width: 1300, height: 1100 } });
+  const page = await ctx.newPage();
+  page.on("pageerror", (e) => errors.push(`${email} pageerror: ${e.message}`));
+  page.on("console", (m) => m.type() === "error" && !/401|404/.test(m.text()) && errors.push(`${email} console: ${m.text()}`));
+  await page.goto(base);
+  await page.fill("input[name=email]", email);
+  await page.fill("input[name=password]", "Temporary-pass-123");
+  await page.click("button:has-text('Sign in')");
+  await page.waitForSelector(".content");
+  await fn(page, ctx);
+  await ctx.close();
+};
+await db.prepare("UPDATE users SET must_change_password=0").run();
+const tab = async (page, label) => { await page.click(`button[data-tab]:has-text("${label}")`); await page.waitForTimeout(500); };
+
+await db.prepare("UPDATE users SET manager_id=(SELECT id FROM users WHERE email='hr@example.test') WHERE email='e@example.test'").run();
+await session("e@example.test", async (page) => {
+  await page.click("nav >> text=My profile");
+  await page.waitForSelector("#bank-change");
+  await page.click("#bank-change");
+  await page.fill("dialog input[name=account_holder]", "Esha Employee");
+  await page.fill("dialog input[name=bank_name]", "HDFC Bank");
+  await page.fill("dialog input[name=bank_account]", "123456789012");
+  await page.fill("dialog input[name=ifsc]", "HDFC0001234");
+  await page.setInputFiles("dialog input[name=proof]", "/tmp/claude-0/portal-smoke/sample.pdf");
+  await page.click("dialog button[type=submit]");
+  await page.waitForSelector("text=Waiting for approval");
+  await page.click("nav >> text=Documents");
+  await page.waitForSelector("text=My employment letters");
+  const [popup] = await Promise.all([page.context().waitForEvent("page"), page.click("a:has-text('Open') >> nth=0")]);
+  await popup.waitForSelector("article.letter");
+  console.log("letter:", (await popup.innerText("h2")));
+  await page.click("nav >> text=Helpdesk");
+  await page.click("#new-ticket");
+  await page.fill("dialog input[name=subject]", "ID card reprint");
+  await page.selectOption("dialog select[name=category]", "id_card");
+  await page.fill("dialog textarea[name=body]", "Lost my card");
+  await page.click("dialog button[type=submit]");
+  await page.waitForSelector("td:has-text('ID card reprint')");
+  console.log("ticket row:", (await page.innerText("tr:has-text('ID card reprint')")).replace(/\s+/g, " "));
+});
+await session("pay@example.test", async (page) => {
+  console.log("payroll sees approvals:", (await page.innerText("nav")).includes("Approvals"));
+  await page.click("nav >> text=Approvals");
+  await page.waitForSelector("[data-bank-ok]");
+  await page.click("[data-bank-proof]");
+  await page.waitForTimeout(400);
+  await page.click("[data-bank-ok]");
+  await page.waitForSelector("#notice:has-text('Approved')");
+});
+await session("hr@example.test", async (page) => {
+  await page.click("nav >> text=Helpdesk");
+  await page.click("#sla-settings");
+  await page.fill("dialog input[name=high]", "8");
+  await page.click("dialog button[type=submit]");
+  await page.waitForTimeout(500);
+  console.log("queue:", (await page.innerText("tr:has-text('ID card reprint')")).replace(/\s+/g, " "));
+});
+console.log("errors:", errors);
+await browser.close(); server.close(); await db.close(); process.exit(0);
