@@ -39,6 +39,7 @@ import {
 import { registerCompOff, scheduleCompOffExpiry } from "./routes/compoff.js";
 import { registerTaxDeclarations } from "./routes/tax-declarations.js";
 import { registerPayrollReports } from "./routes/payroll-reports.js";
+import { registerEssPlus } from "./routes/ess-plus.js";
 import { registerPeoplePlus } from "./routes/people-plus.js";
 import { registerOnboardingPlus } from "./routes/onboarding-plus.js";
 import { registerCredit } from "./routes/credit.js";
@@ -69,6 +70,7 @@ const STATIC = {
   "/recruit.js": ["recruit.js", "text/javascript"],
   "/profile360.js": ["profile360.js", "text/javascript"],
   "/timeplus.js": ["timeplus.js", "text/javascript"],
+  "/ess-plus.js": ["ess-plus.js", "text/javascript"],
   "/join.html": ["join.html", "text/html"],
   "/join.js": ["join.js", "text/javascript"],
   "/careers.html": ["careers.html", "text/html"],
@@ -173,6 +175,7 @@ export function createApp({
     registerPeoplePlus,
     registerCompOff,
     registerTaxDeclarations,
+    registerEssPlus,
     registerPreboarding,
     registerProbation,
     registerLearning,

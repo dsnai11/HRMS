@@ -10,7 +10,16 @@ import {
 import { requireOwned } from "../scope.js";
 import { can } from "../rbac.js";
 
-const CATEGORIES = ["payroll", "leave", "attendance", "it", "policy", "other"];
+const CATEGORIES = [
+  "payroll",
+  "leave",
+  "attendance",
+  "it",
+  "policy",
+  "id_card",
+  "certificate",
+  "other",
+];
 const STATUSES = ["open", "in_progress", "resolved", "closed"];
 
 export function registerEngagement(router, app) {
@@ -183,6 +192,23 @@ export function registerEngagement(router, app) {
 
   // ---- helpdesk ----------------------------------------------------------------------------------
   const TICKET = `SELECT t.*,u.name employee_name,u.employee_code,a.name assigned_name FROM tickets t JOIN users u ON u.id=t.user_id LEFT JOIN users a ON a.id=t.assigned_to`;
+  // Response-time state: met or missed once resolved; otherwise due or breached.
+  const withSla = (t) => {
+    const done = ["resolved", "closed"].includes(t.status);
+    const at = done ? (t.resolved_at ?? t.updated_at) : nowIso();
+    return {
+      ...t,
+      sla_state: !t.due_at
+        ? null
+        : done
+          ? at <= t.due_at
+            ? "met"
+            : "missed"
+          : at > t.due_at
+            ? "breached"
+            : "due",
+    };
+  };
   const canSee = (user, t) =>
     t.user_id === user.id || can(user, "helpdesk.manage");
   router.get("/api/tickets", async ({ user, send }) =>
@@ -192,32 +218,42 @@ export function registerEngagement(router, app) {
         .prepare(
           `${TICKET} WHERE t.user_id=? ORDER BY t.updated_at DESC LIMIT 100`,
         )
-        .all(user.id),
+        .all(user.id)
+        .then((rows) => rows.map(withSla)),
     ),
   );
   router.post("/api/tickets", async ({ user, body, send, audit }) => {
     const b = await body();
     const subject = string(b.subject, "Subject", 150);
+    const priority = oneOf(b.priority ?? "normal", "Priority", [
+      "low",
+      "normal",
+      "high",
+    ]);
+    const sla = JSON.parse(
+      (
+        await db
+          .prepare("SELECT ticket_sla FROM companies WHERE id=?")
+          .get(user.company_id)
+      ).ticket_sla,
+    );
     const id = await transaction(async () => {
       const now = nowIso();
       const id = Number(
         (
           await db
             .prepare(
-              "INSERT INTO tickets(company_id,user_id,category,subject,priority,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+              "INSERT INTO tickets(company_id,user_id,category,subject,priority,created_at,updated_at,due_at) VALUES(?,?,?,?,?,?,?,?)",
             )
             .run(
               user.company_id,
               user.id,
               oneOf(b.category ?? "other", "Category", CATEGORIES),
               subject,
-              oneOf(b.priority ?? "normal", "Priority", [
-                "low",
-                "normal",
-                "high",
-              ]),
+              priority,
               now,
               now,
+              new Date(Date.parse(now) + sla[priority] * 3600000).toISOString(),
             )
         ).lastInsertRowid,
       );
@@ -252,14 +288,22 @@ export function registerEngagement(router, app) {
       const status = query.get("status");
       return send(
         200,
-        await db
-          .prepare(
-            `${TICKET} WHERE t.company_id=? ${status ? "AND t.status=?" : "AND t.status IN ('open','in_progress')"} ORDER BY (t.priority='high') DESC,t.updated_at DESC LIMIT 200`,
-          )
-          .all(
-            ...(status
-              ? [companyId, oneOf(status, "Status", STATUSES)]
-              : [companyId]),
+        (
+          await db
+            .prepare(
+              `${TICKET} WHERE t.company_id=? ${status ? "AND t.status=?" : "AND t.status IN ('open','in_progress')"} ORDER BY (t.priority='high') DESC,t.updated_at DESC LIMIT 200`,
+            )
+            .all(
+              ...(status
+                ? [companyId, oneOf(status, "Status", STATUSES)]
+                : [companyId]),
+            )
+        )
+          .map(withSla)
+          .sort(
+            (a, b) =>
+              Number(b.sla_state === "breached") -
+              Number(a.sla_state === "breached"),
           ),
       );
     },
@@ -269,7 +313,7 @@ export function registerEngagement(router, app) {
     if (!canSee(user, t)) throw new HttpError(404, "Ticket not found.");
     const staff = can(user, "helpdesk.manage");
     return send(200, {
-      ...(await db.prepare(`${TICKET} WHERE t.id=?`).get(t.id)),
+      ...withSla(await db.prepare(`${TICKET} WHERE t.id=?`).get(t.id)),
       messages: await db
         .prepare(
           `SELECT m.id,m.body,m.internal,m.created_at,u.name author FROM ticket_messages m JOIN users u ON u.id=m.user_id WHERE m.ticket_id=? ${staff ? "" : "AND m.internal=0"} ORDER BY m.id`,
@@ -309,9 +353,15 @@ export function registerEngagement(router, app) {
             : t.status;
         await db
           .prepare(
-            "UPDATE tickets SET status=?,updated_at=?,assigned_to=COALESCE(assigned_to,?) WHERE id=?",
+            "UPDATE tickets SET status=?,updated_at=?,assigned_to=COALESCE(assigned_to,?),first_response_at=COALESCE(first_response_at,?) WHERE id=?",
           )
-          .run(status, nowIso(), staff ? user.id : null, t.id);
+          .run(
+            status,
+            nowIso(),
+            staff ? user.id : null,
+            staff && !internal && t.user_id !== user.id ? nowIso() : null,
+            t.id,
+          );
         await audit("ticket_reply", { id: t.id, internal: Boolean(internal) });
       });
       if (staff && !internal && t.user_id !== user.id)
@@ -340,7 +390,7 @@ export function registerEngagement(router, app) {
       if (assigned) await owned("users", assigned, companyId, "assignee");
       await db
         .prepare(
-          "UPDATE tickets SET status=?,assigned_to=?,priority=?,updated_at=? WHERE id=?",
+          "UPDATE tickets SET status=?,assigned_to=?,priority=?,updated_at=?,resolved_at=? WHERE id=?",
         )
         .run(
           status,
@@ -349,6 +399,9 @@ export function registerEngagement(router, app) {
             ? t.priority
             : oneOf(b.priority, "Priority", ["low", "normal", "high"]),
           nowIso(),
+          ["resolved", "closed"].includes(status)
+            ? (t.resolved_at ?? nowIso())
+            : null,
           t.id,
         );
       await audit("ticket_updated", { id: t.id, status });

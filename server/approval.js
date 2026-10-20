@@ -45,6 +45,15 @@ export async function pendingApprovals(app, user) {
       )
       .get(user.company_id, user.id, user.id)
   ).n;
+  // Bank detail changes wait for HR or payroll (never the person who asked).
+  if (can(user, "payroll.manage") || can(user, "employees.write"))
+    n += (
+      await app.db
+        .prepare(
+          "SELECT COUNT(*) n FROM bank_change_requests WHERE company_id=? AND status='pending' AND user_id<>?",
+        )
+        .get(user.company_id, user.id)
+    ).n;
   const scope = await inboxScope(app, user);
   if (!scope) return n;
   for (const table of ["leave_requests", "regularizations", "comp_off_credits"])

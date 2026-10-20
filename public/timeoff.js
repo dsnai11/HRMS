@@ -199,6 +199,7 @@ async function approvalsPage(id) {
   await claimsApprovals(id);
   await hiringApprovals(id);
   await compOffApprovals(id);
+  await bankChangeApprovals(id);
 }
 
 // ---- HR: leave types, holidays, settings, requests, balances ------------------

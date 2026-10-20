@@ -38,6 +38,43 @@ export function offerLetter({ company, candidate, offer, today }) {
   };
 }
 
+export function appointmentLetter({
+  company,
+  person,
+  joined,
+  probationEnd,
+  gross,
+  manager,
+  today,
+}) {
+  const where = [person.designation_name, person.department_name]
+    .filter(Boolean)
+    .join(", ");
+  return {
+    title: "Appointment letter",
+    date: longDate(today),
+    to: person.name,
+    paragraphs: [
+      `Dear ${person.name},`,
+      `We confirm your appointment with ${company}${where ? ` as ${where}` : ""}, with effect from ${longDate(joined)}. Your employee code is ${person.employee_code ?? "—"}.`,
+      ...(gross
+        ? [
+            `Your monthly gross salary is ${inr(gross)} (${inr(gross * 12)} a year), with statutory deductions as applicable.`,
+          ]
+        : []),
+      ...(probationEnd
+        ? [
+            `You will be on probation until ${longDate(probationEnd)}. Your services will be confirmed in writing after a satisfactory review.`,
+          ]
+        : []),
+      ...(manager ? [`You will report to ${manager}.`] : []),
+      "Your appointment is subject to the company's policies, as updated from time to time, and to the verification of the documents and details you have provided.",
+      "We welcome you and look forward to a long and happy association.",
+    ],
+    signoff: `For ${company}`,
+  };
+}
+
 export function exitLetter(kind, { company, person, joined, lastDay, today }) {
   const where = `${person.designation_name ? `${person.designation_name}` : "an employee"}${person.department_name ? `, ${person.department_name}` : ""}`;
   if (kind === "relieving")
