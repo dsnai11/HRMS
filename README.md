@@ -101,6 +101,18 @@ See `docs/COMPARISON.md` for how this lines up with Addetto HRMS.
 - **Challan summaries** for PF (A/c 01, 02, 10, 21) and ESI, a **Labour Welfare Fund** rule per state (you enter the state's current figures and months), shown on the payroll register.
 - **KRAs by designation** applied as goals, and **continuous feedback** (praise, improve, private to managers and HR) under Performance.
 
+
+## Laxmi proposal parity (stage 7)
+
+The company asked for the features in the Unthinkable proposal. `docs/PROPOSAL-MATCH.md` lists every user story with its status. In short:
+
+- **Hiring:** managers raise requisitions; HR approves; a public careers page with an applicant tracker; skill match scores; a pipeline board; recruitment insights; editable candidate emails; a question bank, panel interviews with calendar invites and a scorecard; a credit (CIBIL) check with consent and an audit log.
+- **Joining:** NDA and policy sign-off on the joining link, welcome email with login, IT, Finance and Admin task owners, a readiness dashboard.
+- **People:** grades and salary bands, cost centres, business units, custom fields, org chart, 360° profile, renamed terms.
+- **Time:** shift templates and department rules, comp-off, a team leave calendar.
+- **Pay:** investment declarations that feed TDS, year-to-date, a cost report against budget.
+- **Self-service:** employment letters, bank changes with approval, helpdesk response times.
+
 ## Attendance integrity (anti-spoofing)
 
 Attendance can only be recorded from the company mobile app on an administrator-approved phone.

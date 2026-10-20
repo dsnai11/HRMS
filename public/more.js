@@ -103,6 +103,7 @@ async function documentsPage(id) {
       : "");
   document.querySelector("#add-doc").onclick = () => uploadDialog(undefined);
   wireDocs(document.querySelector("#mine"), () => render());
+  await lettersCard(id);
   if (!manage) return;
   const people = (await api("/admin/employees?limit=200&active=1")).items;
   document.querySelector("#who").innerHTML = people

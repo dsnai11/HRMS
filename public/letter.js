@@ -11,13 +11,15 @@ const esc = (v) =>
   const q = new URLSearchParams(location.search);
   const id = Number(q.get("id"));
   const path =
-    q.get("type") === "offer"
-      ? `/api/admin/offers/${id}/letter`
-      : q.get("type") === "certificate"
-        ? `/api/trainings/records/${id}/certificate`
-        : q.get("type") === "change"
-          ? `/api/admin/changes/${id}/letter`
-          : `/api/admin/exits/${id}/letter?kind=${encodeURIComponent(q.get("kind") || "experience")}`;
+    q.get("type") === "my"
+      ? `/api/my-letters/${encodeURIComponent(q.get("kind") || "")}/${id}`
+      : q.get("type") === "offer"
+        ? `/api/admin/offers/${id}/letter`
+        : q.get("type") === "certificate"
+          ? `/api/trainings/records/${id}/certificate`
+          : q.get("type") === "change"
+            ? `/api/admin/changes/${id}/letter`
+            : `/api/admin/exits/${id}/letter?kind=${encodeURIComponent(q.get("kind") || "experience")}`;
   const res = await fetch(path);
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));

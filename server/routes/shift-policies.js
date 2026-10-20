@@ -6,6 +6,7 @@ const hhmm = (v, label) => {
   if (!m) throw new HttpError(400, `${label} must look like 09:30.`);
   return v;
 };
+export const SHIFT_KINDS = ["fixed", "flexible", "rotational", "night"];
 const minutes = (v) => Number(v.slice(0, 2)) * 60 + Number(v.slice(3));
 
 // The rules that apply to a person: their own, else their branch's, else the
@@ -18,10 +19,18 @@ export async function policyFor(app, person, date = null) {
       `SELECT p.* FROM shift_policies p WHERE p.id=COALESCE(
          (SELECT shift_policy_id FROM roster_entries WHERE user_id=? AND date=? AND off=0),
          (SELECT shift_policy_id FROM users WHERE id=?),
+         (SELECT shift_policy_id FROM departments WHERE id=?),
          (SELECT shift_policy_id FROM branches WHERE id=?),
          (SELECT shift_policy_id FROM companies WHERE id=?))`,
     )
-    .get(person.id, day, person.id, person.branch_id ?? -1, person.company_id);
+    .get(
+      person.id,
+      day,
+      person.id,
+      person.department_id ?? -1,
+      person.branch_id ?? -1,
+      person.company_id,
+    );
   if (!row) return app.policy;
   return {
     startMinutes: minutes(row.start_time),
@@ -44,6 +53,10 @@ export function registerShiftPolicies(router, app) {
         ? existing.earliest_out
         : hhmm(b.earliest_out, "Earliest punch-out");
     return {
+      kind:
+        b.kind === undefined
+          ? (existing.kind ?? "fixed")
+          : oneOf(b.kind, "Type", SHIFT_KINDS),
       name: b.name === undefined ? existing.name : string(b.name, "Name", 60),
       start_time: start,
       earliest_out: out,
@@ -68,6 +81,7 @@ export function registerShiftPolicies(router, app) {
             `SELECT p.*,
              (SELECT COUNT(*) FROM users u WHERE u.shift_policy_id=p.id) employees,
              (SELECT COUNT(*) FROM branches b WHERE b.shift_policy_id=p.id) branches,
+             (SELECT COUNT(*) FROM departments d WHERE d.shift_policy_id=p.id) departments,
              (SELECT COUNT(*) FROM companies c WHERE c.shift_policy_id=p.id) is_default
            FROM shift_policies p WHERE p.company_id=? ORDER BY p.name`,
           )
@@ -89,7 +103,7 @@ export function registerShiftPolicies(router, app) {
           (
             await db
               .prepare(
-                "INSERT INTO shift_policies(company_id,name,start_time,grace_minutes,hours,earliest_out,created_at) VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO shift_policies(company_id,name,start_time,grace_minutes,hours,earliest_out,created_at,kind) VALUES(?,?,?,?,?,?,?,?)",
               )
               .run(
                 companyId,
@@ -99,6 +113,7 @@ export function registerShiftPolicies(router, app) {
                 f.hours,
                 f.earliest_out,
                 new Date(clock()).toISOString(),
+                f.kind,
               )
           ).lastInsertRowid,
         );
@@ -122,7 +137,7 @@ export function registerShiftPolicies(router, app) {
       const f = fields(await body(), p);
       await db
         .prepare(
-          "UPDATE shift_policies SET name=?,start_time=?,grace_minutes=?,hours=?,earliest_out=? WHERE id=?",
+          "UPDATE shift_policies SET name=?,start_time=?,grace_minutes=?,hours=?,earliest_out=?,kind=? WHERE id=?",
         )
         .run(
           f.name,
@@ -130,6 +145,7 @@ export function registerShiftPolicies(router, app) {
           f.grace_minutes,
           f.hours,
           f.earliest_out,
+          f.kind,
           p.id,
         );
       await audit("shift_policy_updated", { id: p.id });
@@ -152,7 +168,49 @@ export function registerShiftPolicies(router, app) {
       return send(200, { ok: true });
     },
   );
-  // Attach a policy to the whole company, a branch or one employee; policy_id null removes it.
+  // The usual patterns: a fixed day, a flexible day, rotating shifts and a night shift.
+  const TEMPLATES = [
+    ["Fixed day shift", "fixed", "09:30", 15, 9, "18:30"],
+    ["Flexible hours", "flexible", "10:00", 120, 8, "17:00"],
+    ["Rotational morning", "rotational", "06:00", 15, 8, "14:00"],
+    ["Rotational afternoon", "rotational", "14:00", 15, 8, "22:00"],
+    ["Night shift", "night", "22:00", 15, 9, "06:00"],
+  ];
+  router.post(
+    "/api/admin/shift-policies/seed-templates",
+    { perm: "org.manage" },
+    async ({ companyId, send, audit }) => {
+      let added = 0;
+      for (const [name, kind, start, grace, hours, out] of TEMPLATES) {
+        if (
+          await db
+            .prepare(
+              "SELECT id FROM shift_policies WHERE company_id=? AND lower(name)=lower(?)",
+            )
+            .get(companyId, name)
+        )
+          continue;
+        await db
+          .prepare(
+            "INSERT INTO shift_policies(company_id,name,start_time,grace_minutes,hours,earliest_out,created_at,kind) VALUES(?,?,?,?,?,?,?,?)",
+          )
+          .run(
+            companyId,
+            name,
+            start,
+            grace,
+            hours,
+            out,
+            new Date(clock()).toISOString(),
+            kind,
+          );
+        added++;
+      }
+      await audit("shift_templates_added", { added });
+      return send(200, { added });
+    },
+  );
+  // Attach a policy to the whole company, a branch, a department or one employee; policy_id null removes it.
   router.post(
     "/api/admin/shift-policies/assign",
     { perm: "org.manage" },
@@ -161,6 +219,7 @@ export function registerShiftPolicies(router, app) {
       const target = oneOf(b.target, "Target", [
         "company",
         "branch",
+        "department",
         "employee",
       ]);
       const policyId =
@@ -180,7 +239,8 @@ export function registerShiftPolicies(router, app) {
           .prepare("UPDATE companies SET shift_policy_id=? WHERE id=?")
           .run(policyId, companyId);
       else {
-        const table = target === "branch" ? "branches" : "users";
+        const table =
+          { branch: "branches", department: "departments" }[target] ?? "users";
         const row = await requireOwned(
           db,
           table,

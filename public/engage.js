@@ -11,6 +11,8 @@ const TICKET_CATEGORY = {
   attendance: "Attendance",
   it: "IT",
   policy: "Policy",
+  id_card: "ID card",
+  certificate: "Certificate / NOC",
   other: "Other",
 };
 let bellTimer;
@@ -125,6 +127,10 @@ async function announcementsPage(id) {
 }
 
 // ---- helpdesk ----------------------------------------------------------------------------------------
+const slaPill = (t) =>
+  !t.sla_state
+    ? "—"
+    : `<span class="pill ${{ breached: "danger", missed: "danger", due: "neutral", met: "" }[t.sla_state]}">${{ breached: "Overdue", missed: "Missed", due: `Due ${time(t.due_at)}`, met: "On time" }[t.sla_state]}</span>`;
 async function helpdeskPage(id) {
   const staff = has("helpdesk.manage");
   const [mine, queue] = await Promise.all([
@@ -134,18 +140,39 @@ async function helpdeskPage(id) {
   if (id !== renderId) return;
   const table = (rows, admin) =>
     rows.length
-      ? `<div class="table-wrap"><table><thead><tr>${admin ? "<th>From</th>" : ""}<th>Subject</th><th>Category</th><th>Status</th><th>Updated</th><th></th></tr></thead><tbody>${rows.map((t) => `<tr>${admin ? `<td>${esc(t.employee_name)}<small>${esc(t.employee_code || "")}</small></td>` : ""}<td>${t.priority === "high" ? '<span class="pill">High</span> ' : ""}${esc(t.subject)}</td><td>${TICKET_CATEGORY[t.category]}</td><td><span class="pill ${["resolved", "closed"].includes(t.status) ? "neutral" : ""}">${TICKET_STATUS[t.status]}</span></td><td>${time(t.updated_at)}</td><td><button class="secondary" data-ticket="${t.id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
+      ? `<div class="table-wrap"><table><thead><tr>${admin ? "<th>From</th>" : ""}<th>Subject</th><th>Category</th><th>Status</th><th>Response</th><th>Updated</th><th></th></tr></thead><tbody>${rows.map((t) => `<tr>${admin ? `<td>${esc(t.employee_name)}<small>${esc(t.employee_code || "")}</small></td>` : ""}<td>${t.priority === "high" ? '<span class="pill">High</span> ' : ""}${esc(t.subject)}</td><td>${TICKET_CATEGORY[t.category]}</td><td><span class="pill ${["resolved", "closed"].includes(t.status) ? "neutral" : ""}">${TICKET_STATUS[t.status]}</span></td><td>${slaPill(t)}</td><td>${time(t.updated_at)}</td><td><button class="secondary" data-ticket="${t.id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
       : empty("Nothing here", "No tickets.");
   document.querySelector("#content").innerHTML =
     heading(
       "Helpdesk",
       "Ask HR or payroll a question and follow the answer.",
-      '<button id="new-ticket">New ticket</button>',
+      `<div class="actions">${staff ? '<button class="secondary" id="sla-settings">Response times</button>' : ""}<button id="new-ticket">New ticket</button></div>`,
     ) +
     (staff
       ? `<div class="card"><h2>Open tickets from employees</h2>${table(queue, true)}</div>`
       : "") +
     `<div class="card"><h2>My tickets</h2>${table(mine, false)}</div>`;
+  document
+    .querySelector("#sla-settings")
+    ?.addEventListener("click", async () => {
+      const sla = await api("/admin/helpdesk/sla");
+      dialog(
+        "Response times",
+        `<p class="full muted">How many hours HR has to resolve a ticket, by the priority the employee chose. Tickets past their time are flagged and listed first.</p>${input("low", "Low priority (hours)", sla.low, 'type="number" min="1" max="720"')}${input("normal", "Normal (hours)", sla.normal, 'type="number" min="1" max="720"')}${input("high", "High (hours)", sla.high, 'type="number" min="1" max="720"')}`,
+        async (f) => {
+          await api(
+            "/admin/helpdesk/sla",
+            {
+              low: Number(f.low),
+              normal: Number(f.normal),
+              high: Number(f.high),
+            },
+            "PUT",
+          );
+          notice("Saved. It applies to new tickets.");
+        },
+      );
+    });
   document
     .querySelectorAll("[data-ticket]")
     .forEach((b) => (b.onclick = () => ticketView(Number(b.dataset.ticket))));

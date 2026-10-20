@@ -36,6 +36,15 @@ import {
   registerLearning,
   scheduleLearningReminders,
 } from "./routes/learning.js";
+import { registerCompOff, scheduleCompOffExpiry } from "./routes/compoff.js";
+import { registerTaxDeclarations } from "./routes/tax-declarations.js";
+import { registerPayrollReports } from "./routes/payroll-reports.js";
+import { registerEssPlus } from "./routes/ess-plus.js";
+import { registerPeoplePlus } from "./routes/people-plus.js";
+import { registerOnboardingPlus } from "./routes/onboarding-plus.js";
+import { registerCredit } from "./routes/credit.js";
+import { registerInterviewsPlus } from "./routes/interviews-plus.js";
+import { registerRecruitmentPlus } from "./routes/recruitment-plus.js";
 import { registerPreboarding } from "./routes/preboarding.js";
 import {
   registerProbation,
@@ -51,14 +60,21 @@ const STATIC = {
   "/timeoff.js": ["timeoff.js", "text/javascript"],
   "/payroll.js": ["payroll.js", "text/javascript"],
   "/payroll-more.js": ["payroll-more.js", "text/javascript"],
+  "/payroll-plus.js": ["payroll-plus.js", "text/javascript"],
   "/hiring.js": ["hiring.js", "text/javascript"],
   "/engage.js": ["engage.js", "text/javascript"],
   "/more.js": ["more.js", "text/javascript"],
   "/people.js": ["people.js", "text/javascript"],
   "/bulk.js": ["bulk.js", "text/javascript"],
   "/learning.js": ["learning.js", "text/javascript"],
+  "/recruit.js": ["recruit.js", "text/javascript"],
+  "/profile360.js": ["profile360.js", "text/javascript"],
+  "/timeplus.js": ["timeplus.js", "text/javascript"],
+  "/ess-plus.js": ["ess-plus.js", "text/javascript"],
   "/join.html": ["join.html", "text/html"],
   "/join.js": ["join.js", "text/javascript"],
+  "/careers.html": ["careers.html", "text/html"],
+  "/careers.js": ["careers.js", "text/javascript"],
   "/letter.html": ["letter.html", "text/html"],
   "/letter.js": ["letter.js", "text/javascript"],
   "/payslip.html": ["payslip.html", "text/html"],
@@ -148,9 +164,18 @@ export function createApp({
     registerRegularization,
     registerSummary,
     registerPayrollSetup,
+    registerPayrollReports, // before the payslip :runId route, so /payslips/ytd is not read as an id
     registerPayrollRuns,
     registerPayrollExtras,
     registerRecruitment,
+    registerRecruitmentPlus,
+    registerInterviewsPlus,
+    registerCredit,
+    registerOnboardingPlus,
+    registerPeoplePlus,
+    registerCompOff,
+    registerTaxDeclarations,
+    registerEssPlus,
     registerPreboarding,
     registerProbation,
     registerLearning,
@@ -341,6 +366,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   scheduleRetention(db);
   scheduleProbationReminders(app);
   scheduleLearningReminders(app);
+  scheduleCompOffExpiry(app);
   server.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () =>
     console.log(`HRMS listening on port ${process.env.PORT || 3000}`),
   );

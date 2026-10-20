@@ -643,5 +643,7 @@ async function payslipsPage(id) {
             "Payslips appear here after your company approves each month's payroll.",
           )
     }</div>`;
+  await ytdCard(id);
+  await declarationCard(id);
   await taxStatementCard(id);
 }

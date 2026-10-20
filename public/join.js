@@ -83,6 +83,12 @@ function draw() {
     html += `<form id="accept"><label>To accept, type your full name: <em>${esc(d.name)}</em><input name="full_name" autocomplete="name" required maxlength="100"></label><div class="actions spaced"><button type="submit">I accept this offer</button><button type="button" class="ghost" id="decline">I want to decline</button></div></form><form id="decline-form" hidden><label>Reason (optional)<input name="reason" maxlength="300"></label><div class="actions spaced"><button type="submit" class="secondary">Confirm decline</button></div></form>`;
   else html += `<div class="join-ok">You accepted this offer. Thank you.</div>`;
   html += `</div>`;
+  if (d.credit)
+    html += `<form id="consent" class="card"><h2>Credit check consent</h2>${
+      d.credit.given_at
+        ? `<div class="join-ok">Your consent was recorded on ${fmt(d.credit.given_at.slice(0, 10))}. Thank you.</div>`
+        : `<p class="prewrap">${esc(d.credit.text)}</p><label class="check"><input type="checkbox" name="agree" required> I have read this and I agree</label><label>Type your full name: <em>${esc(d.name)}</em><input name="full_name" required maxlength="100" autocomplete="name"></label><div class="actions spaced"><button type="submit">Give my consent</button></div>`
+    }</form>`;
   if (o.status !== "accepted") {
     box.innerHTML = html;
     wire();
@@ -94,6 +100,17 @@ function draw() {
     html += `<div class="join-ok">Your details are with HR for review. We will email you if anything needs correcting.</div>`;
   if (d.status === "changes_requested" && d.hr_note)
     html += `<div class="join-note"><strong>HR asked for a correction:</strong> ${esc(d.hr_note)}</div>`;
+  if (d.agreements?.length)
+    html += `<div class="card"><h2>Documents to sign</h2><p class="muted">Read each one, then type your full name to sign it.</p>${d.agreements
+      .map(
+        (a) =>
+          `<form class="agreement" data-agreement="${a.id}"><h3>${esc(a.title)}${a.required ? "" : " (optional)"}</h3><p class="prewrap agreement-text">${esc(a.body)}</p>${
+            a.signed_at
+              ? `<div class="join-ok">Signed on ${fmt(a.signed_at.slice(0, 10))}.</div>`
+              : `<label class="check"><input type="checkbox" name="agree" required> I have read and agree</label><label>Type your full name: <em>${esc(d.name)}</em><input name="full_name" required maxlength="100" autocomplete="name"></label><div class="actions spaced"><button type="submit">Sign</button></div>`
+          }</form>`,
+      )
+      .join("")}</div>`;
   const ro = d.editable ? "" : "disabled";
   html += `<form id="details" class="card"><h2>Your details</h2><div class="form-grid">
     <label>Date of birth<input type="date" name="date_of_birth" value="${esc(f.date_of_birth)}" ${ro}></label>
@@ -242,6 +259,28 @@ function wire() {
       await call("/decline", { reason: dec.elements.reason.value });
       box.innerHTML = `<div class="card"><h2>Offer declined</h2><p>Thank you for letting us know. We wish you the best.</p></div>`;
     });
+  const consent = box.querySelector("#consent");
+  if (consent && consent.elements.agree)
+    consent.onsubmit = guard(
+      consent.querySelector("button[type=submit]"),
+      async () => {
+        await call("/credit-consent", {
+          full_name: consent.elements.full_name.value,
+          agree: consent.elements.agree.checked,
+        });
+        await reload("Consent recorded. Thank you.");
+      },
+    );
+  box.querySelectorAll(".agreement").forEach((f) => {
+    if (!f.elements.agree) return;
+    f.onsubmit = guard(f.querySelector("button[type=submit]"), async () => {
+      await call(`/agreements/${f.dataset.agreement}/acknowledge`, {
+        full_name: f.elements.full_name.value,
+        agree: f.elements.agree.checked,
+      });
+      await reload("Signed. Thank you.");
+    });
+  });
   const details = box.querySelector("#details");
   if (!details) return;
   box.querySelector("#save")?.addEventListener(

@@ -1172,3 +1172,166 @@ fieldset {
   border-radius: 8px;
   background: #e8f5ef;
 }
+
+/* ---- recruitment board and insights ---- */
+.board {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(200px, 1fr);
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+.board-col {
+  background: #f3f7f5;
+  border-radius: 10px;
+  padding: 10px;
+  min-height: 220px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.board-col h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+.board-card {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  cursor: grab;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.board-card small {
+  color: var(--muted);
+}
+.funnel {
+  width: 100%;
+  max-width: 640px;
+}
+.funnel-label {
+  font-size: 13px;
+  fill: #233b35;
+}
+.funnel-bar {
+  fill: var(--green);
+}
+label.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+label.inline select {
+  width: auto;
+}
+
+.panel-pick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.pill.danger {
+  background: #fbe9e6;
+  color: #a94335;
+}
+pre.report {
+  max-height: 320px;
+  overflow: auto;
+  background: #f3f7f5;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.agreement-text {
+  max-height: 220px;
+  overflow: auto;
+  padding: 12px;
+  background: #f3f7f5;
+  border-radius: 8px;
+}
+.agreement {
+  display: grid;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+/* ---- org chart ---- */
+ul.chart,
+ul.chart-kids {
+  list-style: none;
+  margin: 0;
+  padding-left: 0;
+}
+ul.chart-kids {
+  margin-left: 22px;
+  padding-left: 14px;
+  border-left: 2px solid var(--line);
+}
+.chart li {
+  margin: 8px 0;
+}
+.chart-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  width: fit-content;
+  max-width: 100%;
+}
+.chart-card.me {
+  border-color: var(--green);
+  background: #e8f5ef;
+}
+.chart li.hit > .chart-card {
+  outline: 2px solid #f0b429;
+}
+.chart-card small {
+  display: block;
+  color: var(--muted);
+}
+.section-title {
+  margin: 24px 0 4px;
+}
+
+/* ---- team calendar ---- */
+.team-day {
+  align-content: start;
+  gap: 2px;
+  min-height: 92px;
+}
+.team-day.off {
+  background: #f3f5f4;
+}
+.team-day.has-away {
+  background: #fff8e6;
+}
+.away {
+  display: block;
+  font-size: 11px;
+  background: #fde9b8;
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.away.pending {
+  background: transparent;
+  border: 1px dashed #c9971c;
+}
+
+.budget-mark {
+  fill: #a94335;
+}

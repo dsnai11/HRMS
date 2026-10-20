@@ -19,6 +19,9 @@ import {
 } from "../crypto-store.js";
 import { KINDS, TYPES, checkFile } from "./documents.js";
 import { cleanPrivate } from "./payroll-setup.js";
+import { DEFAULT_CONSENT } from "../credit.js";
+import { loadCreditSettings } from "./credit.js";
+import { agreementsFor } from "./onboarding-plus.js";
 
 const LINK_DAYS = 30;
 const MAX_DOCS = 12;
@@ -94,6 +97,38 @@ export function cleanForm(b, base = {}) {
   return f;
 }
 
+/** Issues (or re-issues) the candidate's private joining link; returns the link and its expiry. */
+export async function createInvite(app, actorId, companyId, candidate) {
+  const { db, clock } = app;
+  const token = randomBytes(32).toString("base64url");
+  const expires = new Date(clock() + LINK_DAYS * 86400000).toISOString();
+  const existing = await db
+    .prepare("SELECT id FROM preboarding WHERE candidate_id=?")
+    .get(candidate.id);
+  if (existing)
+    await db
+      .prepare("UPDATE preboarding SET token_hash=?,expires_at=? WHERE id=?")
+      .run(tokenHash(token), expires, existing.id);
+  else
+    await db
+      .prepare(
+        "INSERT INTO preboarding(company_id,candidate_id,token_hash,expires_at,created_by,created_at) VALUES(?,?,?,?,?,?)",
+      )
+      .run(
+        companyId,
+        candidate.id,
+        tokenHash(token),
+        expires,
+        actorId,
+        new Date(clock()).toISOString(),
+      );
+  const base = (process.env.APP_URL || process.env.PUBLIC_URL || "").replace(
+    /\/$/,
+    "",
+  );
+  return { link: `${base}/join.html?t=${token}`, expires };
+}
+
 export function registerPreboarding(router, app) {
   const { db, transaction, clock, rateLimit } = app;
   const nowIso = () => new Date(clock()).toISOString();
@@ -109,6 +144,19 @@ export function registerPreboarding(router, app) {
         .all(companyId)
     ).map((r) => r.id);
 
+  async function creditInfo(p) {
+    const s = await loadCreditSettings(db, p.company_id);
+    if (!s.enabled) return null;
+    const given = await db
+      .prepare(
+        "SELECT given_at FROM credit_consents WHERE candidate_id=? ORDER BY id DESC LIMIT 1",
+      )
+      .get(p.candidate_id);
+    return {
+      text: s.consent_text || DEFAULT_CONSENT,
+      given_at: given?.given_at ?? null,
+    };
+  }
   async function byToken(token) {
     if (typeof token !== "string" || token.length < 20 || token.length > 100)
       throw new HttpError(404, "This link is not valid.");
@@ -197,6 +245,17 @@ export function registerPreboarding(router, app) {
         sensitive: maskedSensitive(p),
         documents: await docsOf(p.id),
         doc_kinds: KINDS.filter((k) => k !== "offer_letter"),
+        credit: await creditInfo(p),
+        agreements: (await agreementsFor(db, p.company_id, p.candidate_id)).map(
+          (a) => ({
+            id: a.id,
+            title: a.title,
+            body: a.body,
+            kind: a.kind,
+            required: Boolean(a.required),
+            signed_at: a.given_at,
+          }),
+        ),
       });
     },
   );
@@ -282,6 +341,48 @@ export function registerPreboarding(router, app) {
         link: "hiring",
         email: true,
       });
+      return send(200, { ok: true });
+    },
+  );
+  router.post(
+    "/api/join/:token/agreements/:id/acknowledge",
+    { public: true },
+    async ({ req, params, body, send }) => {
+      openRate(req);
+      const { p, candidate } = await byToken(params.token);
+      const doc = (await agreementsFor(db, p.company_id, p.candidate_id)).find(
+        (d) => d.id === Number(params.id),
+      );
+      if (!doc) throw new HttpError(404, "Document not found.");
+      if (doc.given_at) return send(200, { ok: true });
+      const b = await body();
+      const norm = (x) => x.trim().replace(/\s+/g, " ").toLowerCase();
+      if (b.agree !== true)
+        throw new HttpError(400, "Tick the box to confirm.");
+      if (norm(string(b.full_name, "Full name", 100)) !== norm(candidate.name))
+        throw new HttpError(
+          400,
+          "Type your full name exactly as shown to confirm.",
+        );
+      await db
+        .prepare(
+          "INSERT INTO joining_acks(document_id,candidate_id,title,text_snapshot,given_name,given_ip,given_at) VALUES(?,?,?,?,?,?,?)",
+        )
+        .run(
+          doc.id,
+          candidate.id,
+          doc.title,
+          doc.body,
+          b.full_name.trim(),
+          clientIp(req),
+          nowIso(),
+        );
+      await app.audit(
+        null,
+        "joining_document_signed",
+        { candidateId: candidate.id, documentId: doc.id },
+        p.company_id,
+      );
       return send(200, { ok: true });
     },
   );
@@ -434,6 +535,8 @@ export function registerPreboarding(router, app) {
         ])
           if (!s[k]) missing.push(l);
       }
+      for (const a of await agreementsFor(db, p.company_id, p.candidate_id))
+        if (a.required && !a.given_at) missing.push(`sign "${a.title}"`);
       const kinds = (await docsOf(p.id)).map((d) => d.kind);
       for (const [k, l] of [
         ["id_proof", "an ID proof"],
@@ -503,29 +606,7 @@ export function registerPreboarding(router, app) {
           409,
           "Mark the offer as sent before inviting the candidate to the joining portal.",
         );
-      const token = randomBytes(32).toString("base64url");
-      const expires = new Date(clock() + LINK_DAYS * 86400000).toISOString();
-      const existing = await db
-        .prepare("SELECT id FROM preboarding WHERE candidate_id=?")
-        .get(c.id);
-      if (existing)
-        await db
-          .prepare(
-            "UPDATE preboarding SET token_hash=?,expires_at=? WHERE id=?",
-          )
-          .run(tokenHash(token), expires, existing.id);
-      else
-        await db
-          .prepare(
-            "INSERT INTO preboarding(company_id,candidate_id,token_hash,expires_at,created_by,created_at) VALUES(?,?,?,?,?,?)",
-          )
-          .run(companyId, c.id, tokenHash(token), expires, user.id, nowIso());
-      const base = (
-        process.env.APP_URL ||
-        process.env.PUBLIC_URL ||
-        ""
-      ).replace(/\/$/, "");
-      const link = `${base}/join.html?t=${token}`;
+      const { link, expires } = await createInvite(app, user.id, companyId, c);
       const company = await db
         .prepare("SELECT name FROM companies WHERE id=?")
         .get(companyId);
@@ -671,7 +752,11 @@ export function registerPreboarding(router, app) {
         .prepare(
           `SELECT c.id candidate_id,c.name,o.designation,o.joining_date,o.status offer_status,p.status preboarding_status,
              (SELECT COUNT(*) FROM preboarding_documents d WHERE d.preboarding_id=p.id) docs,
-             (SELECT COUNT(*) FROM preboarding_documents d WHERE d.preboarding_id=p.id AND d.verified=1) docs_verified
+             (SELECT COUNT(*) FROM preboarding_documents d WHERE d.preboarding_id=p.id AND d.verified=1) docs_verified,
+             (SELECT COUNT(*) FROM joining_documents j WHERE j.company_id=c.company_id AND j.active=1 AND j.required=1) agreements_required,
+             (SELECT COUNT(*) FROM joining_acks a JOIN joining_documents j ON j.id=a.document_id WHERE a.candidate_id=c.id AND j.active=1 AND j.required=1) agreements_signed,
+             (SELECT k.risk FROM credit_checks k WHERE k.candidate_id=c.id AND k.status IN ('completed','manual') ORDER BY k.id DESC LIMIT 1) credit_risk,
+             (SELECT 1 FROM credit_consents x WHERE x.candidate_id=c.id LIMIT 1) credit_consent
            FROM candidates c JOIN offers o ON o.candidate_id=c.id AND o.status IN ('sent','accepted')
            LEFT JOIN preboarding p ON p.candidate_id=c.id
            WHERE c.company_id=? AND c.stage='offer' ORDER BY o.joining_date`,
@@ -681,7 +766,13 @@ export function registerPreboarding(router, app) {
         .prepare(
           `SELECT u.id user_id,u.name,u.employee_code,u.date_of_joining,u.probation_end_date,b.name buddy_name,
              (SELECT COUNT(*) FROM onboarding_tasks t WHERE t.user_id=u.id) tasks,
-             (SELECT COUNT(*) FROM onboarding_tasks t WHERE t.user_id=u.id AND t.done=1) tasks_done
+             (SELECT COUNT(*) FROM onboarding_tasks t WHERE t.user_id=u.id AND t.done=1) tasks_done,
+             (SELECT COUNT(*) FROM documents d WHERE d.user_id=u.id AND d.deleted_at IS NULL) docs,
+             (SELECT COUNT(*) FROM documents d WHERE d.user_id=u.id AND d.deleted_at IS NULL AND d.verified_at IS NOT NULL) docs_verified,
+             (SELECT COUNT(*) FROM joining_acks a WHERE a.user_id=u.id) policies_signed,
+             (SELECT COUNT(*) FROM assets x WHERE x.assigned_to=u.id AND x.status='assigned') assets,
+             (SELECT COUNT(*) FROM training_records r WHERE r.user_id=u.id) trainings,
+             (SELECT COUNT(*) FROM training_records r WHERE r.user_id=u.id AND r.status='completed') trainings_done
            FROM users u LEFT JOIN users b ON b.id=u.buddy_id
            WHERE u.company_id=? AND u.active=1 AND u.date_of_joining>=? ORDER BY u.date_of_joining DESC LIMIT 100`,
         )

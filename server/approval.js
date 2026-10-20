@@ -39,13 +39,24 @@ export async function pendingApprovals(app, user) {
     await app.db
       .prepare(
         `SELECT COUNT(*) n FROM onboarding_tasks t JOIN users u ON u.id=t.user_id
-         WHERE t.company_id=? AND t.done=0 AND ((t.owner='manager' AND u.manager_id=?) ${can(user, "recruitment.manage") ? "OR t.owner IN ('hr','it')" : ""})`,
+         WHERE t.company_id=? AND t.done=0 AND ((t.owner='manager' AND u.manager_id=?)
+           OR (t.owner IN ('it','finance','admin') AND EXISTS (SELECT 1 FROM onboarding_owner_members m WHERE m.company_id=t.company_id AND m.owner=t.owner AND m.user_id=?))
+           ${can(user, "recruitment.manage") ? "OR t.owner IN ('hr','it','finance','admin')" : ""})`,
       )
-      .get(user.company_id, user.id)
+      .get(user.company_id, user.id, user.id)
   ).n;
+  // Bank detail changes wait for HR or payroll (never the person who asked).
+  if (can(user, "payroll.manage") || can(user, "employees.write"))
+    n += (
+      await app.db
+        .prepare(
+          "SELECT COUNT(*) n FROM bank_change_requests WHERE company_id=? AND status='pending' AND user_id<>?",
+        )
+        .get(user.company_id, user.id)
+    ).n;
   const scope = await inboxScope(app, user);
   if (!scope) return n;
-  for (const table of ["leave_requests", "regularizations"])
+  for (const table of ["leave_requests", "regularizations", "comp_off_credits"])
     n += (
       await app.db
         .prepare(

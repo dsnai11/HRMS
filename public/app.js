@@ -12,6 +12,7 @@ async function loadMe() {
     ...p.user,
     permissions: p.permissions,
     is_manager: p.is_manager,
+    approvals_pending: p.approvals_pending,
     company: p.company,
   };
   companies = me.role === "super_admin" ? await api("/admin/companies") : [];
@@ -181,6 +182,13 @@ function shell() {
         : "Approvals",
     ],
     me.is_manager && ["team", "☷", "My team"],
+    (me.is_manager || has("leave.approve")) && [
+      "teamcal",
+      "▦",
+      "Team calendar",
+    ],
+    me.is_manager &&
+      !has("recruitment.manage") && ["requisitions", "✚", "Requisitions"],
     me.role !== "super_admin" && ["timeoff", "☼", "Time off"],
     me.role !== "super_admin" && ["payslips", "❒", "Payslips"],
     me.role !== "super_admin" && ["myclaims", "₹", "Claims & loans"],
@@ -190,6 +198,7 @@ function shell() {
     ["documents", "▤", "Documents"],
     me.role !== "super_admin" && ["mine", "◎", "My attendance"],
     ["directory", "☰", "Directory"],
+    ["orgchart", "⌥", "Org chart"],
     me.role !== "super_admin" && ["refer", "✚", "Refer a candidate"],
     ["helpdesk", "?", "Helpdesk"],
     ["policies", "§", "Policies"],
@@ -284,7 +293,10 @@ async function render() {
     if (page === "insights") return await insightsPage(id);
     if (page === "performance") return await performancePage(id);
     if (page === "learning") return await learningPage(id);
+    if (page === "requisitions") return await requisitionsPage(id);
     if (page === "directory") return await directoryPage(id);
+    if (page === "orgchart") return await orgChartPage(id);
+    if (page === "teamcal") return await teamCalendarPage(id);
     if (page === "refer") return await referPage(id);
     if (page === "documents") return await documentsPage(id);
     if (page === "announcements") return await announcementsPage(id);
@@ -524,6 +536,7 @@ const input = (name, label, value = "", extra = "") =>
 
 async function employeesPage(id) {
   const org = await api("/admin/org");
+  org.custom = await api("/custom-fields");
   if (id !== renderId) return;
   const limit = 25;
   let offset = 0;
@@ -544,7 +557,7 @@ async function employeesPage(id) {
     if (id !== renderId) return;
     const rows = data.items;
     document.querySelector("#list").innerHTML = rows.length
-      ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Reports to</th><th>Workplace</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((e) => `<tr><td><div class="person"><span class="avatar">${initials(e.name)}</span><div>${esc(e.name)}<small>${esc(e.employee_code || "")} · ${esc(e.email)}</small></div></div></td><td>${esc(e.department_name || "—")}<small>${esc(e.designation_name || "")}</small></td><td>${esc(e.manager_name || "—")}</td><td>${esc(e.workplace_name || "—")}</td><td>${esc(ROLE_LABELS[e.role] || e.role)}</td><td><span class="pill ${e.active ? "" : "neutral"}">${e.active ? "Active" : "Inactive"}</span></td><td>${has("employees.write") ? `<button class="secondary" data-edit="${e.id}">Manage</button>` : ""}</td></tr>`).join("")}</tbody></table></div><div class="pager"><span class="muted">${offset + 1}–${offset + rows.length} of ${data.total}</span><button class="secondary" id="prev" ${offset ? "" : "disabled"}>← Previous</button><button class="secondary" id="next" ${offset + limit < data.total ? "" : "disabled"}>Next →</button></div>`
+      ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Reports to</th><th>Workplace</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((e) => `<tr><td><div class="person"><span class="avatar">${initials(e.name)}</span><div>${esc(e.name)}<small>${esc(e.employee_code || "")} · ${esc(e.email)}</small></div></div></td><td>${esc(e.department_name || "—")}<small>${esc(e.designation_name || "")}</small></td><td>${esc(e.manager_name || "—")}</td><td>${esc(e.workplace_name || "—")}</td><td>${esc(ROLE_LABELS[e.role] || e.role)}</td><td><span class="pill ${e.active ? "" : "neutral"}">${e.active ? "Active" : "Inactive"}</span></td><td>${has("employees.write") ? `<button class="secondary" data-edit="${e.id}">Manage</button> <button class="ghost" data-p360="${e.id}" data-name="${esc(e.name)}">360°</button>` : ""}</td></tr>`).join("")}</tbody></table></div><div class="pager"><span class="muted">${offset + 1}–${offset + rows.length} of ${data.total}</span><button class="secondary" id="prev" ${offset ? "" : "disabled"}>← Previous</button><button class="secondary" id="next" ${offset + limit < data.total ? "" : "disabled"}>Next →</button></div>`
       : empty("No employees found", "Adjust the search or add an employee.");
     document
       .querySelector("#prev")
@@ -561,6 +574,13 @@ async function employeesPage(id) {
           document.querySelector("#next"),
           async () => ((offset += limit), await load()),
         ),
+      );
+    document
+      .querySelectorAll("[data-p360]")
+      .forEach(
+        (b) =>
+          (b.onclick = () =>
+            profile360Dialog(Number(b.dataset.p360), b.dataset.name)),
       );
     document
       .querySelectorAll("[data-edit]")
@@ -602,7 +622,7 @@ function employeeDialog(org, e) {
       )}</select></label><label>Department<select name="department_id">${options(org.departments, e?.department_id)}</select></label><label>Designation<select name="designation_id">${options(org.designations, e?.designation_id)}</select></label><label>Branch<select name="branch_id">${options(org.branches, e?.branch_id)}</select></label><label>Attendance workplace<select name="workplace_id">${options(org.workplaces, e?.workplace_id)}</select></label><label>Reports to<select name="manager_id">${options(
       org.managers.filter((m) => m.id !== e?.id),
       e?.manager_id,
-    )}</select></label>${input("date_of_joining", "Date of joining", e?.date_of_joining || "", 'type="date"')}<div class="full"><strong>Personal</strong></div>${input("phone", "Phone", e?.phone || "", 'maxlength="20"')}${input("date_of_birth", "Date of birth", e?.date_of_birth || "", 'type="date"')}<label>Gender<select name="gender"><option value="">—</option>${["male", "female", "other"].map((g) => `<option value="${g}" ${g === e?.gender ? "selected" : ""}>${g[0].toUpperCase() + g.slice(1)}</option>`).join("")}</select></label>${input("address", "Address", e?.address || "", 'maxlength="300"')}<div class="full"><strong>Emergency contact</strong></div>${input("emergency_name", "Name", e?.emergency_name || "", 'maxlength="100"')}${input("emergency_phone", "Phone", e?.emergency_phone || "", 'maxlength="20"')}${input("emergency_relation", "Relation", e?.emergency_relation || "", 'maxlength="50"')}`,
+    )}</select></label>${input("date_of_joining", "Date of joining", e?.date_of_joining || "", 'type="date"')}${orgExtraFields(org, e)}<div class="full"><strong>Personal</strong></div>${input("phone", "Phone", e?.phone || "", 'maxlength="20"')}${input("date_of_birth", "Date of birth", e?.date_of_birth || "", 'type="date"')}<label>Gender<select name="gender"><option value="">—</option>${["male", "female", "other"].map((g) => `<option value="${g}" ${g === e?.gender ? "selected" : ""}>${g[0].toUpperCase() + g.slice(1)}</option>`).join("")}</select></label>${input("address", "Address", e?.address || "", 'maxlength="300"')}<div class="full"><strong>Emergency contact</strong></div>${input("emergency_name", "Name", e?.emergency_name || "", 'maxlength="100"')}${input("emergency_phone", "Phone", e?.emergency_phone || "", 'maxlength="20"')}${input("emergency_relation", "Relation", e?.emergency_relation || "", 'maxlength="50"')}`,
     async (b) => {
       for (const k of [
         "department_id",
@@ -610,8 +630,12 @@ function employeeDialog(org, e) {
         "branch_id",
         "workplace_id",
         "manager_id",
+        "grade_id",
+        "cost_centre_id",
+        "business_unit_id",
       ])
         b[k] = b[k] ? Number(b[k]) : null;
+      b.custom = collectCustom(b);
       if (e) {
         b.active = b.active === "true";
         if (!b.password) delete b.password;
@@ -634,6 +658,27 @@ const ORG_TABS = {
     columns: [["code", "Code"]],
   },
   designations: { label: "Designations", noun: "designation", columns: [] },
+  grades: {
+    label: "Grades",
+    noun: "grade",
+    columns: [
+      ["level", "Level"],
+      ["salary_min", "Pay from"],
+      ["salary_max", "Pay up to"],
+    ],
+  },
+  cost_centres: {
+    label: "Cost centres",
+    noun: "cost centre",
+    columns: [["code", "Code"]],
+  },
+  business_units: {
+    label: "Business units",
+    noun: "business unit",
+    columns: [["code", "Code"]],
+  },
+  customfields: { label: "Custom fields", special: true },
+  terms: { label: "Terms", special: true },
   branches: {
     label: "Branches",
     noun: "branch",
@@ -660,6 +705,7 @@ async function organizationPage(id) {
   };
   if (!tabs[orgTab]) orgTab = "departments";
   const spec = tabs[orgTab];
+  if (spec.special) return await orgSpecialPage(id, tabs);
   const rows = await api(`/admin/${orgTab}`);
   if (id !== renderId) return;
   const manage =
@@ -696,12 +742,17 @@ function orgDialog(kind, spec, row) {
     code: ["Code", 20],
     city: ["City", 80],
     state: ["State", 80],
+    level: ["Level (1 is lowest)", 3],
+    salary_min: ["Pay from (₹ a year)", 12],
+    salary_max: ["Pay up to (₹ a year)", 12],
   };
   dialog(
     `${row ? "Edit" : "Add"} ${spec.noun}`,
-    `${input("name", "Name", row?.name || "", 'maxlength="150" required')}${spec.columns.map(([k]) => (kind === "companies" && row && k === "code" ? "" : input(k, fields[k][0], row?.[k] || "", `maxlength="${fields[k][1]}" ${kind === "companies" ? "required" : ""}`))).join("")}${kind === "branches" ? input("address", "Address", row?.address || "", 'maxlength="300"') : ""}${row ? `<label>Status<select name="active"><option value="true" ${row.active ? "selected" : ""}>Active</option><option value="false" ${row.active ? "" : "selected"}>Inactive</option></select></label>` : ""}`,
+    `${input("name", "Name", row?.name || "", 'maxlength="150" required')}${spec.columns.map(([k]) => (kind === "companies" && row && k === "code" ? "" : input(k, fields[k][0], row?.[k] ?? "", `${["level", "salary_min", "salary_max"].includes(k) ? 'type="number" min="0"' : `maxlength="${fields[k][1]}"`} ${kind === "companies" ? "required" : ""}`))).join("")}${kind === "branches" ? input("address", "Address", row?.address || "", 'maxlength="300"') : ""}${row ? `<label>Status<select name="active"><option value="true" ${row.active ? "selected" : ""}>Active</option><option value="false" ${row.active ? "" : "selected"}>Inactive</option></select></label>` : ""}`,
     async (b) => {
       if (row) b.active = b.active === "true";
+      for (const k of ["level", "salary_min", "salary_max"])
+        if (k in b) b[k] = b[k] === "" ? null : Number(b[k]);
       await api(
         `/admin/${kind}${row ? `/${row.id}` : ""}`,
         b,
@@ -726,6 +777,8 @@ async function profileView(id) {
     ) +
     `<div class="card"><h2>${esc(p.name)}</h2><p class="muted">${esc(p.designation_name || "")}${p.designation_name && p.department_name ? " · " : ""}${esc(p.department_name || "")}</p>${row("Employee code", p.employee_code)}${row("Email", p.email)}${row("Role", ROLE_LABELS[p.role] || p.role)}${row("Reports to", p.manager_name)}${row("Branch", p.branch_name)}${row("Workplace", p.workplace_name)}${row("Employment", EMPLOYMENT[p.employment_type])}${row("Date of joining", p.date_of_joining)}</div><div class="card"><h2>Contact</h2>${row("Phone", p.phone)}${row("Address", p.address)}${row("Emergency contact", [p.emergency_name, p.emergency_relation, p.emergency_phone].filter(Boolean).join(" · "))}</div><p class="muted">To change your name, email, department or other job details, contact HR.</p>`;
   await securityCard(id);
+  await bankCard(id);
+  await profile360Card(id);
   document.querySelector("#edit").onclick = () =>
     dialog(
       "Edit contact details",

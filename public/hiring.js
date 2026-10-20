@@ -3,6 +3,11 @@ let hiringTab = "openings";
 const HIRING_TABS = {
   openings: "Openings",
   candidates: "Candidates",
+  board: "Pipeline board",
+  insights: "Recruitment insights",
+  templates: "Email templates",
+  questions: "Question bank",
+  credit: "Credit checks",
   onboarding: "Onboarding",
   assets: "Assets",
   exits: "Exits",
@@ -38,7 +43,14 @@ const EXIT_STATUS = {
   withdrawn: "Withdrawn",
   completed: "Completed",
 };
-const OWNER = { hr: "HR", manager: "Manager", employee: "Employee", it: "IT" };
+const OWNER = {
+  hr: "HR",
+  manager: "Manager",
+  employee: "Employee",
+  it: "IT",
+  finance: "Finance",
+  admin: "Admin",
+};
 const REC = {
   strong_yes: "Strong yes",
   yes: "Yes",
@@ -69,7 +81,11 @@ async function hiringPage(id) {
       "Openings, candidates, joining checklists, company assets and exits.",
     ) +
     `<div class="tabbar">${Object.entries(HIRING_TABS)
-      .filter(([k]) => k !== "assets" || has("assets.manage"))
+      .filter(
+        ([k]) =>
+          (k !== "assets" || has("assets.manage")) &&
+          (k !== "credit" || has("credit.manage")),
+      )
       .map(
         ([k, l]) =>
           `<button class="${k === hiringTab ? "" : "secondary"}" data-tab="${k}">${l}</button>`,
@@ -89,9 +105,9 @@ async function hiringTabHtml(tab) {
       api("/admin/openings"),
       api("/admin/recruitment/summary"),
     ]);
-    return `<div class="stats"><div class="stat"><div class="stat-label">Open positions</div><div class="stat-value">${summary.open_positions}</div></div>${["applied", "screening", "interview", "offer", "hired"].map((s) => `<div class="stat"><div class="stat-label">${STAGE[s]}</div><div class="stat-value">${summary.stages[s] ?? 0}</div></div>`).join("")}</div><div class="card"><div class="card-head"><div><h2>Job openings</h2></div><button id="new-opening">New opening</button></div>${
+    return `${requisitionsCard(rows)}${careersCard()}<div class="stats"><div class="stat"><div class="stat-label">Open positions</div><div class="stat-value">${summary.open_positions}</div></div>${["applied", "screening", "interview", "offer", "hired"].map((s) => `<div class="stat"><div class="stat-label">${STAGE[s]}</div><div class="stat-value">${summary.stages[s] ?? 0}</div></div>`).join("")}</div><div class="card"><div class="card-head"><div><h2>Job openings</h2></div><button id="new-opening">New opening</button></div>${
       rows.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Title</th><th>Department</th><th>Positions</th><th>In process</th><th>Filled</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((o) => `<tr><td>${esc(o.title)}<small>${esc(o.branch_name || "")}${o.hiring_manager_name ? ` · ${esc(o.hiring_manager_name)}` : ""}</small></td><td>${esc(o.department_name || "—")}</td><td>${o.positions}</td><td>${o.in_process}</td><td>${o.filled}</td><td><span class="pill ${o.status === "open" ? "" : "neutral"}">${esc(o.status.replace("_", " "))}</span></td><td><button class="secondary" data-opening="${o.id}" data-status="${o.status}">${o.status === "open" ? "Close" : "Reopen"}</button> <button class="ghost" data-add-cand="${o.id}">Add candidate</button></td></tr>`).join("")}</tbody></table></div>`
+        ? `<div class="table-wrap"><table><thead><tr><th>Title</th><th>Department</th><th>Positions</th><th>In process</th><th>Filled</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((o) => `<tr><td>${esc(o.title)}<small>${esc(o.branch_name || "")}${o.hiring_manager_name ? ` · ${esc(o.hiring_manager_name)}` : ""}</small></td><td>${esc(o.department_name || "—")}</td><td>${o.positions}</td><td>${o.in_process}</td><td>${o.filled}</td><td><span class="pill ${o.status === "open" ? "" : "neutral"}">${esc(o.status.replace("_", " "))}</span>${o.published ? ' <span class="pill">Public</span>' : ""}${o.approval_status === "pending_approval" ? ' <span class="pill neutral">Needs approval</span>' : ""}</td><td><button class="secondary" data-opening="${o.id}" data-status="${o.status}">${o.status === "open" ? "Close" : "Reopen"}</button> <button class="ghost" data-add-cand="${o.id}">Add candidate</button> <button class="ghost" data-opening-details="${o.id}">Details</button> <button class="ghost" data-posting="${o.id}">Posting text</button></td></tr>`).join("")}</tbody></table></div>`
         : empty("No openings", "Create an opening, then add candidates to it.")
     }</div>`;
   }
@@ -103,10 +119,12 @@ async function hiringTabHtml(tab) {
     hiringCache.openings = openings;
     return `<div class="card"><div class="card-head"><div><h2>Candidates</h2></div><button id="new-cand">Add candidate</button></div>${
       rows.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Opening</th><th>Stage</th><th>Source</th><th>Updated</th><th></th></tr></thead><tbody>${rows.map((c) => `<tr><td>${esc(c.name)}<small>${esc(c.email || c.phone || "")}</small></td><td>${esc(c.opening_title || "—")}</td><td>${stagePill(c.stage)}</td><td>${esc(c.source || "—")}</td><td>${fmtDate(c.updated_at.slice(0, 10))}</td><td><button class="secondary" data-cand="${c.id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
+        ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Opening</th><th>Stage</th><th>Source</th><th>Match</th><th>Updated</th><th></th></tr></thead><tbody>${rows.map((c) => `<tr><td>${esc(c.name)}<small>${esc(c.email || c.phone || "")}</small></td><td>${esc(c.opening_title || "—")}</td><td>${stagePill(c.stage)}</td><td>${esc(c.source || "—")}</td><td>${matchPill(c) || "—"}</td><td>${fmtDate(c.updated_at.slice(0, 10))}</td><td><button class="secondary" data-cand="${c.id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
         : empty("No candidates", "Add candidates as they apply.")
     }</div>`;
   }
+  if (["board", "insights", "templates", "questions", "credit"].includes(tab))
+    return await recruitTabHtml(tab);
   if (tab === "onboarding") {
     const [people, template, pipeline, probation] = await Promise.all([
       api("/admin/onboarding"),
@@ -114,7 +132,11 @@ async function hiringTabHtml(tab) {
       api("/admin/onboarding/joiners"),
       has("changes.manage") ? api("/admin/probation") : [],
     ]);
-    return `${joiningSoonCard(pipeline.pending)}${probationCard(probation)}<div class="card"><h2>New joiners</h2>${
+    const [owners, joiningDocs] = await Promise.all([
+      api("/admin/onboarding/owners"),
+      api("/admin/joining-documents"),
+    ]);
+    return `${joiningSoonCard(pipeline.pending)}${readinessCard(pipeline.joined)}${probationCard(probation)}${ownersCard(owners)}${joiningDocsCard(joiningDocs)}<div class="card"><h2>New joiners</h2>${
       people.length
         ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Joining</th><th>Progress</th><th>Overdue</th><th></th></tr></thead><tbody>${people.map((p) => `<tr><td>${esc(p.name)}<small>${esc(p.employee_code || "")}</small></td><td>${fmtDate(p.date_of_joining)}</td><td>${p.done || 0} of ${p.total}</td><td>${p.overdue ? `<span class="pill">${p.overdue}</span>` : "—"}</td><td><button class="secondary" data-onboard="${p.id}" data-name="${esc(p.name)}">Checklist</button></td></tr>`).join("")}</tbody></table></div>`
         : empty(
@@ -153,7 +175,10 @@ async function hiringWire(tab) {
     document.querySelector(s)?.addEventListener("click", fn);
   const each = (s, fn) =>
     document.querySelectorAll(s).forEach((b) => (b.onclick = () => fn(b)));
-  if (tab === "openings") {
+  if (["board", "insights", "templates", "questions", "credit"].includes(tab)) {
+    await recruitWire(tab);
+  } else if (tab === "openings") {
+    recruitOpeningsWire();
     on("#new-opening", openingDialog);
     each("[data-opening]", (b) =>
       busy(b, async () => {
@@ -173,6 +198,7 @@ async function hiringWire(tab) {
     each("[data-cand]", (b) => candidateView(Number(b.dataset.cand)));
   } else if (tab === "onboarding") {
     each("[data-pre-cand]", (b) => candidateView(Number(b.dataset.preCand)));
+    onboardingPlusWire();
     probationWire();
     each("[data-onboard]", (b) =>
       onboardingDialog(Number(b.dataset.onboard), b.dataset.name),
@@ -277,12 +303,17 @@ async function candidateDialogNew(openingId) {
   );
   dialog(
     "Add a candidate",
-    `${input("name", "Name", "", "required maxlength=100")}${input("email", "Email", "", 'type="email"')}${input("phone", "Phone")}<label>Opening<select name="opening_id"><option value="">— None —</option>${openings.map((o) => `<option value="${o.id}" ${o.id === openingId ? "selected" : ""}>${esc(o.title)}</option>`).join("")}</select></label>${input("source", "Source (referral, portal…)")}${input("expected_ctc", "Expected pay (₹ a year)", "", 'type="number" min="0"')}${input("notice_days", "Notice period (days)", "", 'type="number" min="0" max="365"')}${input("resume_url", "Resume link")}<label class="full">Notes<input name="notes" maxlength="2000"></label>`,
+    `${input("name", "Name", "", "required maxlength=100")}${input("email", "Email", "", 'type="email"')}${input("phone", "Phone")}<label>Opening<select name="opening_id"><option value="">— None —</option>${openings.map((o) => `<option value="${o.id}" ${o.id === openingId ? "selected" : ""}>${esc(o.title)}</option>`).join("")}</select></label>${input("source", "Source (referral, portal…)")}${input("expected_ctc", "Expected pay (₹ a year)", "", 'type="number" min="0"')}${input("notice_days", "Notice period (days)", "", 'type="number" min="0" max="365"')}${input("resume_url", "Resume link")}${input("qualification", "Qualification")}${input("experience_years", "Experience (years)", "", 'type="number" min="0" step="0.5"')}<label class="full">Skills, separated by commas<input name="skills" maxlength="600"></label><label class="full">Notes<input name="notes" maxlength="2000"></label>`,
     async (b) => {
       const body = {};
       for (const [k, v] of Object.entries(b))
         if (v !== "")
-          body[k] = ["opening_id", "expected_ctc", "notice_days"].includes(k)
+          body[k] = [
+            "opening_id",
+            "expected_ctc",
+            "notice_days",
+            "experience_years",
+          ].includes(k)
             ? Number(v)
             : v;
       await api("/admin/candidates", body);
@@ -297,11 +328,15 @@ async function candidateView(id) {
   const offer = c.offers.find((o) =>
     ["draft", "sent", "accepted"].includes(o.status),
   );
+  const files = await api(`/admin/candidates/${id}/files`);
+  const credit = has("credit.manage")
+    ? await api(`/admin/candidates/${id}/credit`)
+    : null;
   const pre =
     !c.user_id && c.offers.some((o) => ["sent", "accepted"].includes(o.status))
       ? await api(`/admin/candidates/${id}/preboarding`)
       : null;
-  const html = `<p class="muted">${esc(c.email || "")} ${esc(c.phone || "")} · ${esc(c.opening_title || "No opening")} · ${stagePill(c.stage)}${c.user_id ? " · now an employee" : ""}</p>${c.notes ? `<p>${esc(c.notes)}</p>` : ""}${c.resume_url ? `<p><a href="${esc(c.resume_url)}" target="_blank" rel="noopener noreferrer">Resume</a></p>` : ""}
+  const html = `<p class="muted">${esc(c.email || "")} ${esc(c.phone || "")} · ${esc(c.opening_title || "No opening")} · ${stagePill(c.stage)}${c.user_id ? " · now an employee" : ""}</p>${matchPill(c)} ${c.qualification ? `<small>${esc(c.qualification)}</small>` : ""} ${c.experience_years != null ? `<small>${c.experience_years} yrs experience</small>` : ""}${JSON.parse(c.skills || "[]").length ? `<p><strong>Skills:</strong> ${JSON.parse(c.skills).map(esc).join(", ")}</p>` : ""}${files.map((f) => `<button class="ghost" data-cfile="${f.id}">View ${esc(f.name)}</button>`).join(" ")} <button class="ghost" id="edit-skills">Edit skills</button>${c.notes ? `<p>${esc(c.notes)}</p>` : ""}${c.resume_url ? `<p><a href="${esc(c.resume_url)}" target="_blank" rel="noopener noreferrer">Resume</a></p>` : ""}
     ${
       live
         ? `<div class="actions spaced">${["applied", "screening", "interview"]
@@ -315,9 +350,9 @@ async function candidateView(id) {
             )}<button class="secondary" id="sched">Schedule interview</button>${offer ? "" : '<button class="secondary" id="new-offer">Make an offer</button>'}<button class="ghost" id="reject">Reject</button></div>`
         : ""
     }
-    <h3>Interviews</h3>${c.interviews.length ? c.interviews.map((i) => `<div class="activity"><strong>${esc(i.round_name)}</strong> · ${esc(i.interviewer_name)} · ${new Date(i.scheduled_at).toLocaleString("en-IN")} · ${esc(i.status)}${i.rating ? `<br><small>${i.rating}/5 · ${REC[i.recommendation]} · ${esc(i.feedback || "")}</small>` : ""}${i.status === "scheduled" ? ` <button class="ghost" data-cancel-iv="${i.id}">Cancel</button>` : ""}</div>`).join("") : '<p class="muted">None yet.</p>'}
+    <h3>Interviews</h3>${c.interviews.length ? '<div class="actions"><button class="ghost" id="scorecard">Timeline and scorecard</button></div>' : ""}${c.interviews.length ? c.interviews.map((i) => `<div class="activity"><strong>${esc(i.round_name)}</strong> · ${esc(i.interviewer_name)} · ${new Date(i.scheduled_at).toLocaleString("en-IN")} · ${esc(i.status)}${i.rating ? `<br><small>${i.rating}/5 · ${REC[i.recommendation]} · ${esc(i.feedback || "")}</small>` : ""}${i.status === "scheduled" ? ` <button class="ghost" data-cancel-iv="${i.id}">Cancel</button>` : ""}</div>`).join("") : '<p class="muted">None yet.</p>'}
     <h3>Offers</h3>${c.offers.length ? c.offers.map((o) => `<div class="activity"><strong>${esc(o.designation)}</strong> · ${inr(o.monthly_gross)} a month · joins ${fmtDate(o.joining_date)} · ${OFFER_STATUS[o.status]}<br>${o.status === "draft" ? `<button class="ghost" data-offer="${o.id}" data-st="sent">Mark as sent</button>` : ""}${o.status === "sent" ? `<button class="ghost" data-offer="${o.id}" data-st="accepted">Accepted</button><button class="ghost" data-offer="${o.id}" data-st="declined">Declined</button>` : ""}${["draft", "sent", "accepted"].includes(o.status) && !c.user_id ? `<button class="ghost" data-offer="${o.id}" data-st="withdrawn">Withdraw</button>` : ""} <a class="button secondary" href="/letter.html?type=offer&id=${o.id}" target="_blank" rel="noopener">Offer letter</a></div>`).join("") : '<p class="muted">None yet.</p>'}
-    ${pre ? preboardingPanel(pre) : ""}
+    ${pre ? preboardingPanel(pre) : ""}${credit && !c.user_id ? creditPanelHtml(credit) : ""}
     ${offer?.status === "accepted" && !c.user_id ? '<div class="actions spaced"><button id="hire">Hire and create the employee</button></div>' : ""}
     <h3>History</h3>${c.events.map((e) => `<div class="activity"><small>${time(e.created_at)} · ${esc(e.kind.replaceAll("_", " "))}${e.detail ? ` · ${esc(e.detail)}` : ""}${e.actor_name ? ` · ${esc(e.actor_name)}` : ""}</small></div>`).join("")}`;
   viewDialog(c.name, html);
@@ -357,6 +392,31 @@ async function candidateView(id) {
         })),
   );
   wirePreboarding(id, pre, reopen);
+  wireCredit(id, credit, reopen);
+  document
+    .querySelectorAll("dialog [data-cfile]")
+    .forEach(
+      (b) =>
+        (b.onclick = () =>
+          openFile(`/api/admin/candidate-files/${b.dataset.cfile}`)),
+    );
+  on("#edit-skills", () =>
+    dialog(
+      "Skills and experience",
+      `<label class="full">Skills, separated by commas<input name="skills" value="${esc(JSON.parse(c.skills || "[]").join(", "))}" maxlength="600"></label>${input("experience_years", "Experience (years)", c.experience_years ?? "", 'type="number" min="0" step="0.5"')}${input("qualification", "Qualification", c.qualification || "")}`,
+      async (f) => {
+        const r = await api(`/admin/candidates/${id}/rescore`, {
+          skills: f.skills,
+          experience_years:
+            f.experience_years === "" ? null : Number(f.experience_years),
+          qualification: f.qualification,
+        });
+        notice(
+          r.match_score == null ? "Saved." : `Saved. Match ${r.match_score}%.`,
+        );
+      },
+    ),
+  );
   on("#reject", () =>
     dialog(
       "Close this candidate",
@@ -370,39 +430,27 @@ async function candidateView(id) {
       },
     ),
   );
-  on("#sched", async () => {
-    const people = await peopleList();
-    dialog(
-      "Schedule an interview",
-      `${input("round_name", "Round", "Round 1", "required maxlength=60")}${personSel("interviewer_id", "Interviewer", people)}${input("scheduled_at", "Date and time", "", 'type="datetime-local" required')}${sel(
-        "mode",
-        "Mode",
-        [
-          ["in_person", "In person"],
-          ["phone", "Phone"],
-          ["video", "Video"],
-        ],
-      )}${input("location", "Place or link")}`,
-      async (b) => {
-        await api(`/admin/candidates/${id}/interviews`, {
-          round_name: b.round_name,
-          interviewer_id: Number(b.interviewer_id),
-          scheduled_at: new Date(b.scheduled_at).toISOString(),
-          mode: b.mode,
-          location: b.location || undefined,
-        });
-        notice("Interview scheduled.");
-        await reopen();
-      },
-    );
-  });
+  on("#sched", () => interviewScheduleDialog(id, reopen));
+  on("#scorecard", () => scorecardDialog(id));
   on("#new-offer", () =>
     dialog(
       "Make an offer",
-      `${input("designation", "Designation", "", "required maxlength=100")}${input("monthly_gross", "Monthly gross (₹)", "", 'type="number" min="1" required')}${input("joining_date", "Joining date", "", 'type="date" required')}${input("valid_until", "Offer valid until", "", 'type="date"')}${input("probation_months", "Probation (months)", 6, 'type="number" min="0" max="24"')}<label class="full">Note for the letter<input name="note" maxlength="1000"></label>`,
+      `${input("designation", "Designation", "", "required maxlength=100")}${input("monthly_gross", "Monthly gross (₹)", "", 'type="number" min="1" required')}${input("joining_date", "Joining date", "", 'type="date" required')}${input("valid_until", "Offer valid until", "", 'type="date"')}${input("probation_months", "Probation (months)", 6, 'type="number" min="0" max="24"')}<label class="full">Monthly salary breakup, one per line like <em>Basic: 24000</em> (leave empty for the standard split)<textarea name="breakup" rows="4"></textarea></label><label class="full">Note for the letter<input name="note" maxlength="1000"></label>`,
       async (b) => {
         await api(`/admin/candidates/${id}/offers`, {
           probation_months: Number(b.probation_months),
+          breakup: b.breakup.trim()
+            ? b.breakup
+                .trim()
+                .split("\n")
+                .map((l) => {
+                  const [name, amount] = l.split(":");
+                  return {
+                    name: (name || "").trim(),
+                    monthly: Number((amount || "").replace(/[^0-9.]/g, "")),
+                  };
+                })
+            : undefined,
           designation: b.designation,
           monthly_gross: Number(b.monthly_gross),
           joining_date: b.joining_date,
@@ -421,7 +469,7 @@ async function candidateView(id) {
     ] = await Promise.all([api("/admin/org"), peopleList()]);
     dialog(
       "Hire " + c.name,
-      `${input("email", "Login email", c.email || "", 'type="email" required')}${input("password", "Temporary password", "", 'type="password" minlength="10" required')}<label>Workplace (for punching)<select name="workplace_id">${options(sites, null)}</select></label><label>Department<select name="department_id">${options(deps, null)}</select></label><label>Branch<select name="branch_id">${options(branches, null)}</select></label><label>Designation<select name="designation_id">${options(desigs, null)}</select></label><label>Reporting manager<select name="manager_id">${options(people, null)}</select></label><label>Onboarding buddy<select name="buddy_id">${options(people, null)}</select></label>${sel(
+      `${input("email", "Login email", c.email || "", 'type="email" required')}${input("password", "Temporary password", "", 'type="password" minlength="10" required')}<label>Workplace (for punching)<select name="workplace_id">${options(sites, null)}</select></label><label>Department<select name="department_id">${options(deps, null)}</select></label><label>Branch<select name="branch_id">${options(branches, null)}</select></label><label>Designation<select name="designation_id">${options(desigs, null)}</select></label><label>Reporting manager<select name="manager_id">${options(people, null)}</select></label><label>Onboarding buddy<select name="buddy_id">${options(people, null)}</select></label><label class="full">Workstation details for the welcome email (desk, laptop…)<input name="workstation" maxlength="300"></label><label class="check full"><input type="checkbox" name="send_welcome" checked> Email a welcome message with the login details to the candidate</label><label class="full">Credit check override note (only if a high-risk result is accepted)<input name="credit_override_note" maxlength="300"></label>${sel(
         "gender",
         "Gender",
         [
@@ -443,6 +491,10 @@ async function candidateView(id) {
         ])
           if (b[k]) body[k] = Number(b[k]);
         if (b.gender) body.gender = b.gender;
+        if (b.credit_override_note)
+          body.credit_override_note = b.credit_override_note;
+        if (b.workstation) body.workstation = b.workstation;
+        body.send_welcome = "send_welcome" in b;
         await api(`/admin/candidates/${id}/hire`, body);
         notice(
           "Hired. The onboarding checklist has been created; set their salary under Payroll.",
@@ -476,7 +528,7 @@ async function openFile(url) {
 function joiningSoonCard(rows) {
   return `<div class="card"><div class="card-head"><div><h2>Joining soon</h2><p class="muted">Candidates with an offer out: where their offer and joining details stand.</p></div></div>${
     rows.length
-      ? `<div class="table-wrap"><table><thead><tr><th>Candidate</th><th>Joining</th><th>Offer</th><th>Joining details</th><th>Documents</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.name)}<small>${esc(r.designation)}</small></td><td>${fmtDate(r.joining_date)}</td><td><span class="pill ${r.offer_status === "accepted" ? "" : "neutral"}">${OFFER_STATUS[r.offer_status]}</span></td><td>${r.preboarding_status ? `<span class="pill ${r.preboarding_status === "verified" ? "" : "neutral"}">${PRE_STATUS[r.preboarding_status]}</span>` : '<span class="muted">Not invited</span>'}</td><td>${r.docs ? `${r.docs_verified} of ${r.docs} verified` : "—"}</td><td><button class="secondary" data-pre-cand="${r.candidate_id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
+      ? `<div class="table-wrap"><table><thead><tr><th>Candidate</th><th>Joining</th><th>Offer</th><th>Joining details</th><th>Documents</th><th>Policies</th><th>Credit</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.name)}<small>${esc(r.designation)}</small></td><td>${fmtDate(r.joining_date)}</td><td><span class="pill ${r.offer_status === "accepted" ? "" : "neutral"}">${OFFER_STATUS[r.offer_status]}</span></td><td>${r.preboarding_status ? `<span class="pill ${r.preboarding_status === "verified" ? "" : "neutral"}">${PRE_STATUS[r.preboarding_status]}</span>` : '<span class="muted">Not invited</span>'}</td><td>${r.docs ? `${r.docs_verified} of ${r.docs} verified` : "—"}</td><td>${r.agreements_required ? `${r.agreements_signed} of ${r.agreements_required} signed` : "—"}</td><td>${r.credit_risk ? `<span class="pill ${RISK_PILL[r.credit_risk]}">${{ low: "Low", medium: "Medium", high: "High" }[r.credit_risk]} risk</span>` : r.credit_consent ? "Consent given" : "—"}</td><td><button class="secondary" data-pre-cand="${r.candidate_id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
       : empty("Nobody waiting to join", "Offers that are sent appear here.")
   }</div>`;
 }
@@ -908,26 +960,11 @@ async function hiringApprovals(id) {
         await loadMe();
       }),
   );
-  card.querySelectorAll("[data-feedback]").forEach(
-    (b) =>
-      (b.onclick = () =>
-        dialog(
-          "Interview feedback",
-          `${sel(
-            "rating",
-            "Rating (5 is best)",
-            [1, 2, 3, 4, 5].map((n) => [n, n]),
-            3,
-          )}${sel("recommendation", "Recommendation", Object.entries(REC), "yes")}<label class="full">Feedback<input name="feedback" maxlength="2000" required></label>`,
-          async (f) => {
-            await api(`/interviews/${b.dataset.feedback}/feedback`, {
-              rating: Number(f.rating),
-              recommendation: f.recommendation,
-              feedback: f.feedback,
-            });
-            notice("Feedback saved.");
-            await loadMe();
-          },
-        )),
-  );
+  card
+    .querySelectorAll("[data-feedback]")
+    .forEach(
+      (b) =>
+        (b.onclick = () =>
+          interviewDialog(Number(b.dataset.feedback), () => loadMe())),
+    );
 }

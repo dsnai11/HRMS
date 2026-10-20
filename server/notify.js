@@ -18,6 +18,7 @@ export function createNotifier(app, env = process.env) {
           to: [row.to_email],
           subject: row.subject,
           text: row.body,
+          ...(row.attachments ? { attachments: row.attachments } : {}),
         }),
       });
       if (!res.ok) throw new Error(`Mail provider answered ${res.status}`);
@@ -32,7 +33,7 @@ export function createNotifier(app, env = process.env) {
   }
 
   /** Plain email to anyone (e.g. a candidate with no login yet); resolves false if mail is not configured. */
-  async function mail(companyId, to, subject, body) {
+  async function mail(companyId, to, subject, body, attachments) {
     if (!mailConfigured() || !to) return false;
     const outbox = Number(
       (
@@ -43,7 +44,7 @@ export function createNotifier(app, env = process.env) {
           .run(companyId, to, subject, body, new Date(clock()).toISOString())
       ).lastInsertRowid,
     );
-    void sendMail({ id: outbox, to_email: to, subject, body });
+    void sendMail({ id: outbox, to_email: to, subject, body, attachments });
     return true;
   }
 

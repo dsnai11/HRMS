@@ -135,7 +135,7 @@ export async function ensureAccruals(app, user, asOf) {
   const year = leaveYearOf(asOf, settings.leaveYearStartMonth);
   const types = await app.db
     .prepare(
-      "SELECT * FROM leave_types WHERE company_id=? AND active=1 AND unlimited=0 AND quota_per_year>0",
+      "SELECT * FROM leave_types WHERE company_id=? AND active=1 AND unlimited=0 AND (quota_per_year>0 OR carry_forward_max>0)",
     )
     .all(user.company_id);
   for (const type of types) {

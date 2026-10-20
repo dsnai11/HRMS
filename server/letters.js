@@ -9,6 +9,17 @@ const longDate = (d) =>
     timeZone: "UTC",
   }).format(new Date(`${d}T00:00:00Z`));
 
+/** Basic 50% of gross, HRA 50% of basic, the rest special allowance. */
+export function defaultBreakup(gross) {
+  const basic = Math.round(gross * 0.5);
+  const hra = Math.round(basic * 0.5);
+  return [
+    { name: "Basic", monthly: basic },
+    { name: "House rent allowance", monthly: hra },
+    { name: "Special allowance", monthly: gross - basic - hra },
+  ];
+}
+
 export function offerLetter({ company, candidate, offer, today }) {
   return {
     title: "Offer of employment",
@@ -18,9 +29,47 @@ export function offerLetter({ company, candidate, offer, today }) {
       `Dear ${candidate.name},`,
       `We are pleased to offer you the position of ${offer.designation} at ${company}. This offer is subject to verification of your documents and references.`,
       `Your monthly gross salary will be ${inr(offer.monthly_gross)} (${inr(offer.monthly_gross * 12)} a year), with statutory deductions as applicable. The detailed breakup is shared with your first payslip.`,
+      `Monthly salary breakup: ${(offer.ctc_breakup ? JSON.parse(offer.ctc_breakup) : defaultBreakup(offer.monthly_gross)).map((c) => `${c.name} ${inr(c.monthly)} (${inr(c.monthly * 12)} a year)`).join("; ")}.`,
       `Your date of joining will be ${longDate(offer.joining_date)}.${offer.valid_until ? ` This offer is valid until ${longDate(offer.valid_until)}.` : ""}`,
       ...(offer.note ? [offer.note] : []),
       "Please confirm your acceptance in the manner communicated by HR. We look forward to welcoming you.",
+    ],
+    signoff: `For ${company}`,
+  };
+}
+
+export function appointmentLetter({
+  company,
+  person,
+  joined,
+  probationEnd,
+  gross,
+  manager,
+  today,
+}) {
+  const where = [person.designation_name, person.department_name]
+    .filter(Boolean)
+    .join(", ");
+  return {
+    title: "Appointment letter",
+    date: longDate(today),
+    to: person.name,
+    paragraphs: [
+      `Dear ${person.name},`,
+      `We confirm your appointment with ${company}${where ? ` as ${where}` : ""}, with effect from ${longDate(joined)}. Your employee code is ${person.employee_code ?? "—"}.`,
+      ...(gross
+        ? [
+            `Your monthly gross salary is ${inr(gross)} (${inr(gross * 12)} a year), with statutory deductions as applicable.`,
+          ]
+        : []),
+      ...(probationEnd
+        ? [
+            `You will be on probation until ${longDate(probationEnd)}. Your services will be confirmed in writing after a satisfactory review.`,
+          ]
+        : []),
+      ...(manager ? [`You will report to ${manager}.`] : []),
+      "Your appointment is subject to the company's policies, as updated from time to time, and to the verification of the documents and details you have provided.",
+      "We welcome you and look forward to a long and happy association.",
     ],
     signoff: `For ${company}`,
   };

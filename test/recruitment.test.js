@@ -346,7 +346,7 @@ test("a candidate moves from opening to hired employee with an onboarding checkl
       hr,
     )
   ).data;
-  assert.equal(tasks.length, 9);
+  assert.equal(tasks.length, 11);
   assert.equal(tasks[0].due_date, "2026-12-01");
   // The new joiner completes only their own tasks; their manager the manager's.
   await w.db
@@ -382,7 +382,7 @@ test("a candidate moves from opening to hired employee with an onboarding checkl
   const progress = (await call("/admin/onboarding", undefined, hr)).data.find(
     (p) => p.name === "Asha Verma",
   );
-  assert.deepEqual([progress.total, Number(progress.done)], [9, 3]);
+  assert.deepEqual([progress.total, Number(progress.done)], [11, 3]);
 });
 
 test("rejections, declined offers and the company's own checklist", async (t) => {
