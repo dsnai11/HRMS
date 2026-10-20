@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -11,15 +11,20 @@ import {
   View,
 } from "react-native";
 
-// Self-service screens for the phone: leave, payslips, attendance requests,
-// directory, helpdesk, alerts and profile. Everything talks to the same API as
+// Self-service screens for the phone: leave, messages, the Laxmi assistant,
+// payslips, attendance requests, directory, helpdesk, alerts and profile. Everything talks to the same API as
 // the web portal, so the same rules and approvals apply.
 export type Api = <T>(
   path: string,
   body?: object,
   method?: string,
 ) => Promise<T>;
-type Props = { api: Api; onSignOut: () => void; onPassword: () => void };
+type Props = {
+  api: Api;
+  userId: number;
+  onSignOut: () => void;
+  onPassword: () => void;
+};
 
 type Balance = {
   leave_type_id: number;
@@ -104,8 +109,64 @@ type Profile = {
   date_of_joining?: string | null;
 };
 
+type ChatRoom = {
+  id: number;
+  kind: "direct" | "group";
+  title: string;
+  members: number;
+  unread: number | string;
+  last_body: string | null;
+  last_from: string | null;
+};
+type ChatMessage = {
+  id: number;
+  room_id?: number;
+  user_id: number;
+  author: string;
+  body: string;
+  created_at: string;
+};
+type RoomInfo = {
+  id: number;
+  kind: "direct" | "group";
+  name: string | null;
+  is_admin: boolean;
+  members: { id: number; name: string; is_admin: number | boolean }[];
+};
+type ChatPerson = {
+  id: number;
+  name: string;
+  employee_code?: string | null;
+  designation?: string | null;
+};
+type ChatUpdates = { messages: ChatMessage[]; unread: number; latest: number };
+type LeaveAction = {
+  type: "leave_request";
+  leave_type_id: number | null;
+  from_date: string;
+  to_date: string;
+  half_day: "first" | "second" | null;
+  reason: string | null;
+  options: {
+    leave_type_id: number;
+    name: string;
+    available: number | null;
+    allow_half_day?: boolean;
+  }[];
+};
+type BotAnswer = {
+  id?: number;
+  text: string;
+  action?: LeaveAction | null;
+  links?: string[];
+  helpful?: boolean | number | null;
+};
+type BotEntry = { key: string; question?: string; answer?: BotAnswer; error?: string };
+
 const SECTIONS = [
   "Leave",
+  "Messages",
+  "Ask Laxmi",
   "Payslips",
   "Requests",
   "Directory",
@@ -197,13 +258,19 @@ function Field({
 }
 const Pill = ({ text }: { text: string }) => <Text style={s.pill}>{text}</Text>;
 
-export default function More({ api, onSignOut, onPassword }: Props) {
+export default function More({ api, userId, onSignOut, onPassword }: Props) {
   const [section, setSection] = useState<Section>("Leave");
   const [unread, setUnread] = useState(0);
+  const [chatUnread, setChatUnread] = useState(0);
   useEffect(() => {
     api<{ unread: number }>("/notifications")
       .then((r) => setUnread(r.unread))
       .catch(() => {});
+    // The Messages screen keeps this current itself while it is open.
+    if (section !== "Messages")
+      api<ChatUpdates>("/chat/updates")
+        .then((r) => setChatUnread(Number(r.unread)))
+        .catch(() => {});
   }, [api, section]);
   return (
     <View style={{ gap: 14 }}>
@@ -221,11 +288,16 @@ export default function More({ api, onSignOut, onPassword }: Props) {
             <Text style={[s.chipText, section === name && { color: "#fff" }]}>
               {name}
               {name === "Alerts" && unread ? " (" + unread + ")" : ""}
+              {name === "Messages" && chatUnread ? " (" + chatUnread + ")" : ""}
             </Text>
           </Pressable>
         ))}
       </ScrollView>
       {section === "Leave" && <LeaveScreen api={api} />}
+      {section === "Messages" && (
+        <MessagesScreen api={api} userId={userId} onUnread={setChatUnread} />
+      )}
+      {section === "Ask Laxmi" && <LaxmiScreen api={api} onGoto={setSection} />}
       {section === "Payslips" && <PayslipsScreen api={api} />}
       {section === "Requests" && <RequestsScreen api={api} />}
       {section === "Directory" && <DirectoryScreen api={api} />}
@@ -471,6 +543,723 @@ function LeaveScreen({ api }: { api: Api }) {
         )}
       </View>
     </>
+  );
+}
+
+// ---- messages (internal chat) -----------------------------------------------------------------------
+// New messages arrive by polling /chat/updates every few seconds while this section
+// is open, the same as the web portal. Groups are created on the web; here people
+// can read, reply and leave them.
+const CHAT_POLL_MS = 5000;
+const errorText = (e: unknown) =>
+  e instanceof Error ? e.message : "Please retry.";
+const initials = (name: string) =>
+  name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("");
+const chatTime = (iso: string) =>
+  new Intl.DateTimeFormat("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(iso.slice(0, 10) === new Date().toISOString().slice(0, 10)
+      ? {}
+      : { day: "numeric", month: "short" }),
+  }).format(new Date(iso));
+// Adds messages once each, oldest first: a poll and a send can both report the same one.
+const merge = (list: ChatMessage[], more: ChatMessage[]) =>
+  [...list, ...more.filter((m) => !list.some((x) => x.id === m.id))].sort(
+    (a, b) => a.id - b.id,
+  );
+
+function MessagesScreen({
+  api,
+  userId,
+  onUnread,
+}: {
+  api: Api;
+  userId: number;
+  onUnread: (n: number) => void;
+}) {
+  const [rooms, setRooms] = useState<ChatRoom[] | null>(null);
+  const [error, setError] = useState("");
+  const [room, setRoom] = useState<number | null>(null);
+  const [info, setInfo] = useState<RoomInfo | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [earlier, setEarlier] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const roomRef = useRef<number | null>(null);
+  const latest = useRef<number | null>(null);
+  const polling = useRef(false);
+
+  const loadRooms = useCallback(async () => {
+    try {
+      setRooms(await api<ChatRoom[]>("/chat/rooms"));
+      setError("");
+    } catch (e) {
+      setError(errorText(e));
+    }
+  }, [api]);
+
+  useEffect(() => {
+    let stopped = false;
+    const poll = async () => {
+      if (polling.current) return;
+      polling.current = true;
+      try {
+        const since = latest.current === null ? "" : "?since=" + latest.current;
+        const data = await api<ChatUpdates>("/chat/updates" + since);
+        if (stopped) return;
+        const fresh = latest.current === null ? [] : data.messages;
+        latest.current = data.latest;
+        let unread = Number(data.unread);
+        const open = roomRef.current;
+        const here = fresh.filter((m) => m.room_id === open);
+        if (open !== null && here.length) {
+          setMessages((list) => merge(list, here));
+          await api("/chat/rooms/" + open + "/read", {
+            message_id: here[here.length - 1].id,
+          }).catch(() => {});
+          unread = Math.max(
+            0,
+            unread - here.filter((m) => m.user_id !== userId).length,
+          );
+        }
+        onUnread(unread);
+        if (fresh.length) void loadRooms();
+      } catch {
+        // offline for a moment; try again on the next tick
+      } finally {
+        polling.current = false;
+      }
+    };
+    // Loads the list once on open; state is set after the request returns.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadRooms();
+    void poll();
+    const timer = setInterval(() => void poll(), CHAT_POLL_MS);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [api, userId, onUnread, loadRooms]);
+
+  const close = () => {
+    roomRef.current = null;
+    setRoom(null);
+    setInfo(null);
+    setMessages([]);
+    void loadRooms();
+  };
+  const openRoom = async (id: number) => {
+    roomRef.current = id;
+    setRoom(id);
+    setInfo(null);
+    setMessages([]);
+    setEarlier(false);
+    setDraft("");
+    try {
+      const [i, m] = await Promise.all([
+        api<RoomInfo>("/chat/rooms/" + id),
+        api<{ messages: ChatMessage[] }>("/chat/rooms/" + id + "/messages"),
+      ]);
+      if (roomRef.current !== id) return;
+      setInfo(i);
+      setMessages((list) => merge(list, m.messages));
+      setEarlier(m.messages.length === 50);
+      const last = m.messages[m.messages.length - 1]?.id;
+      if (last) {
+        await api("/chat/rooms/" + id + "/read", { message_id: last });
+        const r = await api<ChatUpdates>("/chat/updates");
+        onUnread(Number(r.unread));
+        void loadRooms();
+      }
+    } catch (e) {
+      if (roomRef.current !== id) return;
+      Alert.alert("Could not open", errorText(e));
+      close();
+    }
+  };
+  const showEarlier = async () => {
+    const id = room,
+      first = messages[0]?.id;
+    if (id === null || !first) return;
+    try {
+      const r = await api<{ messages: ChatMessage[] }>(
+        "/chat/rooms/" + id + "/messages?before=" + first,
+      );
+      if (roomRef.current !== id) return;
+      setMessages((list) => merge(r.messages, list));
+      setEarlier(r.messages.length === 50);
+    } catch (e) {
+      Alert.alert("Could not load", errorText(e));
+    }
+  };
+  const send = async () => {
+    const text = draft.trim();
+    if (!text || room === null) return;
+    setSending(true);
+    try {
+      const r = await api<{ id: number; created_at: string }>(
+        "/chat/rooms/" + room + "/messages",
+        { body: text },
+      );
+      setDraft("");
+      setMessages((list) =>
+        merge(list, [
+          {
+            id: r.id,
+            user_id: userId,
+            author: "You",
+            body: text,
+            created_at: r.created_at,
+          },
+        ]),
+      );
+      void loadRooms();
+    } catch (e) {
+      Alert.alert("Could not send", errorText(e));
+    } finally {
+      setSending(false);
+    }
+  };
+  const unsend = (m: ChatMessage) =>
+    Alert.alert("Delete this message?", "It disappears for everyone.", [
+      { text: "Keep", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          if (
+            await attempt(() =>
+              api("/chat/messages/" + m.id, undefined, "DELETE"),
+            )
+          ) {
+            setMessages((list) => list.filter((x) => x.id !== m.id));
+            void loadRooms();
+          }
+        },
+      },
+    ]);
+  const leave = (g: RoomInfo) =>
+    Alert.alert(
+      "Leave " + (g.name ?? "this group") + "?",
+      "You will no longer see its messages.",
+      [
+        { text: "Stay", style: "cancel" },
+        {
+          text: "Leave group",
+          style: "destructive",
+          onPress: async () => {
+            if (
+              await attempt(() =>
+                api(
+                  "/chat/rooms/" + g.id + "/members/" + userId,
+                  undefined,
+                  "DELETE",
+                ),
+              )
+            )
+              close();
+          },
+        },
+      ],
+    );
+
+  if (room !== null) {
+    const title = info
+      ? info.kind === "group"
+        ? (info.name ?? "Group")
+        : (info.members.find((m) => m.id !== userId)?.name ??
+          "Former colleague")
+      : (rooms?.find((r) => r.id === room)?.title ?? "");
+    return (
+      <View style={s.card}>
+        <View style={[s.row, { paddingTop: 0 }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.heading}>{title}</Text>
+            <Text style={s.note}>
+              {info?.kind === "group"
+                ? info.members.length + " people"
+                : "Direct message"}
+            </Text>
+          </View>
+          <Pressable accessibilityRole="button" onPress={close}>
+            <Text style={s.link}>Back</Text>
+          </Pressable>
+        </View>
+        {!info && <ActivityIndicator color="#17694f" />}
+        {earlier && (
+          <Btn
+            title="Show earlier messages"
+            secondary
+            onPress={() => void showEarlier()}
+          />
+        )}
+        {!!info && messages.length === 0 && (
+          <Text style={s.note}>
+            Say hello. Messages are visible only to the people in this
+            conversation.
+          </Text>
+        )}
+        {messages.map((m) => {
+          const mine = m.user_id === userId;
+          return (
+            <View key={m.id} style={[s.bubble, s.msg, mine && s.msgMine]}>
+              <Text style={s.note}>
+                {mine ? "You" : m.author} · {chatTime(m.created_at)}
+                {mine ? "   " : ""}
+                {mine && (
+                  <Text style={s.link} onPress={() => unsend(m)}>
+                    Delete
+                  </Text>
+                )}
+              </Text>
+              <Text style={s.body}>{m.body}</Text>
+            </View>
+          );
+        })}
+        {!!info && (
+          <>
+            <TextInput
+              accessibilityLabel="Message"
+              style={[s.input, { minHeight: 60, textAlignVertical: "top" }]}
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Write a message"
+              maxLength={2000}
+              multiline
+            />
+            <Btn
+              title={sending ? "Sending…" : "Send"}
+              disabled={sending || !draft.trim()}
+              onPress={() => void send()}
+            />
+          </>
+        )}
+        {info?.kind === "group" && (
+          <>
+            <Text style={s.label}>People</Text>
+            <Text style={s.note}>
+              {info.members.map((m) => m.name).join(", ")}
+            </Text>
+            <Btn title="Leave group" secondary onPress={() => leave(info)} />
+          </>
+        )}
+      </View>
+    );
+  }
+  return (
+    <>
+      <View style={s.card}>
+        <Text style={s.heading}>Messages</Text>
+        <Text style={s.note}>
+          Chat with colleagues. New messages arrive every few seconds while
+          this screen is open.
+        </Text>
+        <Btn
+          title={picking ? "Close" : "New message"}
+          secondary={picking}
+          onPress={() => setPicking(!picking)}
+        />
+        {picking && (
+          <PeoplePicker
+            api={api}
+            onPick={async (id) => {
+              try {
+                const r = await api<{ id: number }>("/chat/direct", {
+                  user_id: id,
+                });
+                setPicking(false);
+                void openRoom(r.id);
+              } catch (e) {
+                Alert.alert("Could not start", errorText(e));
+              }
+            }}
+          />
+        )}
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>Conversations</Text>
+        <Status loading={rooms === null && !error} error={error} />
+        {rooms?.length === 0 && (
+          <Text style={s.note}>
+            No conversations yet. Start one with New message.
+          </Text>
+        )}
+        {(rooms ?? []).map((r) => (
+          <Pressable
+            key={r.id}
+            style={s.row}
+            onPress={() => void openRoom(r.id)}
+          >
+            <View style={s.avatar}>
+              <Text style={s.avatarText}>
+                {r.kind === "group" ? "#" : initials(r.title)}
+              </Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.strong}>{r.title}</Text>
+              <Text style={s.note} numberOfLines={1}>
+                {r.last_body
+                  ? (r.kind === "group" && r.last_from
+                      ? r.last_from.split(" ")[0] + ": "
+                      : "") + r.last_body
+                  : r.kind === "group"
+                    ? r.members + " people"
+                    : "No messages yet"}
+              </Text>
+            </View>
+            {Number(r.unread) > 0 && <Text style={s.count}>{r.unread}</Text>}
+          </Pressable>
+        ))}
+      </View>
+    </>
+  );
+}
+
+// Type to search colleagues, tap one to message them.
+function PeoplePicker({
+  api,
+  onPick,
+}: {
+  api: Api;
+  onPick: (id: number) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [people, setPeople] = useState<ChatPerson[] | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => {
+      api<ChatPerson[]>("/chat/people?q=" + encodeURIComponent(q.trim()))
+        .then((r) => {
+          setPeople(r);
+          setError("");
+        })
+        .catch((e) => setError(errorText(e)));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [api, q]);
+  return (
+    <View style={{ gap: 6 }}>
+      <Field
+        label="Find a colleague"
+        value={q}
+        onChange={setQ}
+        placeholder="Name or employee code"
+      />
+      {!!error && <Text style={s.error}>{error}</Text>}
+      {people?.length === 0 && <Text style={s.note}>Nobody found.</Text>}
+      {(people ?? []).map((p) => (
+        <Pressable key={p.id} style={s.row} onPress={() => onPick(p.id)}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.strong}>{p.name}</Text>
+            <Text style={s.note}>
+              {[p.designation, p.employee_code].filter(Boolean).join(" · ")}
+            </Text>
+          </View>
+          <Text style={s.link}>Message</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+// ---- Laxmi, the HR assistant -------------------------------------------------------------------------
+// Links in answers name web portal pages; the ones the phone also has open here.
+const BOT_LINKS: Partial<Record<string, Section>> = {
+  timeoff: "Leave",
+  payslips: "Payslips",
+  helpdesk: "Helpdesk",
+};
+const BOT_SUGGESTIONS = [
+  "What is my leave balance?",
+  "Apply casual leave tomorrow",
+  "Next holidays",
+  "When is payday?",
+  "Show my last payslip",
+  "My attendance this month",
+];
+
+function LaxmiScreen({
+  api,
+  onGoto,
+}: {
+  api: Api;
+  onGoto: (section: Section) => void;
+}) {
+  const [log, setLog] = useState<BotEntry[] | null>(null);
+  const [error, setError] = useState("");
+  const [question, setQuestion] = useState("");
+  const [asking, setAsking] = useState(false);
+  const asked = useRef(0);
+  useEffect(() => {
+    api<
+      {
+        id: number;
+        question: string;
+        answer: string;
+        helpful: number | boolean | null;
+      }[]
+    >("/bot/history")
+      .then((h) =>
+        setLog(
+          h.map((x) => ({
+            key: "h" + x.id,
+            question: x.question,
+            answer: { id: x.id, text: x.answer, helpful: x.helpful },
+          })),
+        ),
+      )
+      .catch((e) => {
+        setError(errorText(e));
+        setLog([]);
+      });
+  }, [api]);
+  const update = (key: string, change: Partial<BotEntry>) =>
+    setLog((l) =>
+      (l ?? []).map((e) => (e.key === key ? { ...e, ...change } : e)),
+    );
+  const ask = async (text: string) => {
+    const q = text.trim();
+    if (!q || asking) return;
+    const key = "q" + ++asked.current;
+    setQuestion("");
+    setAsking(true);
+    setLog((l) => [...(l ?? []), { key, question: q }]);
+    try {
+      update(key, {
+        answer: await api<BotAnswer>("/bot/ask", { question: q }),
+      });
+    } catch (e) {
+      update(key, { error: errorText(e) });
+    } finally {
+      setAsking(false);
+    }
+  };
+  const rate = async (e: BotEntry, helpful: boolean) => {
+    const a = e.answer;
+    if (!a?.id) return;
+    if (await attempt(() => api("/bot/log/" + a.id + "/feedback", { helpful })))
+      update(e.key, { answer: { ...a, helpful } });
+  };
+  return (
+    <View style={s.card}>
+      <Text style={s.heading}>Ask Laxmi</Text>
+      <Text style={s.note}>
+        {
+          "Your HR assistant. Answers come from your own records and the company's published guidance. Every question is kept in a log HR can review."
+        }
+      </Text>
+      <Status loading={log === null} error={error} />
+      {log?.length === 0 && !error && (
+        <View style={[s.bubble, s.msg]}>
+          <Text style={s.strong}>Laxmi</Text>
+          <Text style={s.body}>
+            Namaste! I can tell you your leave balance, apply for leave, list
+            holidays, and answer questions about pay, attendance and company
+            policies.
+          </Text>
+        </View>
+      )}
+      {(log ?? []).map((e) => {
+        const a = e.answer;
+        const links = (a?.links ?? []).filter((l) => BOT_LINKS[l]);
+        return (
+          <React.Fragment key={e.key}>
+            {!!e.question && (
+              <View style={[s.bubble, s.msg, s.msgMine]}>
+                <Text style={s.body}>{e.question}</Text>
+              </View>
+            )}
+            <View
+              style={[s.bubble, s.msg, !!a?.action && { maxWidth: "100%" }]}
+            >
+              <Text style={s.strong}>Laxmi</Text>
+              {a ? (
+                <>
+                  <Text style={s.body}>{a.text}</Text>
+                  {a.action?.type === "leave_request" && (
+                    <LeaveCard api={api} action={a.action} />
+                  )}
+                  {links.length > 0 && (
+                    <View style={s.wrap}>
+                      {links.map((l) => (
+                        <Pressable
+                          key={l}
+                          style={s.chip}
+                          onPress={() => onGoto(BOT_LINKS[l] as Section)}
+                        >
+                          <Text style={s.chipText}>{BOT_LINKS[l]} →</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                  {!!a.id &&
+                    (a.helpful === null || a.helpful === undefined ? (
+                      <Text style={s.note}>
+                        Was this helpful?{"   "}
+                        <Text style={s.link} onPress={() => void rate(e, true)}>
+                          Yes
+                        </Text>
+                        {"   "}
+                        <Text
+                          style={s.link}
+                          onPress={() => void rate(e, false)}
+                        >
+                          No
+                        </Text>
+                      </Text>
+                    ) : (
+                      <Text style={s.note}>
+                        {a.helpful
+                          ? "Thanks for the feedback."
+                          : "Thanks. HR will review this answer."}
+                      </Text>
+                    ))}
+                </>
+              ) : e.error ? (
+                <Text style={{ color: "#894a35" }}>{e.error}</Text>
+              ) : (
+                <Text style={s.note}>Thinking…</Text>
+              )}
+            </View>
+          </React.Fragment>
+        );
+      })}
+      <View style={s.wrap}>
+        {BOT_SUGGESTIONS.map((x) => (
+          <Pressable
+            key={x}
+            disabled={asking}
+            onPress={() => void ask(x)}
+            style={[s.chip, asking && { opacity: 0.5 }]}
+          >
+            <Text style={s.chipText}>{x}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <TextInput
+        accessibilityLabel="Question for Laxmi"
+        style={s.input}
+        value={question}
+        onChangeText={setQuestion}
+        placeholder="Ask about leave, holidays, pay or a policy"
+        maxLength={500}
+        returnKeyType="send"
+        onSubmitEditing={() => void ask(question)}
+      />
+      <Btn
+        title={asking ? "Asking…" : "Ask"}
+        disabled={asking || !question.trim()}
+        onPress={() => void ask(question)}
+      />
+    </View>
+  );
+}
+
+// The leave request Laxmi drafted: check it, change anything, then confirm.
+function LeaveCard({ api, action }: { api: Api; action: LeaveAction }) {
+  const [typeId, setTypeId] = useState<number | null>(action.leave_type_id);
+  const [from, setFrom] = useState(action.from_date),
+    [to, setTo] = useState(action.to_date),
+    [reason, setReason] = useState(action.reason ?? "");
+  const [half, setHalf] = useState<"" | "first" | "second">(
+    action.half_day ?? "",
+  );
+  const [working, setWorking] = useState(false);
+  const [sent, setSent] = useState<number | null>(null);
+  if (sent !== null)
+    return (
+      <Text style={s.callout}>
+        Sent for approval: {sent} day{sent === 1 ? "" : "s"}. Follow it under
+        Leave.
+      </Text>
+    );
+  const halfAllowed =
+    action.options.find((o) => o.leave_type_id === typeId)?.allow_half_day !==
+    false;
+  const halfDay = halfAllowed ? half : "";
+  return (
+    <View style={s.draft}>
+      <Text style={s.label}>Leave type</Text>
+      <View style={s.wrap}>
+        {action.options.map((o) => (
+          <Pressable
+            key={o.leave_type_id}
+            onPress={() => setTypeId(o.leave_type_id)}
+            style={[s.chip, typeId === o.leave_type_id && s.chipOn]}
+          >
+            <Text
+              style={[
+                s.chipText,
+                typeId === o.leave_type_id && { color: "#fff" },
+              ]}
+            >
+              {o.name}
+              {o.available === null ? "" : " (" + o.available + " left)"}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      <Field label="From (YYYY-MM-DD)" value={from} onChange={setFrom} />
+      {!halfDay && (
+        <Field label="To (YYYY-MM-DD)" value={to} onChange={setTo} />
+      )}
+      {halfAllowed && (
+        <View style={s.wrap}>
+          {(["", "first", "second"] as const).map((h) => (
+            <Pressable
+              key={h}
+              onPress={() => setHalf(h)}
+              style={[s.chip, half === h && s.chipOn]}
+            >
+              <Text style={[s.chipText, half === h && { color: "#fff" }]}>
+                {h === ""
+                  ? "Full day(s)"
+                  : h === "first"
+                    ? "First half"
+                    : "Second half"}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+      <Field
+        label="Reason (optional)"
+        value={reason}
+        onChange={setReason}
+        multiline
+      />
+      <Btn
+        title={working ? "Sending…" : "Confirm and send for approval"}
+        disabled={working || !typeId || !from || (!halfDay && !to)}
+        onPress={async () => {
+          setWorking(true);
+          try {
+            const r = await api<{ id: number; days: number }>(
+              "/leave/requests",
+              {
+                leave_type_id: typeId,
+                from_date: from,
+                to_date: halfDay ? from : to,
+                half_day: halfDay || null,
+                reason: reason.trim() || null,
+              },
+            );
+            setSent(r.days);
+          } catch (e) {
+            Alert.alert("Could not complete", errorText(e));
+          } finally {
+            setWorking(false);
+          }
+        }}
+      />
+    </View>
   );
 }
 
@@ -1056,4 +1845,44 @@ const s = StyleSheet.create({
   netLabel: { color: "#cfe5d6", fontWeight: "600" },
   netValue: { color: "#fff", fontSize: 22, fontWeight: "700" },
   bubble: { backgroundColor: "#f1f6f1", borderRadius: 12, padding: 12, gap: 4 },
+  msg: { maxWidth: "90%", alignSelf: "flex-start" },
+  msgMine: { alignSelf: "flex-end", backgroundColor: "#dcefe3" },
+  body: { color: "#213c30", fontSize: 15, lineHeight: 21 },
+  avatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#e8f0e9",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarText: { color: "#22684f", fontWeight: "700", fontSize: 13 },
+  count: {
+    backgroundColor: "#17694f",
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
+    minWidth: 22,
+    textAlign: "center",
+    paddingVertical: 3,
+    paddingHorizontal: 7,
+    borderRadius: 11,
+    overflow: "hidden",
+  },
+  draft: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#e1eae3",
+    padding: 12,
+    gap: 10,
+    marginTop: 4,
+  },
+  callout: {
+    color: "#22684f",
+    backgroundColor: "#e8f0e9",
+    padding: 12,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
 });
