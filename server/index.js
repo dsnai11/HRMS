@@ -37,6 +37,8 @@ import {
   scheduleLearningReminders,
 } from "./routes/learning.js";
 import { registerCompOff, scheduleCompOffExpiry } from "./routes/compoff.js";
+import { registerTaxDeclarations } from "./routes/tax-declarations.js";
+import { registerPayrollReports } from "./routes/payroll-reports.js";
 import { registerPeoplePlus } from "./routes/people-plus.js";
 import { registerOnboardingPlus } from "./routes/onboarding-plus.js";
 import { registerCredit } from "./routes/credit.js";
@@ -57,6 +59,7 @@ const STATIC = {
   "/timeoff.js": ["timeoff.js", "text/javascript"],
   "/payroll.js": ["payroll.js", "text/javascript"],
   "/payroll-more.js": ["payroll-more.js", "text/javascript"],
+  "/payroll-plus.js": ["payroll-plus.js", "text/javascript"],
   "/hiring.js": ["hiring.js", "text/javascript"],
   "/engage.js": ["engage.js", "text/javascript"],
   "/more.js": ["more.js", "text/javascript"],
@@ -159,6 +162,7 @@ export function createApp({
     registerRegularization,
     registerSummary,
     registerPayrollSetup,
+    registerPayrollReports, // before the payslip :runId route, so /payslips/ytd is not read as an id
     registerPayrollRuns,
     registerPayrollExtras,
     registerRecruitment,
@@ -168,6 +172,7 @@ export function createApp({
     registerOnboardingPlus,
     registerPeoplePlus,
     registerCompOff,
+    registerTaxDeclarations,
     registerPreboarding,
     registerProbation,
     registerLearning,

@@ -1331,3 +1331,7 @@ ul.chart-kids {
   background: transparent;
   border: 1px dashed #c9971c;
 }
+
+.budget-mark {
+  fill: #a94335;
+}

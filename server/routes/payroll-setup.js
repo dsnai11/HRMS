@@ -534,13 +534,19 @@ export function registerPayrollSetup(router, app) {
     if (!effective) throw new HttpError(400, "Effective from is required.");
     const gross = number(b.monthly_gross, "Monthly gross", 1, 10000000);
     const flag = (k, d) => (b[k] === undefined ? d : Number(bool(b[k], k)));
+    // A revision keeps the person's regime and declared deductions unless told otherwise.
+    const prev = await db
+      .prepare(
+        "SELECT tax_regime,declared_deductions FROM employee_salaries WHERE user_id=? ORDER BY effective_from DESC,id DESC LIMIT 1",
+      )
+      .get(person.id);
     const regime =
       b.tax_regime === undefined
-        ? "new"
+        ? (prev?.tax_regime ?? "new")
         : oneOf(b.tax_regime, "Tax regime", ["new", "old"]);
     const declared =
       b.declared_deductions === undefined
-        ? 0
+        ? (prev?.declared_deductions ?? 0)
         : number(b.declared_deductions, "Declared deductions", 0, 100000000);
     const components = await listComponents(companyId);
     let built;
@@ -724,7 +730,27 @@ export function registerPayrollSetup(router, app) {
       });
       return id;
     });
-    return { id, lines: built, arrears };
+    // A gentle flag when the pay sits outside the band set for the person's grade.
+    let band_warning = null;
+    if (person.grade_id) {
+      const g = await db
+        .prepare("SELECT name,salary_min,salary_max FROM grades WHERE id=?")
+        .get(person.grade_id);
+      const annual = round(gross) * 12;
+      if (
+        g &&
+        ((g.salary_min != null && annual < g.salary_min) ||
+          (g.salary_max != null && annual > g.salary_max))
+      )
+        band_warning = {
+          grade: g.name,
+          annual,
+          min: g.salary_min,
+          max: g.salary_max,
+          message: `₹${annual.toLocaleString("en-IN")} a year is outside the ${g.name} band${g.salary_min != null ? ` (from ₹${g.salary_min.toLocaleString("en-IN")}` : ""}${g.salary_max != null ? ` up to ₹${g.salary_max.toLocaleString("en-IN")}` : ""}${g.salary_min != null ? ")" : ""}.`,
+        };
+    }
+    return { id, lines: built, arrears, band_warning };
   };
   app.setSalary = setSalary;
   router.post(
