@@ -60,6 +60,16 @@ function calendarGrid(days, month) {
     );
   return `<div class="cal"><div class="dow">${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((x) => `<span>${x}</span>`).join("")}</div><div class="grid">${cells.join("")}</div></div>`;
 }
+// Where to reach someone on leave and who covers for them, when they said.
+const leaveExtras = (r) =>
+  [
+    r.address_on_leave && `Address: ${esc(r.address_on_leave)}`,
+    r.contact_on_leave && `Contact: ${esc(r.contact_on_leave)}`,
+    r.handover_name && `Work handled by ${esc(r.handover_name)}`,
+  ]
+    .filter(Boolean)
+    .map((x) => `<small>${x}</small>`)
+    .join("");
 async function timeOffPage(id) {
   timeOffMonth ||= thisMonth();
   const month = timeOffMonth;
@@ -72,15 +82,30 @@ async function timeOffPage(id) {
   ]);
   if (id !== renderId) return;
   const days = cal.days || [];
+  const colleagues = await api("/directory").catch(() => []);
+  if (id !== renderId) return;
   document.querySelector("#content").innerHTML =
-    heading(
-      "Time off",
-      "Leave balances, your calendar and attendance corrections.",
-      `<div class="actions"><button id="apply">Apply for leave</button><button class="secondary" id="correct">Request correction</button></div>`,
-    ) +
-    (bal.length
-      ? `<div class="stats">${bal.map((b) => `<div class="stat"><div class="stat-label">${esc(b.name)}</div><div class="stat-value">${b.unlimited ? "∞" : b.available}</div><small>${b.unlimited ? "Unpaid, no limit" : `${b.balance} balance${b.pending ? ` · ${b.pending} pending` : ""}`}</small></div>`).join("")}</div>`
-      : `<div class="card">${empty("No leave types yet", "HR has not set up leave for your company.")}</div>`) +
+    crumb("Leave / My Leave") +
+    `<div class="leave-layout"><div class="card"><div class="card-head"><h2>Leave Request</h2><button class="secondary" id="correct">Request attendance correction</button></div>${
+      bal.length
+        ? `<form id="leave-form" class="form-grid"><label>Please grant me<select name="leave_type_id" required><option value="">-Select-</option>${bal.map((b) => `<option value="${b.leave_type_id}" data-half="${b.allow_half_day ? 1 : 0}">${esc(b.name)}${b.unlimited ? "" : ` (${b.available} available)`}</option>`).join("")}</select></label><label class="check"><input type="checkbox" name="is_half"> Is Half Day</label><label id="half-which" hidden>Which half<select name="half_day"><option value="first">First half</option><option value="second">Second half</option></select></label>${input("from_date", "From", "", 'type="date" required')}<label id="to-wrap">To<input name="to_date" type="date"></label><p class="full muted" id="leave-days">Total Days:</p><label class="full">For the following reason<textarea name="reason" rows="3" maxlength="500"></textarea></label><label class="full">My Address on leave will be<input name="address_on_leave" maxlength="300"></label>${input("contact_on_leave", "Contact No.", "", 'maxlength="20" inputmode="tel"')}<label>In my absence, work handled by<select name="handover_to"><option value="">-Select-</option>${colleagues
+            .filter((p) => p.id !== me.id)
+            .map(
+              (p) =>
+                `<option value="${p.id}">${esc(p.name)}${p.employee_code ? ` (${esc(p.employee_code)})` : ""}</option>`,
+            )
+            .join(
+              "",
+            )}</select></label><p class="error-text full" id="leave-error" role="alert"></p><div class="actions full"><button>Submit</button></div></form>`
+        : empty("No leave types yet", "HR has not set up leave for your company.")
+    }</div><div class="card"><h2>Leave Balance</h2><div class="lb-row"><span>Leave Summary For Year</span><strong>${month.slice(0, 4)}</strong></div>${bal
+      .map(
+        (b, i) =>
+          `<div class="lb-row"><div style="color:${LEAVE_DOTS[i % LEAVE_DOTS.length]}"><span class="dot" style="background:currentColor"></span><span style="color:#2a2c3a">${esc(b.code ? `${b.code} (${b.name})` : b.name)}</span><small>${b.unlimited ? "No limit" : `${b.available} Leaves`}</small></div><span class="applied">${b.pending || 0} Applied</span></div>`,
+      )
+      .join(
+        "",
+      )}<div class="lb-total"><span>Total:</span><span>${bal.filter((b) => !b.unlimited).reduce((n, b) => n + Number(b.available || 0), 0)} Days</span></div></div></div>` +
     `<div class="card"><div class="card-head"><div><h2>${monthLabel(month)}</h2><p class="muted">${cal.payable_days !== undefined ? `Payable days ${cal.payable_days} · Loss of pay ${cal.lop_days}` : ""}</p></div><div class="actions"><button class="secondary" id="prev">←</button><button class="secondary" id="next">→</button></div></div>${calendarGrid(days, month)}</div>` +
     `<div class="card"><h2>My leave requests</h2>${
       reqs.length
@@ -95,12 +120,59 @@ async function timeOffPage(id) {
             "Missed a punch? Request a correction within the allowed window.",
           )
     }</div>` +
-    `<div class="card"><h2>Holidays ${month.slice(0, 4)}</h2>${hol.length ? hol.map((h) => `<div class="kv"><span>${esc(h.name)}</span><strong>${fmtDate(h.date)}</strong></div>`).join("") : '<p class="muted">No holidays have been added yet.</p>'}</div>`;
+    `<div class="card"><h2>Holidays ${month.slice(0, 4)}</h2>${hol.length ? hol.map((h) => `<div class="kv"><span>${esc(h.name)}${h.optional ? " (optional)" : ""}</span><strong>${fmtDate(h.date)}</strong></div>`).join("") : '<p class="muted">No holidays have been added yet.</p>'}</div>`;
   const go = (n) => () => ((timeOffMonth = shiftMonth(month, n)), render());
   document.querySelector("#prev").onclick = go(-1);
   document.querySelector("#next").onclick = go(1);
-  document.querySelector("#apply").onclick = () => applyLeaveDialog(bal);
   document.querySelector("#correct").onclick = () => correctionDialog();
+  const form = document.querySelector("#leave-form");
+  if (form) {
+    // Calendar days in the range; the server leaves out holidays and weekly offs.
+    const count = () => {
+      const half = form.is_half.checked;
+      const from = form.from_date.value;
+      const to = half ? from : form.to_date.value || from;
+      const n =
+        from && to >= from
+          ? Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1
+          : 0;
+      document.querySelector("#leave-days").textContent =
+        `Total Days: ${half ? (from ? 0.5 : 0) : n}${n ? " (holidays and weekly offs in the range are not counted)" : ""}`;
+    };
+    const halfAllowed = () =>
+      form.leave_type_id.selectedOptions[0]?.dataset.half === "1";
+    form.onchange = () => {
+      if (!halfAllowed()) form.is_half.checked = false;
+      form.is_half.disabled = !halfAllowed();
+      document.querySelector("#half-which").hidden = !form.is_half.checked;
+      document.querySelector("#to-wrap").hidden = form.is_half.checked;
+      count();
+    };
+    form.onchange();
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      const f = Object.fromEntries(new FormData(form));
+      const half = form.is_half.checked;
+      busy(e.submitter, async () => {
+        try {
+          const r = await api("/leave/requests", {
+            leave_type_id: Number(f.leave_type_id),
+            from_date: f.from_date,
+            to_date: half ? f.from_date : f.to_date || f.from_date,
+            half_day: half ? f.half_day : null,
+            reason: f.reason || null,
+            address_on_leave: f.address_on_leave || null,
+            contact_on_leave: f.contact_on_leave || null,
+            handover_to: f.handover_to ? Number(f.handover_to) : null,
+          });
+          notice(`Leave request sent for approval: ${r.days} day(s).`);
+          await render();
+        } catch (err) {
+          document.querySelector("#leave-error").textContent = err.message;
+        }
+      });
+    };
+  }
   const cancel = (attr, path) =>
     document.querySelectorAll(`[${attr}]`).forEach(
       (b) =>
@@ -114,31 +186,6 @@ async function timeOffPage(id) {
   cancel("data-cancel-leave", "/leave/requests");
   cancel("data-cancel-reg", "/regularizations");
   await compOffCard(id);
-}
-function applyLeaveDialog(bal) {
-  if (!bal.length) return notice("No leave types are available yet.", true);
-  dialog(
-    "Apply for leave",
-    `${sel(
-      "leave_type_id",
-      "Leave type",
-      bal.map((b) => [
-        b.leave_type_id,
-        `${b.name}${b.unlimited ? "" : ` (${b.available} available)`}`,
-      ]),
-    )}${sel("half_day", "Duration", [
-      ["", "Full day(s)"],
-      ["first", "Half day — first half"],
-      ["second", "Half day — second half"],
-    ])}${input("from_date", "From", today(), 'type="date" required')}${input("to_date", "To (leave blank for one day)", "", 'type="date"')}<label class="full">Reason<input name="reason" maxlength="500"></label>`,
-    async (b) => {
-      b.leave_type_id = Number(b.leave_type_id);
-      b.half_day ||= null;
-      if (!b.to_date) b.to_date = b.from_date;
-      const r = await api("/leave/requests", b);
-      notice(`Request sent for ${r.days} day(s).`);
-    },
-  );
 }
 function correctionDialog() {
   dialog(
@@ -179,7 +226,7 @@ async function approvalsPage(id) {
     heading("Approvals", "Requests from your team waiting for a decision.") +
     `<div class="card"><h2>Leave requests</h2>${
       data.leave.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th><th></th></tr></thead><tbody>${data.leave.map((r) => `<tr><td>${esc(r.employee_name)}<small>${esc(r.employee_code || "")}</small></td><td>${esc(r.type_name)}<small>${esc(r.reason || "")}</small></td><td>${rangeText(r)}</td><td>${r.days}</td><td>${buttons("leave", r)}</td></tr>`).join("")}</tbody></table></div>`
+        ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th><th></th></tr></thead><tbody>${data.leave.map((r) => `<tr><td>${esc(r.employee_name)}<small>${esc(r.employee_code || "")}</small></td><td>${esc(r.type_name)}<small>${esc(r.reason || "")}</small>${leaveExtras(r)}</td><td>${rangeText(r)}</td><td>${r.days}</td><td>${buttons("leave", r)}</td></tr>`).join("")}</tbody></table></div>`
         : empty("Nothing waiting", "No leave requests need your decision.")
     }</div><div class="card"><h2>Attendance corrections</h2>${
       data.regularizations.length
@@ -253,7 +300,7 @@ async function leaveAdminTabHtml(tab) {
     const list = await api(`/admin/holidays?year=${holidayYear}`);
     return `<div class="card"><div class="card-head"><div><h2>Holidays ${holidayYear}</h2><p class="muted">Holidays and weekly offs are not deducted from leave.</p></div><div class="actions"><button class="secondary" id="hy-prev">←</button><button class="secondary" id="hy-next">→</button><button id="add-holidays">+ Add holidays</button></div></div>${
       list.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Holiday</th><th>Applies to</th><th></th></tr></thead><tbody>${list.map((h) => `<tr><td>${fmtDate(h.date)}</td><td>${esc(h.name)}</td><td>${esc(h.branch_name || "All branches")}</td><td><button class="ghost" data-del-holiday="${h.id}">Remove</button></td></tr>`).join("")}</tbody></table></div>`
+        ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Holiday</th><th>Applies to</th><th></th></tr></thead><tbody>${list.map((h) => `<tr><td>${fmtDate(h.date)}</td><td>${esc(h.name)}${h.optional ? ' <span class="pill neutral">Optional</span>' : ""}</td><td>${esc(h.branch_name || "All branches")}</td><td><button class="ghost" data-del-holiday="${h.id}">Remove</button></td></tr>`).join("")}</tbody></table></div>`
         : empty("No holidays", "Add the year's holidays.")
     }</div>`;
   }
@@ -411,7 +458,7 @@ async function leaveAdminWire(tab) {
       const org = await api("/admin/org");
       dialog(
         "Add holidays",
-        `<label class="full">One per line: YYYY-MM-DD, name<textarea name="lines" rows="6" required placeholder="${holidayYear}-01-26, Republic Day&#10;${holidayYear}-08-15, Independence Day"></textarea></label><label class="full">Applies to<select name="branch_id">${options(org.branches, null, "All branches")}</select></label>`,
+        `<label class="full">One per line: YYYY-MM-DD, name<textarea name="lines" rows="6" required placeholder="${holidayYear}-01-26, Republic Day&#10;${holidayYear}-08-15, Independence Day"></textarea></label><label class="full">Applies to<select name="branch_id">${options(org.branches, null, "All branches")}</select></label><label class="check full"><input type="checkbox" name="optional"> Optional holidays (people may take them; they still count as working days)</label>`,
         async (b) => {
           const items = b.lines
             .split("\n")
@@ -424,6 +471,7 @@ async function leaveAdminWire(tab) {
           const r = await api("/admin/holidays", {
             items,
             branch_id: b.branch_id ? Number(b.branch_id) : null,
+            optional: "optional" in b,
           });
           notice(`Added ${r.created} holiday(s).`);
         },

@@ -32,6 +32,7 @@ import { registerSecurity } from "./routes/security.js";
 import { registerEngagement } from "./routes/engagement.js";
 import { registerInsights } from "./routes/insights.js";
 import { registerRoles } from "./routes/roles.js";
+import { registerHome } from "./routes/home.js";
 import { scheduleRetention } from "./retention.js";
 import {
   registerLearning,
@@ -200,6 +201,7 @@ export function createApp({
     registerPerformance,
     registerInsights,
     registerRoles,
+    registerHome,
   ])
     register(router, app);
 

@@ -183,8 +183,13 @@ export function registerAuth(router, app) {
           "SELECT id,name,require_selfie,labels FROM companies WHERE id=?",
         )
         .get(companyId);
+      const job = await db
+        .prepare(
+          "SELECT g.name designation FROM users u LEFT JOIN designations g ON g.id=u.designation_id WHERE u.id=?",
+        )
+        .get(user.id);
       return send(200, {
-        user: safeUser(user),
+        user: { ...safeUser(user), designation: job?.designation ?? null },
         company: company && {
           ...company,
           require_selfie: Boolean(company.require_selfie),

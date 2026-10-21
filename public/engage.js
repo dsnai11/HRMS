@@ -113,7 +113,7 @@ const holidaysHtml = (list) =>
       ? list
           .map(
             (h) =>
-              `<div class="kv"><span>${esc(h.name)}</span><strong>${fmtDate(h.date)}</strong></div>`,
+              `<div class="kv"><span>${esc(h.name)}${h.optional ? " (optional)" : ""}</span><strong>${fmtDate(h.date)}</strong></div>`,
           )
           .join("")
       : '<p class="muted">No upcoming holidays have been added.</p>'

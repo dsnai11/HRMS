@@ -362,18 +362,29 @@ export function registerLeave(router, app) {
       throw new HttpError(400, "Choose a valid year.");
     return y;
   };
+  // The person's holidays for a year: fixed ones (days off) and optional ones.
   router.get("/api/holidays", async ({ user, query, send }) => {
     const y = yearParam(query);
-    const map = await holidayMap(
-      db,
-      user.company_id,
-      user.branch_id,
-      `${y}-01-01`,
-      `${y}-12-31`,
-    );
+    const rows = await db
+      .prepare(
+        `SELECT h.date,h.name,h.optional,b.name branch_name FROM holidays h LEFT JOIN branches b ON b.id=h.branch_id
+         WHERE h.company_id=? AND h.date>=? AND h.date<=? AND (h.branch_id IS NULL OR h.branch_id=?) ORDER BY h.date,h.optional`,
+      )
+      .all(user.company_id, `${y}-01-01`, `${y}-12-31`, user.branch_id ?? -1);
+    const seen = new Set();
     return send(
       200,
-      [...map].map(([date, name]) => ({ date, name })),
+      rows
+        .filter((h) => {
+          const key = `${h.date}:${h.optional}`;
+          return !seen.has(key) && seen.add(key);
+        })
+        .map((h) => ({
+          date: h.date,
+          name: h.name,
+          optional: Boolean(h.optional),
+          branch: h.branch_name ?? "All branches",
+        })),
     );
   });
   router.get(
@@ -413,9 +424,16 @@ export function registerLeave(router, app) {
         for (const h of clean)
           await db
             .prepare(
-              "INSERT INTO holidays(company_id,branch_id,date,name,created_at) VALUES(?,?,?,?,?)",
+              "INSERT INTO holidays(company_id,branch_id,date,name,optional,created_at) VALUES(?,?,?,?,?,?)",
             )
-            .run(companyId, branchId, h.date, h.name, now(app));
+            .run(
+              companyId,
+              branchId,
+              h.date,
+              h.name,
+              b.optional ? 1 : 0,
+              now(app),
+            );
         await audit("holidays_added", { count: clean.length, branchId });
       });
       return send(201, { created: clean.length });
@@ -548,6 +566,19 @@ export function registerLeave(router, app) {
         "Half days apply to a single day of a leave type that allows them.",
       );
     const reason = optionalString(b.reason, "Reason", 500);
+    const address = optionalString(b.address_on_leave, "Address on leave", 300);
+    const contact = optionalString(b.contact_on_leave, "Contact number", 20);
+    const handover = optionalId(b.handover_to, "Work handled by");
+    if (
+      handover &&
+      (handover === user.id ||
+        !(await db
+          .prepare(
+            "SELECT id FROM users WHERE id=? AND company_id=? AND active=1",
+          )
+          .get(handover, user.company_id)))
+    )
+      throw new HttpError(400, "Choose a colleague to handle your work.");
     const settings = await ensureAccruals(app, user, today());
     const year = leaveYearOf(from, settings.leaveYearStartMonth);
     if (year !== leaveYearOf(to, settings.leaveYearStartMonth))
@@ -594,7 +625,7 @@ export function registerLeave(router, app) {
         (
           await db
             .prepare(
-              "INSERT INTO leave_requests(company_id,user_id,leave_type_id,from_date,to_date,half_day,days,leave_year,reason,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+              "INSERT INTO leave_requests(company_id,user_id,leave_type_id,from_date,to_date,half_day,days,leave_year,reason,address_on_leave,contact_on_leave,handover_to,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
             )
             .run(
               user.company_id,
@@ -606,6 +637,9 @@ export function registerLeave(router, app) {
               days,
               year,
               reason,
+              address,
+              contact,
+              handover,
               now(app),
             )
         ).lastInsertRowid,
@@ -631,8 +665,8 @@ export function registerLeave(router, app) {
     return send(201, { id, days });
   });
 
-  const SELECT_REQ = `SELECT r.*,t.name type_name,t.code type_code,t.paid,u.name employee_name,u.employee_code FROM leave_requests r
-    JOIN leave_types t ON t.id=r.leave_type_id JOIN users u ON u.id=r.user_id`;
+  const SELECT_REQ = `SELECT r.*,t.name type_name,t.code type_code,t.paid,u.name employee_name,u.employee_code,h.name handover_name FROM leave_requests r
+    JOIN leave_types t ON t.id=r.leave_type_id JOIN users u ON u.id=r.user_id LEFT JOIN users h ON h.id=r.handover_to`;
   router.get("/api/leave/requests", async ({ user, send }) =>
     send(
       200,

@@ -303,7 +303,7 @@ export function registerRegularization(router, app) {
     return send(200, {
       leave: await db
         .prepare(
-          `SELECT r.*,t.name type_name,t.code type_code,u.name employee_name,u.employee_code FROM leave_requests r JOIN leave_types t ON t.id=r.leave_type_id JOIN users u ON u.id=r.user_id WHERE r.company_id=? AND r.status='pending' AND r.user_id<>?${scope.sql} ORDER BY r.from_date,r.id LIMIT 200`,
+          `SELECT r.*,t.name type_name,t.code type_code,u.name employee_name,u.employee_code,h.name handover_name FROM leave_requests r JOIN leave_types t ON t.id=r.leave_type_id JOIN users u ON u.id=r.user_id LEFT JOIN users h ON h.id=r.handover_to WHERE r.company_id=? AND r.status='pending' AND r.user_id<>?${scope.sql} ORDER BY r.from_date,r.id LIMIT 200`,
         )
         .all(...args),
       regularizations: await db

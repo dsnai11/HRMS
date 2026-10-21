@@ -31,7 +31,7 @@ export async function companySettings(db, companyId) {
 export async function holidayMap(db, companyId, branchId, from, to) {
   const rows = await db
     .prepare(
-      "SELECT date,name FROM holidays WHERE company_id=? AND date>=? AND date<=? AND (branch_id IS NULL OR branch_id=?) ORDER BY date",
+      "SELECT date,name FROM holidays WHERE company_id=? AND date>=? AND date<=? AND (branch_id IS NULL OR branch_id=?) AND optional=0 ORDER BY date",
     )
     .all(companyId, from, to, branchId ?? -1);
   return new Map(rows.map((r) => [r.date, r.name]));

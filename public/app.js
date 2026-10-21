@@ -113,7 +113,7 @@ const empty = (title, description) =>
   `<div class="empty"><div class="empty-icon">◎</div><strong>${esc(title)}</strong>${esc(description)}</div>`;
 function login() {
   if (config.setupRequired) return setup();
-  app.innerHTML = `<div class="login"><section class="login-story">${brand()}<div><div class="eyebrow">${esc(config.company)}</div><h1>Every workday.<br>In the right place.</h1><p>A connected workplace starts with clarity. Attendance, people, and working hours — together in one space.</p></div><footer class="muted">Built around your people.</footer></section><section class="login-panel"><div class="eyebrow">Your workspace</div><h2>Welcome back</h2><p class="muted">Sign in with your company account.</p><form id="login"><label>Email address<input type="email" name="email" autocomplete="username" placeholder="you@company.com" required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button>Sign in →</button><a href="#" id="forgot" class="forgot">Forgot password?</a></form><p class="login-footer">Employees: use the credentials provided by your administrator.<br>Location is requested only when you punch in or out.</p></section></div>`;
+  app.innerHTML = `<div class="login"><section class="login-story">${brand()}<div><div class="eyebrow">${esc(config.company)}</div><h1>Employee Engagement Portal</h1><p>Creating a great place to work.</p></div><footer class="muted">© ${new Date().getFullYear()}, ${esc(config.company)}</footer></section><section class="login-panel"><h2>Sign In</h2><p class="muted">Use your company email and password.</p><form id="login"><label>Email address<input type="email" name="email" autocomplete="username" placeholder="you@company.com" required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button>Sign in →</button><a href="#" id="forgot" class="forgot">Forgot password?</a></form><p class="login-footer">Employees: use the credentials provided by your administrator.<br>Location is requested only when you punch in or out.</p></section></div>`;
   document.querySelector("#forgot")?.addEventListener("click", forgotDialog);
   document.querySelector("#login").onsubmit = (e) => {
     e.preventDefault();
@@ -230,74 +230,138 @@ function setup() {
     });
   };
 }
-function shell() {
-  const items = [
-    has("attendance.read") && ["overview", "◫", "Overview"],
-    has("insights.read") && ["insights", "▨", "Insights"],
-    me.role !== "super_admin" &&
-      !has("attendance.read") && ["mine", "⌂", "Home"],
-    me.role !== "super_admin" && [
-      "chat",
-      "✆",
-      'Messages<span id="chat-n" class="nav-n"></span>',
+// The menu, grouped the way Laxmi's earlier HR portal grouped it: Home, then
+// Attendance, Leave, TDS, Employee and so on, each opening to its pages.
+function navGroups() {
+  const staff = me.role !== "super_admin";
+  const approver = me.is_manager || has("leave.approve") || me.approvals_pending;
+  return [
+    ["Home", "⌂", [staff && ["mine", "Home"]]],
+    ["Overview", "◫", [has("attendance.read") && ["overview", "Overview"]]],
+    [
+      "Attendance",
+      "▤",
+      [
+        staff && ["myattendance", "My Attendance"],
+        me.is_manager && ["team", "Supervisor"],
+        (me.is_manager || has("leave.approve")) && ["teamcal", "Team calendar"],
+      ],
     ],
-    (me.role !== "super_admin" || has("bot.manage")) && [
-      "laxmi",
-      "✦",
-      "Ask Laxmi",
+    [
+      "Leave",
+      "☼",
+      [
+        staff && ["timeoff", "My Leaves"],
+        approver && [
+          "approvals",
+          me.approvals_pending
+            ? `Supervisor (${me.approvals_pending})`
+            : "Supervisor",
+        ],
+      ],
     ],
-    has("employees.read") && ["employees", "♙", "Employees"],
-    has("org.read") && ["organization", "▦", "Organization"],
-    has("attendance.read") && ["attendance", "▤", "Attendance"],
-    has("org.read") && ["workplaces", "◎", "Workplaces"],
-    has("attendance.read") && ["muster", "▥", "Monthly muster"],
-    has("leave.manage") && ["leaveadmin", "❖", "Leave & holidays"],
-    has("payroll.read") && ["payroll", "₹", "Payroll"],
-    (has("recruitment.manage") || has("exit.manage")) && [
-      "hiring",
+    ["TDS", "❒", [staff && ["payslips", "Payslips & Declarations"]]],
+    [
+      "Employee",
+      "♙",
+      [
+        ["profile", "My Profile"],
+        staff && ["myemployment", "My Employment"],
+        ["directory", "Directory"],
+        ["orgchart", "Org chart"],
+      ],
+    ],
+    ["Documents", "▥", [["documents", "Documents"], ["policies", "Policies"]]],
+    ["PMR", "★", [staff && ["performance", "Performance"]]],
+    [
+      "Recruitment",
       "✚",
-      "Hiring & exits",
+      [
+        staff && ["refer", "Refer A Candidate"],
+        me.is_manager &&
+          !has("recruitment.manage") && ["requisitions", "Requisitions"],
+      ],
     ],
-    has("devices.manage") && ["devices", "▣", "Devices"],
-    has("roles.assign") && ["roles", "⚿", "Roles & rights"],
-    has("security.read") && ["security", "⚠", "Security"],
-    has("audit.read") && ["audit", "≡", "Activity log"],
-    (me.is_manager || has("leave.approve") || me.approvals_pending) && [
-      "approvals",
-      "✓",
-      me.approvals_pending
-        ? `Approvals (${me.approvals_pending})`
-        : "Approvals",
+    ["LMS", "✎", [staff && ["learning", "My Courses"]]],
+    ["Reimbursement", "₹", [staff && ["myclaims", "My Claim"]]],
+    [
+      "Connect",
+      "✆",
+      [
+        staff && ["chat", 'Messages<span id="chat-n" class="nav-n"></span>'],
+        (staff || has("bot.manage")) && ["laxmi", "Ask Laxmi"],
+        ["helpdesk", "Helpdesk"],
+      ],
     ],
-    me.is_manager && ["team", "☷", "My team"],
-    (me.is_manager || has("leave.approve")) && [
-      "teamcal",
-      "▦",
-      "Team calendar",
+    [
+      "Administration",
+      "⚙",
+      [
+        has("insights.read") && ["insights", "Insights"],
+        has("employees.read") && ["employees", "Employees"],
+        has("org.read") && ["organization", "Organization"],
+        has("attendance.read") && ["attendance", "Attendance records"],
+        has("org.read") && ["workplaces", "Workplaces"],
+        has("attendance.read") && ["muster", "Monthly muster"],
+        has("leave.manage") && ["leaveadmin", "Leave & holidays"],
+        has("payroll.read") && ["payroll", "Payroll"],
+        (has("recruitment.manage") || has("exit.manage")) && [
+          "hiring",
+          "Hiring & exits",
+        ],
+        has("devices.manage") && ["devices", "Devices"],
+        has("roles.assign") && ["roles", "Roles & rights"],
+        has("security.read") && ["security", "Security"],
+        has("audit.read") && ["audit", "Activity log"],
+      ],
     ],
-    me.is_manager &&
-      !has("recruitment.manage") && ["requisitions", "✚", "Requisitions"],
-    me.role !== "super_admin" && ["timeoff", "☼", "Time off"],
-    me.role !== "super_admin" && ["payslips", "❒", "Payslips"],
-    me.role !== "super_admin" && ["myclaims", "₹", "Claims & loans"],
-    me.role !== "super_admin" && ["myemployment", "☗", "My employment"],
-    me.role !== "super_admin" && ["performance", "★", "Performance"],
-    me.role !== "super_admin" && ["learning", "✎", "Learning"],
-    ["documents", "▤", "Documents"],
-    me.role !== "super_admin" &&
-      has("attendance.read") && ["mine", "◎", "My attendance"],
-    ["directory", "☰", "Directory"],
-    ["orgchart", "⌥", "Org chart"],
-    me.role !== "super_admin" && ["refer", "✚", "Refer a candidate"],
-    ["helpdesk", "?", "Helpdesk"],
-    ["policies", "§", "Policies"],
-    ["profile", "☺", "My profile"],
-  ].filter(Boolean);
+  ]
+    .map(([label, icon, items]) => [label, icon, items.filter(Boolean)])
+    .filter(([, , items]) => items.length);
+}
+let navOpen = null;
+function shell() {
+  const groups = navGroups();
+  const current = groups.find(([, , items]) =>
+    items.some(([id]) => id === page),
+  )?.[0];
+  if (navOpen === null || current !== navOpen) navOpen = current ?? null;
   const scope = activeCompany || me.company_id;
-  const workspace = has("employees.read")
-    ? "HR workspace"
-    : "Employee workspace";
-  app.innerHTML = `<div class="layout"><aside class="sidebar">${brand()}<div class="nav-label">WORKSPACE</div><nav class="nav">${items.map(([id, icon, label]) => `<button data-page="${id}" class="${page === id ? "selected" : ""}"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="sidebar-foot"><strong>${esc(me.company?.name || config.company)}</strong>Location-verified attendance<br>${esc(config.timezone)}</div></aside><main class="main"><header class="topbar"><div class="topbar-left"><span>${esc(workspace)}</span>${me.role === "super_admin" ? "" : '<div class="people-search"><input id="people-q" type="search" placeholder="Search people across the company" aria-label="Search people" autocomplete="off"><div id="people-out" class="people-out" hidden></div></div>'}</div><div class="user">${companies.length > 1 ? `<select id="company" aria-label="Company">${companies.map((c) => `<option value="${c.id}" ${c.id === scope ? "selected" : ""}>${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("")}</select>` : ""}<button class="ghost bell" id="bell" aria-label="Notifications">🔔<span id="bell-n" class="bell-n"></span></button><span class="avatar">${initials(me.name)}</span><span class="name">${esc(me.name)}</span><button class="ghost" id="password">Password</button><button class="ghost" id="logout">Sign out</button></div></header><section class="content" id="content"><div class="loading">Loading…</div></section></main></div>`;
+  const nav = groups
+    .map(([label, icon, items]) =>
+      items.length === 1 && ["Home", "Overview"].includes(label)
+        ? `<button data-page="${items[0][0]}" class="${page === items[0][0] ? "selected" : ""}"><span class="nav-icon">${icon}</span>${items[0][1]}</button>`
+        : `<button type="button" class="nav-group ${label === navOpen ? "open" : ""}" data-group="${esc(label)}" aria-expanded="${label === navOpen}"><span class="nav-icon">${icon}</span>${esc(label)}<span class="chev">›</span></button><div class="nav-sub" ${label === navOpen ? "" : "hidden"}>${items.map(([id, text]) => `<button data-page="${id}" class="${page === id ? "selected" : ""}">${text}</button>`).join("")}</div>`,
+    )
+    .join("");
+  const sub = [me.employee_code, me.designation].filter(Boolean);
+  app.innerHTML = `<div class="layout"><aside class="sidebar">${brand()}<nav class="nav">${nav}</nav><div class="sidebar-foot"><strong>${esc(me.company?.name || config.company)}</strong>${esc(config.timezone)}</div></aside><main class="main"><header class="topbar"><div class="topbar-left">${me.role === "super_admin" ? "" : '<div class="people-search"><input id="people-q" type="search" placeholder="Search people across the company" aria-label="Search people" autocomplete="off"><div id="people-out" class="people-out" hidden></div></div>'}</div><div class="user">${companies.length > 1 ? `<select id="company" aria-label="Company">${companies.map((c) => `<option value="${c.id}" ${c.id === scope ? "selected" : ""}>${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("")}</select>` : ""}<button class="ghost bell" id="bell" aria-label="Notifications">🔔<span id="bell-n" class="bell-n"></span></button><div class="me-menu"><button type="button" class="me-button" id="me-button" aria-haspopup="true" aria-expanded="false"><span class="avatar">${initials(me.name)}</span><span class="me-text"><strong>${esc(sub[0] || me.name)}</strong><small>${esc(sub[1] || (sub[0] ? me.name : ""))}</small></span><span class="chev">⌄</span></button><div class="me-drop" id="me-drop" hidden><div class="me-name">${esc(me.name)}</div><button type="button" data-page="profile">Personal Information</button><button type="button" id="password">Change Password</button><button type="button" id="logout">Log Out</button></div></div></div></header><section class="content" id="content"><div class="loading">Loading…</div></section><footer class="foot">© ${new Date().getFullYear()}, ${esc(me.company?.name || config.company)}</footer></main></div>`;
+  document.querySelectorAll("[data-group]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const opening = navOpen !== b.dataset.group;
+        navOpen = opening ? b.dataset.group : "";
+        document.querySelectorAll("[data-group]").forEach((g) => {
+          const on = opening && g === b;
+          g.classList.toggle("open", on);
+          g.setAttribute("aria-expanded", on);
+          g.nextElementSibling.hidden = !on;
+        });
+      }),
+  );
+  const drop = document.querySelector("#me-drop");
+  document.querySelector("#me-button").onclick = (e) => {
+    e.stopPropagation();
+    drop.hidden = !drop.hidden;
+    e.currentTarget.setAttribute("aria-expanded", !drop.hidden);
+  };
+  if (!shell.wired) {
+    shell.wired = true;
+    document.addEventListener("click", (e) => {
+      const d = document.querySelector("#me-drop");
+      if (d && !e.target.closest(".me-menu")) d.hidden = true;
+    });
+  }
   bellInit();
   chatInit();
   peopleSearch();
@@ -373,6 +437,7 @@ async function render() {
   }
   try {
     if (page === "mine") return await employeeView(id);
+    if (page === "myattendance") return await myAttendancePage(id);
     if (page === "profile") return await profileView(id);
     if (page === "team") return await teamView(id);
     if (page === "timeoff") return await timeOffPage(id);
@@ -981,19 +1046,183 @@ function getLocation() {
     );
   });
 }
+// ---- Home: the page employees land on ----------------------------------------------------------
+// Laid out like the company's previous HR portal: employee search on top, then cards for
+// leave balance, announcements, holidays, birthdays, the org structure and today.
+const dmy = (d) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const LEAVE_DOTS = ["#222", "#c95bb8", "#d9303e", "#1e9be0", "#2f9d62", "#e08a1e", "#6b5bd6"];
+const crumb = (text) => `<div class="crumb"><span>${esc(text)}</span></div>`;
+const personRow = (p, right = "") =>
+  `<div class="person-row"><span class="avatar">${initials(p.name)}</span><div><strong>${esc(p.name)}</strong><small>${esc(p.designation || "")}</small><small>${esc(p.branch || "")}</small></div>${right ? `<span class="when">${right}</span>` : ""}</div>`;
+
 async function employeeView(id) {
-  const [profile, shifts, home] = await Promise.all([
+  const year = Number(today().slice(0, 4));
+  const [home, bal, profile, news] = await Promise.all([
+    api("/home"),
+    api("/leave/balances").catch(() => []),
     api("/me"),
-    api("/shifts"),
     homeData(),
   ]);
+  const holidays = await api(`/holidays?year=${year}`).catch(() => []);
   if (id !== renderId) return;
   const open = profile.openShift;
+  const done = profile.todayShift;
+  const counted = bal.filter((b) => !b.unlimited);
+  const leaveCard = `<div class="card"><h2>My Leave Balance</h2><div class="lb-row"><span>Leave Summary For Year</span><strong>${year}</strong></div><div class="card-body">${
+    bal.length
+      ? bal
+          .map(
+            (b, i) =>
+              `<div class="lb-row"><div style="color:${LEAVE_DOTS[i % LEAVE_DOTS.length]}"><span class="dot" style="background:currentColor"></span><span style="color:#2a2c3a">${esc(b.code ? `${b.code} (${b.name})` : b.name)}</span><small>${b.unlimited ? "No limit" : `${b.available} Leaves`}</small></div><span class="applied">${b.pending || 0} Applied</span></div>`,
+          )
+          .join("")
+      : '<p class="muted">HR has not set up leave for you yet.</p>'
+  }</div><div class="lb-total"><span>Total:</span><span>${counted.reduce((n, b) => n + Number(b.available || 0), 0)} Days</span></div></div>`;
+  const manage = has("announcements.manage");
+  const feed = [
+    ...news.announcements.map(
+      (a) =>
+        `<div class="feed-item"><span class="feed-icon">📣</span><div><strong>${a.pinned ? "📌 " : ""}${esc(a.title)}</strong>${esc(a.body).replaceAll("\n", "<br>")}<small>${esc(a.author || "")} · ${time(a.created_at)}${manage ? ` · <button class="link" data-del="${a.id}">Remove</button>` : ""}</small></div></div>`,
+    ),
+    ...home.joiners.map(
+      (j) =>
+        `<div class="feed-item"><span class="feed-icon">👤</span><div><strong>New Employee</strong>${esc(j.name)}${j.employee_code ? ` (${esc(j.employee_code)})` : ""} has joined${j.department ? ` in ${esc(j.department)} department` : ""}<small>${fmtDate(j.date_of_joining)}</small></div></div>`,
+    ),
+  ];
+  const announceCard = `<div class="card"><div class="card-head"><h2>Company Announcement</h2>${manage ? '<button class="secondary" id="post">Post</button>' : ""}</div><div class="card-body">${feed.length ? feed.join("") : '<p class="muted">No announcements yet.</p>'}</div></div>`;
+  const holidayRows = (optional) => {
+    const list = holidays.filter((h) => Boolean(h.optional) === optional);
+    return list.length
+      ? list
+          .map(
+            (h) =>
+              `<div class="person-row"><span class="feed-icon">✦</span><div><strong>${esc(h.name)}</strong><small>${dmy(h.date)}</small></div><span class="when">${esc(h.branch || "")}<small>Branch</small></span></div>`,
+          )
+          .join("")
+      : `<p class="muted">No ${optional ? "optional " : ""}holidays added for ${year}.</p>`;
+  };
+  const holidayCard = `<div class="card"><h2>Holiday List</h2><div class="tabs-line"><button type="button" class="on" data-hol="fixed">Fixed Holiday</button><button type="button" data-hol="optional">Optional Holiday</button></div><div class="card-body" id="hol-list">${holidayRows(false)}</div></div>`;
+  const birthdayCard = `<div class="card"><h2>Birthdays 🎉</h2><div class="card-body">${
+    home.birthdays.length
+      ? home.birthdays
+          .map((p) => personRow(p, `${p.day} ${MONTHS[home.month - 1]}`))
+          .join("")
+      : `<p class="muted">No birthdays in ${MONTHS[home.month - 1]}.</p>`
+  }</div></div>`;
+  const node = (p, cls = "") =>
+    `<div class="org-node ${cls}"><strong>${esc(p.name)}</strong><small>${esc(p.designation || p.employee_code || "")}</small></div>`;
+  const orgCard = `<div class="card"><h2>Organisation Structure</h2><div class="card-body"><div class="org-box">${home.org.manager ? `${node(home.org.manager)}<div class="org-line"></div>` : ""}${home.me ? node(home.me, "me") : ""}${home.org.reports.length ? `<div class="org-line"></div><div class="org-reports">${home.org.reports.map((p) => node(p)).join("")}</div>` : ""}</div><p class="muted" style="text-align:center"><a href="#" id="see-org">Open the full org chart →</a></p></div></div>`;
+  const todayCard = `<div class="card"><h2>Today</h2><div class="card-body"><span class="pill ${open ? "" : "neutral"}">${open ? "Working now" : done ? "Punched out" : "Not punched in"}</span><h3>${esc(open?.workplace_name || profile.workplace?.name || "No workplace assigned")}</h3><p class="muted">${open ? `Signed in at ${time(open.in_at)}.` : done ? `Worked ${time(done.in_at)} – ${time(done.out_at)}.` : "Attendance is marked from the company mobile app at your workplace."}</p><button class="secondary" data-page-go="myattendance">My Attendance →</button></div></div>`;
   document.querySelector("#content").innerHTML =
-    heading(`Hello, ${me.name.split(" ")[0]}`, "Your workday, in one place.") +
-    announcementsHtml(home.announcements) +
-    `<div class="grid-two"><div class="card punch-card"><span class="pill ${open ? "" : "neutral"}">${open ? "You are working" : "Not punched in"}</span><div class="big-clock">${open ? "Your shift is in progress" : "Ready for your day?"}</div><h2>${esc(open?.workplace_name || profile.workplace?.name || "No workplace assigned")}</h2><p class="muted">${open ? `Started ${time(open.in_at)}. Punch out at the same workplace${open.required_out_at ? ` after ${time(open.required_out_at)} for a full day` : ""}.` : `Punch in within ${profile.workplace?.radius || "—"} metres of your assigned workplace.`}</p><div class="callout">Attendance is recorded only from the company mobile app, at your assigned workplace.</div></div>${holidaysHtml(home.holidays)}</div><div class="card"><h2>My recent attendance</h2>${table(shifts)}</div>`;
+    crumb("Home") +
+    `<div class="card"><h2>Employee Search</h2><form id="emp-search"><div class="search-row"><input name="code" placeholder="Code" aria-label="Employee code"><input name="name" placeholder="Name" aria-label="Name"></div><div class="actions"><button>Search</button></div></form><div id="emp-results"></div></div>` +
+    `<div class="home-grid">${leaveCard}${announceCard}${holidayCard}${birthdayCard}${orgCard}${todayCard}</div>`;
   announcementsWire();
+  document.querySelectorAll("[data-hol]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        document
+          .querySelectorAll("[data-hol]")
+          .forEach((x) => x.classList.toggle("on", x === b));
+        document.querySelector("#hol-list").innerHTML = holidayRows(
+          b.dataset.hol === "optional",
+        );
+      }),
+  );
+  document.querySelector("#see-org").onclick = (e) => {
+    e.preventDefault();
+    page = "orgchart";
+    render();
+  };
+  document.querySelector("[data-page-go]").onclick = (e) => {
+    page = e.currentTarget.dataset.pageGo;
+    render();
+  };
+  document.querySelector("#emp-search").onsubmit = (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const code = String(f.get("code")).trim().toLowerCase();
+    const name = String(f.get("name")).trim().toLowerCase();
+    if (!code && !name) return;
+    busy(e.submitter, async () => {
+      const rows = (
+        await api(`/directory?q=${encodeURIComponent(code || name)}`)
+      ).filter(
+        (p) =>
+          (!code || (p.employee_code || "").toLowerCase().includes(code)) &&
+          (!name || p.name.toLowerCase().includes(name)),
+      );
+      document.querySelector("#emp-results").innerHTML = rows.length
+        ? `<div class="table-wrap"><table><thead><tr><th>Code</th><th>Name</th><th>Designation</th><th>Department</th><th>Branch</th><th>Contact</th></tr></thead><tbody>${rows.map((p) => `<tr><td>${esc(p.employee_code || "—")}</td><td>${esc(p.name)}</td><td>${esc(p.designation_name || "—")}</td><td>${esc(p.department_name || "—")}</td><td>${esc(p.branch_name || "—")}</td><td>${p.phone ? `<a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : ""}<small>${esc(p.email || "")}</small></td></tr>`).join("")}</tbody></table></div>`
+        : '<p class="muted">Nobody found.</p>';
+    });
+  };
+}
+
+// ---- My Attendance: who I am, a live clock, and my day-by-day record ------------------------------
+async function myAttendancePage(id) {
+  const [home, profile, shifts] = await Promise.all([
+    api("/home"),
+    api("/me"),
+    api("/shifts"),
+  ]);
+  if (id !== renderId) return;
+  const p = home.me || {};
+  const hhmm = (ms) =>
+    `${String(Math.floor(ms / 3600000)).padStart(2, "0")}:${String(Math.floor((ms % 3600000) / 60000)).padStart(2, "0")}`;
+  const status = (s) =>
+    !s.out_at
+      ? ["Working", "W"]
+      : s.day_type === "half_day"
+        ? ["Half Day", "HD"]
+        : ["Present", "P"];
+  let size = 10,
+    pageNo = 0;
+  const draw = () => {
+    const rows = shifts.slice(pageNo * size, pageNo * size + size);
+    const pages = Math.max(1, Math.ceil(shifts.length / size));
+    document.querySelector("#att-table").innerHTML = shifts.length
+      ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Workplace</th><th>Sign-In-Time</th><th>Sign-Out-Time</th><th>Present Hours (HH:MM)</th><th>Att. Status</th><th>Status</th></tr></thead><tbody>${rows
+          .map((s) => {
+            const [label, code] = status(s);
+            return `<tr><td>${fmtDate(s.in_at.slice(0, 10))}</td><td>${esc(s.workplace_name || "—")}</td><td>${time(s.in_at)}</td><td>${s.out_at ? time(s.out_at) : "—"}</td><td>${s.out_at ? hhmm(Date.parse(s.out_at) - Date.parse(s.in_at)) : "—"}</td><td>${label}</td><td><span class="pill ${code === "P" ? "" : "neutral"}">${code}</span></td></tr>`;
+          })
+          .join(
+            "",
+          )}</tbody></table></div><div class="pager"><button class="secondary" id="att-prev" ${pageNo ? "" : "disabled"}>Prev</button><button class="secondary" id="att-next" ${pageNo + 1 < pages ? "" : "disabled"}>Next</button><span class="muted">Page ${pageNo + 1} of ${pages}</span><select id="att-size" aria-label="Rows per page">${[10, 20, 30, 40, 50].map((n) => `<option ${n === size ? "selected" : ""}>${n}</option>`).join("")}</select></div>`
+      : empty("No attendance yet", "Your punches from the mobile app appear here.");
+    document.querySelector("#att-prev")?.addEventListener("click", () => {
+      pageNo -= 1;
+      draw();
+    });
+    document.querySelector("#att-next")?.addEventListener("click", () => {
+      pageNo += 1;
+      draw();
+    });
+    document.querySelector("#att-size")?.addEventListener("change", (e) => {
+      size = Number(e.target.value);
+      pageNo = 0;
+      draw();
+    });
+  };
+  const open = profile.openShift;
+  document.querySelector("#content").innerHTML =
+    crumb("Attendance / My Attendance") +
+    `<div class="card"><h2>Attendance Details</h2><div class="emp-strip"><span class="avatar">${initials(p.name || me.name)}</span><div><strong>${esc(p.name || me.name)}</strong></div><div>${esc(p.employee_code || "—")}<small>Employee Code</small></div><div>${esc(p.department || "—")}<small>Department</small></div><div>${esc(p.designation || "—")}<small>Designation</small></div><div>${esc(p.branch || profile.workplace?.name || "—")}<small>Location</small></div><div class="clock" id="att-clock"></div></div><p class="muted">${open ? `Already signed in at ${time(open.in_at)}.` : "Not signed in. Attendance is marked from the company mobile app."}</p></div><div class="card" id="att-table"></div>`;
+  const tick = () => {
+    const c = document.querySelector("#att-clock");
+    if (!c) return clearInterval(timer);
+    c.textContent = new Intl.DateTimeFormat("en-GB", {
+      timeZone: config.timezone,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(new Date());
+  };
+  const timer = setInterval(tick, 1000);
+  tick();
+  draw();
 }
 // Start once every deferred script has run (they share this page's scope); an early
 // start could use a function from a later script before it exists.
