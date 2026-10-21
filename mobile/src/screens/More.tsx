@@ -4,7 +4,6 @@ import {
   Alert,
   Linking,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -22,6 +21,10 @@ export type Api = <T>(
 type Props = {
   api: Api;
   userId: number;
+  section: Section;
+  onSection: (s: Section) => void;
+  onPunch: () => void;
+  onCounts: (alerts: number, messages: number) => void;
   onSignOut: () => void;
   onPassword: () => void;
 };
@@ -30,6 +33,7 @@ type Balance = {
   leave_type_id: number;
   name: string;
   code: string;
+  pending?: number;
   balance: number | null;
   available: number | null;
   unlimited: boolean;
@@ -163,7 +167,9 @@ type BotAnswer = {
 };
 type BotEntry = { key: string; question?: string; answer?: BotAnswer; error?: string };
 
-const SECTIONS = [
+export const SECTIONS = [
+  "Home",
+  "My Attendance",
   "Leave",
   "Messages",
   "Ask Laxmi",
@@ -174,7 +180,38 @@ const SECTIONS = [
   "Alerts",
   "Profile",
 ] as const;
-type Section = (typeof SECTIONS)[number];
+export type Section = (typeof SECTIONS)[number];
+// The phone menu, grouped like the web portal and the company's earlier HR portal.
+// "Punch" is the attendance screen itself, drawn by the parent.
+export const MENU: [string, [Section | "Punch", string][]][] = [
+  ["Home", [["Home", "Home"]]],
+  [
+    "Attendance",
+    [
+      ["Punch", "Punch In / Out"],
+      ["My Attendance", "My Attendance"],
+      ["Requests", "Attendance Requests"],
+    ],
+  ],
+  ["Leave", [["Leave", "My Leaves"]]],
+  ["TDS", [["Payslips", "Payslips"]]],
+  [
+    "Employee",
+    [
+      ["Profile", "My Profile"],
+      ["Directory", "Directory & Referrals"],
+    ],
+  ],
+  [
+    "Connect",
+    [
+      ["Messages", "Messages"],
+      ["Ask Laxmi", "Ask Laxmi"],
+      ["Helpdesk", "Helpdesk"],
+      ["Alerts", "Alerts"],
+    ],
+  ],
+];
 const inr = (n: number) =>
   "₹" +
   new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(n ?? 0);
@@ -216,7 +253,7 @@ function Btn({
       onPress={onPress}
       style={[s.btn, secondary && s.btnSecondary, disabled && { opacity: 0.5 }]}
     >
-      <Text style={[s.btnText, secondary && { color: "#22684f" }]}>
+      <Text style={[s.btnText, secondary && { color: "#4e5aa8" }]}>
         {title}
       </Text>
     </Pressable>
@@ -258,8 +295,16 @@ function Field({
 }
 const Pill = ({ text }: { text: string }) => <Text style={s.pill}>{text}</Text>;
 
-export default function More({ api, userId, onSignOut, onPassword }: Props) {
-  const [section, setSection] = useState<Section>("Leave");
+export default function More({
+  api,
+  userId,
+  section,
+  onSection,
+  onPunch,
+  onCounts,
+  onSignOut,
+  onPassword,
+}: Props) {
   const [unread, setUnread] = useState(0);
   const [chatUnread, setChatUnread] = useState(0);
   useEffect(() => {
@@ -272,32 +317,24 @@ export default function More({ api, userId, onSignOut, onPassword }: Props) {
         .then((r) => setChatUnread(Number(r.unread)))
         .catch(() => {});
   }, [api, section]);
+  useEffect(() => {
+    onCounts(unread, chatUnread);
+  }, [unread, chatUnread, onCounts]);
   return (
     <View style={{ gap: 14 }}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ gap: 8 }}
-      >
-        {SECTIONS.map((name) => (
-          <Pressable
-            key={name}
-            onPress={() => setSection(name)}
-            style={[s.chip, section === name && s.chipOn]}
-          >
-            <Text style={[s.chipText, section === name && { color: "#fff" }]}>
-              {name}
-              {name === "Alerts" && unread ? " (" + unread + ")" : ""}
-              {name === "Messages" && chatUnread ? " (" + chatUnread + ")" : ""}
-            </Text>
-          </Pressable>
-        ))}
-      </ScrollView>
+      <Text style={s.crumb}>
+        {MENU.find(([, items]) => items.some(([id]) => id === section))?.[0]}
+        {section === "Home" ? "" : " / " + section}
+      </Text>
+      {section === "Home" && (
+        <HomeScreen api={api} onSection={onSection} onPunch={onPunch} />
+      )}
+      {section === "My Attendance" && <MyAttendanceScreen api={api} />}
       {section === "Leave" && <LeaveScreen api={api} />}
       {section === "Messages" && (
         <MessagesScreen api={api} userId={userId} onUnread={setChatUnread} />
       )}
-      {section === "Ask Laxmi" && <LaxmiScreen api={api} onGoto={setSection} />}
+      {section === "Ask Laxmi" && <LaxmiScreen api={api} onGoto={onSection} />}
       {section === "Payslips" && <PayslipsScreen api={api} />}
       {section === "Requests" && <RequestsScreen api={api} />}
       {section === "Directory" && <DirectoryScreen api={api} />}
@@ -343,7 +380,7 @@ function useLoad<T>(load: () => Promise<T>) {
 }
 const Status = ({ loading, error }: { loading: boolean; error: string }) =>
   loading ? (
-    <ActivityIndicator color="#17694f" />
+    <ActivityIndicator color="#4e5aa8" />
   ) : error ? (
     <Text style={s.error}>{error}</Text>
   ) : null;
@@ -361,6 +398,439 @@ async function attempt(fn: () => Promise<unknown>, done?: string) {
   }
 }
 
+// ---- home -----------------------------------------------------------------------------------
+// The same cards as the web Home page: employee search, leave balance, announcements,
+// holidays, birthdays, the reporting line and today's attendance.
+type HomePerson = {
+  id: number;
+  name: string;
+  employee_code?: string | null;
+  designation?: string | null;
+  department?: string | null;
+  branch?: string | null;
+};
+type HomeData = {
+  me: HomePerson | null;
+  month: number;
+  birthdays: (HomePerson & { day: number })[];
+  joiners: (HomePerson & { date_of_joining: string })[];
+  org: { manager: HomePerson | null; reports: HomePerson[] };
+};
+type Announcement = {
+  id: number;
+  title: string;
+  body: string;
+  pinned: number | boolean;
+  created_at: string;
+  author: string | null;
+};
+type HolidayRow = {
+  date: string;
+  name: string;
+  optional?: boolean;
+  branch?: string;
+};
+type TodayInfo = {
+  openShift: { in_at: string; workplace_name: string } | null;
+  todayShift: { in_at: string; out_at: string | null } | null;
+  workplace: { name: string } | null;
+};
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+const DOTS = ["#222", "#c95bb8", "#d9303e", "#1e9be0", "#2f9d62", "#e08a1e"];
+const dmy = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
+const initialsOf = (name: string) =>
+  name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("");
+const clock = (iso: string) =>
+  new Intl.DateTimeFormat("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(iso));
+
+function HomeScreen({
+  api,
+  onSection,
+  onPunch,
+}: {
+  api: Api;
+  onSection: (s: Section) => void;
+  onPunch: () => void;
+}) {
+  const year = new Date().getFullYear();
+  const home = useLoad(() => api<HomeData>("/home"));
+  const bal = useLoad(() => api<Balance[]>("/leave/balances"));
+  const news = useLoad(() => api<Announcement[]>("/announcements"));
+  const hol = useLoad(() => api<HolidayRow[]>("/holidays?year=" + year));
+  const today = useLoad(() => api<TodayInfo>("/me"));
+  const [optional, setOptional] = useState(false);
+  const [code, setCode] = useState(""),
+    [name, setName] = useState("");
+  const [found, setFound] = useState<Person[] | null>(null);
+  const search = async () => {
+    const c = code.trim().toLowerCase(),
+      n = name.trim().toLowerCase();
+    if (!c && !n) return;
+    try {
+      const rows = await api<Person[]>(
+        "/directory?q=" + encodeURIComponent(c || n),
+      );
+      setFound(
+        rows.filter(
+          (p) =>
+            (!c || (p.employee_code ?? "").toLowerCase().includes(c)) &&
+            (!n || p.name.toLowerCase().includes(n)),
+        ),
+      );
+    } catch (e) {
+      Alert.alert("Could not search", errorText(e));
+    }
+  };
+  const list = bal.data ?? [];
+  const total = list
+    .filter((b) => !b.unlimited)
+    .reduce((n, b) => n + Number(b.available ?? 0), 0);
+  const holidays = (hol.data ?? []).filter((h) => !!h.optional === optional);
+  const open = today.data?.openShift,
+    done = today.data?.todayShift;
+  const node = (p: HomePerson, me?: boolean) => (
+    <View key={p.id} style={[s.orgNode, me && s.orgMe]}>
+      <Text style={s.strong}>{p.name}</Text>
+      <Text style={s.note}>{p.designation || p.employee_code || ""}</Text>
+    </View>
+  );
+  return (
+    <>
+      <View style={s.card}>
+        <Text style={s.heading}>Employee Search</Text>
+        <Field label="Code" value={code} onChange={setCode} />
+        <Field label="Name" value={name} onChange={setName} />
+        <Btn title="Search" onPress={() => void search()} />
+        {found?.length === 0 && <Text style={s.note}>Nobody found.</Text>}
+        {(found ?? []).slice(0, 30).map((p) => (
+          <View key={p.id} style={s.row}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.strong}>
+                {p.name}
+                {p.employee_code ? " (" + p.employee_code + ")" : ""}
+              </Text>
+              <Text style={s.note}>
+                {[p.designation_name, p.department_name]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </Text>
+            </View>
+            {!!p.phone && (
+              <Text
+                style={s.link}
+                onPress={() => void Linking.openURL("tel:" + p.phone)}
+              >
+                Call
+              </Text>
+            )}
+          </View>
+        ))}
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>Today</Text>
+        <Pill
+          text={open ? "Working now" : done ? "Punched out" : "Not punched in"}
+        />
+        <Text style={s.note}>
+          {open
+            ? "Signed in at " + clock(open.in_at) + " · " + open.workplace_name
+            : done
+              ? "Worked " +
+                clock(done.in_at) +
+                " – " +
+                (done.out_at ? clock(done.out_at) : "")
+              : (today.data?.workplace?.name ?? "No workplace assigned")}
+        </Text>
+        <Btn title={open ? "Punch out →" : "Punch in →"} onPress={onPunch} />
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>My Leave Balance</Text>
+        <View style={s.row}>
+          <Text style={s.note}>Leave Summary For Year</Text>
+          <Text style={s.strong}>{year}</Text>
+        </View>
+        <Status loading={bal.loading} error={bal.error} />
+        {list.map((b, i) => (
+          <View key={b.leave_type_id} style={s.row}>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <View
+                  style={[s.dot, { backgroundColor: DOTS[i % DOTS.length] }]}
+                />
+                <Text style={s.strong}>
+                  {b.code ? b.code + " (" + b.name + ")" : b.name}
+                </Text>
+              </View>
+              <Text style={[s.note, { marginLeft: 20 }]}>
+                {b.unlimited ? "No limit" : (b.available ?? 0) + " Leaves"}
+              </Text>
+            </View>
+            <Text style={s.applied}>{(b.pending ?? 0) + " Applied"}</Text>
+          </View>
+        ))}
+        <View style={s.row}>
+          <Text style={s.strong}>Total:</Text>
+          <Text style={s.strong}>{total} Days</Text>
+        </View>
+        <Btn title="Apply for leave" secondary onPress={() => onSection("Leave")} />
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>Company Announcement</Text>
+        <Status loading={news.loading} error={news.error} />
+        {(news.data ?? []).map((a) => (
+          <View key={"a" + a.id} style={s.feed}>
+            <Text style={s.feedTitle}>
+              {a.pinned ? "📌 " : "📣 "}
+              {a.title}
+            </Text>
+            <Text style={s.body}>{a.body}</Text>
+            <Text style={s.note}>
+              {(a.author ?? "") + " · " + dateText(a.created_at)}
+            </Text>
+          </View>
+        ))}
+        {(home.data?.joiners ?? []).map((j) => (
+          <View key={"j" + j.id} style={s.feed}>
+            <Text style={s.feedTitle}>👤 New Employee</Text>
+            <Text style={s.body}>
+              {j.name}
+              {j.employee_code ? " (" + j.employee_code + ")" : ""} has joined
+              {j.department ? " in " + j.department + " department" : ""}
+            </Text>
+            <Text style={s.note}>{dateText(j.date_of_joining)}</Text>
+          </View>
+        ))}
+        {!news.loading &&
+          (news.data ?? []).length === 0 &&
+          (home.data?.joiners ?? []).length === 0 && (
+            <Text style={s.note}>No announcements yet.</Text>
+          )}
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>Holiday List</Text>
+        <View style={s.wrap}>
+          {[false, true].map((o) => (
+            <Pressable
+              key={String(o)}
+              onPress={() => setOptional(o)}
+              style={[s.chip, optional === o && s.chipOn]}
+            >
+              <Text style={[s.chipText, optional === o && { color: "#fff" }]}>
+                {o ? "Optional Holiday" : "Fixed Holiday"}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        <Status loading={hol.loading} error={hol.error} />
+        {holidays.map((h) => (
+          <View key={h.date + h.name} style={s.row}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.strong}>{h.name}</Text>
+              <Text style={s.note}>{dmy(h.date)}</Text>
+            </View>
+            <Text style={s.note}>{h.branch ?? ""}</Text>
+          </View>
+        ))}
+        {!hol.loading && holidays.length === 0 && (
+          <Text style={s.note}>
+            No {optional ? "optional " : ""}holidays added for {year}.
+          </Text>
+        )}
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>Birthdays 🎉</Text>
+        <Status loading={home.loading} error={home.error} />
+        {(home.data?.birthdays ?? []).map((p) => (
+          <View key={p.id} style={s.row}>
+            <View style={s.avatar}>
+              <Text style={s.avatarText}>{initialsOf(p.name)}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.strong}>{p.name}</Text>
+              <Text style={s.note}>
+                {[p.designation, p.branch].filter(Boolean).join(" · ")}
+              </Text>
+            </View>
+            <Text style={s.note}>
+              {p.day} {MONTHS[(home.data?.month ?? 1) - 1]}
+            </Text>
+          </View>
+        ))}
+        {!home.loading && (home.data?.birthdays ?? []).length === 0 && (
+          <Text style={s.note}>
+            No birthdays in {MONTHS[(home.data?.month ?? 1) - 1]}.
+          </Text>
+        )}
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>Organisation Structure</Text>
+        {home.data && (
+          <View style={{ alignItems: "center", gap: 6 }}>
+            {home.data.org.manager && node(home.data.org.manager)}
+            {home.data.org.manager && <View style={s.orgLine} />}
+            {home.data.me && node(home.data.me, true)}
+            {home.data.org.reports.length > 0 && <View style={s.orgLine} />}
+            <View style={[s.wrap, { justifyContent: "center" }]}>
+              {home.data.org.reports.map((p) => node(p))}
+            </View>
+          </View>
+        )}
+      </View>
+    </>
+  );
+}
+
+// ---- my attendance --------------------------------------------------------------------------
+type ShiftRow = {
+  id: number;
+  workplace_name: string;
+  in_at: string;
+  out_at: string | null;
+  day_type?: "full_day" | "half_day" | null;
+};
+function MyAttendanceScreen({ api }: { api: Api }) {
+  const home = useLoad(() => api<HomeData>("/home"));
+  const shifts = useLoad(() => api<ShiftRow[]>("/shifts"));
+  const [size, setSize] = useState(10);
+  const [pageNo, setPageNo] = useState(0);
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const p = home.data?.me;
+  const all = shifts.data ?? [];
+  const pages = Math.max(1, Math.ceil(all.length / size));
+  const rows = all.slice(pageNo * size, pageNo * size + size);
+  const hhmm = (ms: number) =>
+    String(Math.floor(ms / 3600000)).padStart(2, "0") +
+    ":" +
+    String(Math.floor((ms % 3600000) / 60000)).padStart(2, "0");
+  return (
+    <>
+      <View style={s.card}>
+        <Text style={s.heading}>Attendance Details</Text>
+        {p && (
+          <>
+            <Text style={s.strong}>{p.name}</Text>
+            {(
+              [
+                ["Employee Code", p.employee_code],
+                ["Department", p.department],
+                ["Designation", p.designation],
+                ["Location", p.branch],
+              ] as const
+            ).map(([label, value]) => (
+              <View key={label} style={s.row}>
+                <Text style={s.note}>{label}</Text>
+                <Text style={s.strong}>{value || "—"}</Text>
+              </View>
+            ))}
+          </>
+        )}
+        <Text style={s.clock}>
+          {new Intl.DateTimeFormat("en-GB", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          }).format(now)}
+        </Text>
+      </View>
+      <View style={s.card}>
+        <Status loading={shifts.loading} error={shifts.error} />
+        {!shifts.loading && all.length === 0 && (
+          <Text style={s.note}>Your punches appear here.</Text>
+        )}
+        {rows.map((r) => {
+          const code = !r.out_at ? "W" : r.day_type === "half_day" ? "HD" : "P";
+          return (
+            <View key={r.id} style={s.row}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.strong}>{dateText(r.in_at)}</Text>
+                <Text style={s.note}>
+                  {"In " +
+                    clock(r.in_at) +
+                    " · Out " +
+                    (r.out_at ? clock(r.out_at) : "—") +
+                    (r.out_at
+                      ? " · " +
+                        hhmm(Date.parse(r.out_at) - Date.parse(r.in_at)) +
+                        " h"
+                      : "")}
+                </Text>
+                <Text style={s.note}>{r.workplace_name}</Text>
+              </View>
+              <Pill
+                text={
+                  code === "P" ? "Present" : code === "HD" ? "Half Day" : "Working"
+                }
+              />
+            </View>
+          );
+        })}
+        {all.length > 0 && (
+          <View style={[s.row, { borderBottomWidth: 0 }]}>
+            <Btn
+              title="Prev"
+              secondary
+              disabled={pageNo === 0}
+              onPress={() => setPageNo(pageNo - 1)}
+            />
+            <Text style={s.note}>
+              Page {pageNo + 1} of {pages}
+            </Text>
+            <Btn
+              title="Next"
+              secondary
+              disabled={pageNo + 1 >= pages}
+              onPress={() => setPageNo(pageNo + 1)}
+            />
+          </View>
+        )}
+        {all.length > 10 && (
+          <View style={s.wrap}>
+            {[10, 20, 50].map((n) => (
+              <Pressable
+                key={n}
+                onPress={() => {
+                  setSize(n);
+                  setPageNo(0);
+                }}
+                style={[s.chip, size === n && s.chipOn]}
+              >
+                <Text style={[s.chipText, size === n && { color: "#fff" }]}>
+                  {n} per page
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+      </View>
+    </>
+  );
+}
+
 // ---- leave ----------------------------------------------------------------------------------
 function LeaveScreen({ api }: { api: Api }) {
   const year = new Date().getFullYear();
@@ -373,6 +843,12 @@ function LeaveScreen({ api }: { api: Api }) {
     [to, setTo] = useState(""),
     [reason, setReason] = useState("");
   const [half, setHalf] = useState<"" | "first" | "second">("");
+  const [address, setAddress] = useState(""),
+    [contact, setContact] = useState("");
+  const [cover, setCover] = useState<{ id: number; name: string } | null>(
+    null,
+  );
+  const [picking, setPicking] = useState(false);
   const [working, setWorking] = useState(false);
   const options =
     bal.data?.map((b) => ({ id: b.leave_type_id, name: b.name })) ?? [];
@@ -446,11 +922,37 @@ function LeaveScreen({ api }: { api: Api }) {
               ))}
             </View>
             <Field
-              label="Reason (optional)"
+              label="For the following reason"
               value={reason}
               onChange={setReason}
               multiline
             />
+            <Field
+              label="My address on leave will be"
+              value={address}
+              onChange={setAddress}
+            />
+            <Field
+              label="Contact No."
+              value={contact}
+              onChange={setContact}
+              keyboardType="phone-pad"
+            />
+            <Text style={s.label}>In my absence, work handled by</Text>
+            <Pressable onPress={() => setPicking(!picking)} style={s.input}>
+              <Text style={{ color: cover ? "#2a2c3a" : "#9a9cab" }}>
+                {cover ? cover.name : "Choose a colleague (optional)"}
+              </Text>
+            </Pressable>
+            {picking && (
+              <PeoplePicker
+                api={api}
+                onPick={(id, name) => {
+                  setCover({ id, name });
+                  setPicking(false);
+                }}
+              />
+            )}
             <Btn
               title={working ? "Sending…" : "Send request"}
               disabled={working || !typeId || !from}
@@ -464,6 +966,9 @@ function LeaveScreen({ api }: { api: Api }) {
                       to_date: half ? from : to || from,
                       half_day: half || undefined,
                       reason: reason || undefined,
+                      address_on_leave: address || undefined,
+                      contact_on_leave: contact || undefined,
+                      handover_to: cover?.id,
                     }),
                   "Leave request sent for approval.",
                 );
@@ -474,6 +979,9 @@ function LeaveScreen({ api }: { api: Api }) {
                   setTo("");
                   setReason("");
                   setHalf("");
+                  setAddress("");
+                  setContact("");
+                  setCover(null);
                   void reqs.reload();
                   void bal.reload();
                 }
@@ -792,7 +1300,7 @@ function MessagesScreen({
             <Text style={s.link}>Back</Text>
           </Pressable>
         </View>
-        {!info && <ActivityIndicator color="#17694f" />}
+        {!info && <ActivityIndicator color="#4e5aa8" />}
         {earlier && (
           <Btn
             title="Show earlier messages"
@@ -928,7 +1436,7 @@ function PeoplePicker({
   onPick,
 }: {
   api: Api;
-  onPick: (id: number) => void;
+  onPick: (id: number, name: string) => void;
 }) {
   const [q, setQ] = useState("");
   const [people, setPeople] = useState<ChatPerson[] | null>(null);
@@ -955,7 +1463,11 @@ function PeoplePicker({
       {!!error && <Text style={s.error}>{error}</Text>}
       {people?.length === 0 && <Text style={s.note}>Nobody found.</Text>}
       {(people ?? []).map((p) => (
-        <Pressable key={p.id} style={s.row} onPress={() => onPick(p.id)}>
+        <Pressable
+          key={p.id}
+          style={s.row}
+          onPress={() => onPick(p.id, p.name)}
+        >
           <View style={{ flex: 1 }}>
             <Text style={s.strong}>{p.name}</Text>
             <Text style={s.note}>
@@ -1706,7 +2218,7 @@ function AlertsScreen({
           }}
         >
           <View style={{ flex: 1 }}>
-            <Text style={[s.strong, !n.read_at && { color: "#17694f" }]}>
+            <Text style={[s.strong, !n.read_at && { color: "#4e5aa8" }]}>
               {!n.read_at ? "● " : ""}
               {n.title}
             </Text>
@@ -1765,44 +2277,44 @@ const s = StyleSheet.create({
   card: {
     backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#e1eae3",
+    borderColor: "#eceaf1",
     borderRadius: 20,
     padding: 20,
     gap: 12,
   },
   heading: {
-    color: "#213c30",
+    color: "#2a2c3a",
     fontSize: 21,
     fontWeight: "600",
     letterSpacing: -0.4,
   },
-  label: { fontSize: 12, fontWeight: "600", color: "#496252" },
+  label: { fontSize: 12, fontWeight: "600", color: "#555867" },
   input: {
-    backgroundColor: "#f9fbf9",
-    borderColor: "#dce6df",
+    backgroundColor: "#fafafc",
+    borderColor: "#e1e0e8",
     borderWidth: 1,
     borderRadius: 10,
     padding: 13,
-    color: "#213c30",
+    color: "#2a2c3a",
     fontSize: 15,
   },
   btn: {
     paddingVertical: 15,
     paddingHorizontal: 20,
-    backgroundColor: "#17694f",
+    backgroundColor: "#4e5aa8",
     borderRadius: 12,
     alignItems: "center",
   },
-  btnSecondary: { backgroundColor: "#e8f0e9" },
+  btnSecondary: { backgroundColor: "#eceefa" },
   btnText: { fontSize: 15, color: "#fff", fontWeight: "600" },
   chip: {
     paddingVertical: 9,
     paddingHorizontal: 14,
     borderRadius: 18,
-    backgroundColor: "#e8f0e9",
+    backgroundColor: "#eceefa",
   },
-  chipOn: { backgroundColor: "#17694f" },
-  chipText: { color: "#22684f", fontWeight: "600", fontSize: 13 },
+  chipOn: { backgroundColor: "#4e5aa8" },
+  chipText: { color: "#4e5aa8", fontWeight: "600", fontSize: 13 },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   row: {
     flexDirection: "row",
@@ -1811,11 +2323,11 @@ const s = StyleSheet.create({
     gap: 10,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderColor: "#eef3ef",
+    borderColor: "#f0eff4",
   },
-  strong: { fontWeight: "600", color: "#3b5946", fontSize: 14 },
-  note: { color: "#7a8c7e", fontSize: 12, lineHeight: 18 },
-  link: { color: "#17694f", fontWeight: "600", fontSize: 13 },
+  strong: { fontWeight: "600", color: "#3a3c4a", fontSize: 14 },
+  note: { color: "#7a7d8c", fontSize: 12, lineHeight: 18 },
+  link: { color: "#4e5aa8", fontWeight: "600", fontSize: 13 },
   error: {
     color: "#894a35",
     backgroundColor: "#f9eae3",
@@ -1823,8 +2335,8 @@ const s = StyleSheet.create({
     borderRadius: 10,
   },
   pill: {
-    backgroundColor: "#e8f0e9",
-    color: "#22684f",
+    backgroundColor: "#eceefa",
+    color: "#4e5aa8",
     fontSize: 11,
     fontWeight: "600",
     paddingVertical: 3,
@@ -1835,30 +2347,74 @@ const s = StyleSheet.create({
     alignSelf: "flex-start",
   },
   net: {
-    backgroundColor: "#193c30",
+    backgroundColor: "#ac051b",
     borderRadius: 12,
     padding: 16,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  netLabel: { color: "#cfe5d6", fontWeight: "600" },
+  netLabel: { color: "#fde7ea", fontWeight: "600" },
   netValue: { color: "#fff", fontSize: 22, fontWeight: "700" },
-  bubble: { backgroundColor: "#f1f6f1", borderRadius: 12, padding: 12, gap: 4 },
+  bubble: { backgroundColor: "#f3f2f7", borderRadius: 12, padding: 12, gap: 4 },
+  crumb: {
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    fontWeight: "600",
+    color: "#2a2c3a",
+  },
+  dot: { width: 12, height: 12, borderRadius: 6, marginRight: 8 },
+  applied: {
+    backgroundColor: "#f1f1f4",
+    borderRadius: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 9,
+    fontSize: 12,
+    color: "#3a3c4a",
+    overflow: "hidden",
+  },
+  feed: {
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderColor: "#f0eff4",
+    gap: 3,
+  },
+  feedTitle: { color: "#1d6fd6", fontWeight: "700", fontSize: 14 },
+  orgNode: {
+    backgroundColor: "#d9ecf7",
+    borderColor: "#b9d7ea",
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    minWidth: 140,
+  },
+  orgMe: { backgroundColor: "#fde7ea", borderColor: "#f3b8c0" },
+  orgLine: { width: 1, height: 14, backgroundColor: "#b9b9c6" },
+  clock: {
+    fontSize: 28,
+    fontWeight: "700",
+    color: "#2a2c3a",
+    textAlign: "right",
+    fontVariant: ["tabular-nums"],
+  },
   msg: { maxWidth: "90%", alignSelf: "flex-start" },
-  msgMine: { alignSelf: "flex-end", backgroundColor: "#dcefe3" },
-  body: { color: "#213c30", fontSize: 15, lineHeight: 21 },
+  msgMine: { alignSelf: "flex-end", backgroundColor: "#e3e6f8" },
+  body: { color: "#2a2c3a", fontSize: 15, lineHeight: 21 },
   avatar: {
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: "#e8f0e9",
+    backgroundColor: "#eceefa",
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarText: { color: "#22684f", fontWeight: "700", fontSize: 13 },
+  avatarText: { color: "#4e5aa8", fontWeight: "700", fontSize: 13 },
   count: {
-    backgroundColor: "#17694f",
+    backgroundColor: "#4e5aa8",
     color: "#fff",
     fontSize: 11,
     fontWeight: "700",
@@ -1873,14 +2429,14 @@ const s = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#e1eae3",
+    borderColor: "#eceaf1",
     padding: 12,
     gap: 10,
     marginTop: 4,
   },
   callout: {
-    color: "#22684f",
-    backgroundColor: "#e8f0e9",
+    color: "#4e5aa8",
+    backgroundColor: "#eceefa",
     padding: 12,
     borderRadius: 10,
     overflow: "hidden",

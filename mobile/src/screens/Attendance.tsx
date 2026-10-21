@@ -1,4 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -23,12 +29,14 @@ import * as Crypto from "expo-crypto";
 import Constants from "expo-constants";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Notifications from "expo-notifications";
-import More from "./More";
+import More, { MENU, type Section } from "./More";
 type User = {
   id: number;
   name: string;
   role: string;
   must_change_password: boolean;
+  employee_code?: string | null;
+  designation?: string | null;
 };
 type Shift = {
   id: number;
@@ -78,7 +86,7 @@ function Button({
       onPress={onPress}
       style={[s.button, secondary && s.secondary, disabled && { opacity: 0.5 }]}
     >
-      <Text style={[s.buttonText, secondary && { color: "#22684f" }]}>
+      <Text style={[s.buttonText, secondary && { color: "#4e5aa8" }]}>
         {title}
       </Text>
     </Pressable>
@@ -91,19 +99,19 @@ export default function Attendance() {
     pushToken = useRef<string | null>(null),
     pushRegistered = useRef(false),
     identity = useRef<Identity | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null),
-    [shifts, setShifts] = useState<Shift[]>([]);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(true);
-  const [refreshedAt, setRefreshedAt] = useState(0);
   const [email, setEmail] = useState(""),
     [password, setPassword] = useState(""),
     [nextPassword, setNextPassword] = useState("");
   const [changing, setChanging] = useState(false),
     [message, setMessage] = useState(""),
-    [timezone, setTimezone] = useState("Asia/Kolkata"),
-    [history, setHistory] = useState(false),
-    [more, setMore] = useState(false);
+    [timezone, setTimezone] = useState("Asia/Kolkata");
+  // Which screen the menu has open: the punch screen, or one of More's sections.
+  const [view, setView] = useState<Section | "Punch">("Home"),
+    [menuOpen, setMenuOpen] = useState(false),
+    [counts, setCounts] = useState({ alerts: 0, messages: 0 });
   const [cameraPermission, requestCamera] = useCameraPermissions();
   const selfieResolver = useRef<((photo: string | null) => void) | null>(null);
   const cameraRef = useRef<CameraView | null>(null);
@@ -152,7 +160,6 @@ export default function Attendance() {
     sessionRef.current = null;
     setToken(null);
     setProfile(null);
-    setShifts([]);
     setPassword("");
     setNextPassword("");
     await SecureStore.deleteItemAsync(KEY);
@@ -237,9 +244,7 @@ export default function Attendance() {
     if (!session) return;
     const p = await api<Profile>("/me", undefined, session);
     setProfile(p);
-    setRefreshedAt(Date.now());
     if (!p.user.must_change_password && p.user.role !== "super_admin") {
-      setShifts(await api<Shift[]>("/shifts", undefined, session));
       if (!pushRegistered.current) {
         pushRegistered.current = true;
         void registerPush(session);
@@ -464,6 +469,10 @@ export default function Attendance() {
           : "You are punched out. Your working hours are saved.",
       );
     });
+  const onCounts = useCallback(
+    (alerts: number, messages: number) => setCounts({ alerts, messages }),
+    [],
+  );
   const moreApi = useMemo(
     () =>
       <T,>(path: string, body?: object, method?: string) =>
@@ -475,6 +484,8 @@ export default function Attendance() {
   const open = profile?.openShift,
     done = profile?.todayShift;
   const passwordScreen = profile?.user.must_change_password || changing;
+  const employeeView =
+    !!profile && !passwordScreen && profile.user.role !== "super_admin";
   return (
     <SafeAreaView style={s.safe}>
       <StatusBar style="dark" />
@@ -494,6 +505,119 @@ export default function Attendance() {
           </View>
         </View>
       </Modal>
+      {employeeView && profile && (
+        <View style={s.topbar}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open menu"
+            onPress={() => setMenuOpen(true)}
+            hitSlop={10}
+          >
+            <Text style={s.burger}>☰</Text>
+          </Pressable>
+          <View style={{ flex: 1 }} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Alerts"
+            onPress={() => setView("Alerts")}
+            hitSlop={10}
+          >
+            <Text style={s.bell}>
+              🔔{counts.alerts ? " " + counts.alerts : ""}
+            </Text>
+          </Pressable>
+          <View style={s.avatar}>
+            <Text style={s.avatarText}>
+              {profile.user.name
+                .split(" ")
+                .filter(Boolean)
+                .slice(0, 2)
+                .map((w) => w[0].toUpperCase())
+                .join("")}
+            </Text>
+          </View>
+          <View style={{ maxWidth: 170 }}>
+            <Text style={s.barCode}>
+              {profile.user.employee_code || profile.user.name}
+            </Text>
+            <Text style={s.barSub} numberOfLines={2}>
+              {profile.user.designation ||
+                (profile.user.employee_code ? profile.user.name : "")}
+            </Text>
+          </View>
+        </View>
+      )}
+      <Modal
+        visible={menuOpen && employeeView}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuOpen(false)}
+      >
+        <View style={s.menuWrap}>
+          <View style={s.menu}>
+            <ScrollView>
+              <View style={s.menuBrand}>
+                <View style={s.logo}>
+                  <Text style={s.logoText}>L</Text>
+                </View>
+                <View>
+                  <Text style={s.menuBrandName}>LAXMI INDIA</Text>
+                  <Text style={s.menuBrandSub}>FINANCE</Text>
+                </View>
+              </View>
+              {MENU.map(([group, items]) => (
+                <View key={group} style={{ marginBottom: 6 }}>
+                  <Text style={s.menuGroup}>{group}</Text>
+                  {items.map(([id, label]) => (
+                    <Pressable
+                      key={id}
+                      onPress={() => {
+                        setView(id);
+                        setMenuOpen(false);
+                      }}
+                      style={[s.menuItem, view === id && s.menuItemOn]}
+                    >
+                      <Text style={s.menuText}>
+                        {label}
+                        {id === "Messages" && counts.messages
+                          ? " (" + counts.messages + ")"
+                          : ""}
+                        {id === "Alerts" && counts.alerts
+                          ? " (" + counts.alerts + ")"
+                          : ""}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ))}
+              <Text style={s.menuGroup}>Account</Text>
+              <Pressable
+                style={s.menuItem}
+                onPress={() => {
+                  setMenuOpen(false);
+                  setChanging(true);
+                }}
+              >
+                <Text style={s.menuText}>Change Password</Text>
+              </Pressable>
+              <Pressable
+                style={s.menuItem}
+                onPress={() => {
+                  setMenuOpen(false);
+                  void logout();
+                }}
+              >
+                <Text style={s.menuText}>Log Out</Text>
+              </Pressable>
+            </ScrollView>
+          </View>
+          <Pressable
+            style={{ flex: 1 }}
+            accessibilityLabel="Close menu"
+            onPress={() => setMenuOpen(false)}
+          />
+        </View>
+      </Modal>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -510,20 +634,23 @@ export default function Attendance() {
             ) : undefined
           }
         >
-          <View style={s.brand}>
-            <View style={s.logo}>
-              <Text style={s.logoText}>L</Text>
+          {!employeeView && (
+            <View style={s.brand}>
+              <View style={s.logo}>
+                <Text style={s.logoText}>L</Text>
+              </View>
+              <View>
+                <Text style={s.brandName}>Laxmi India</Text>
+                <Text style={s.eyebrow}>FINANCE LTD. · HRMS</Text>
+              </View>
             </View>
-            <View>
-              <Text style={s.brandName}>Laxmi India</Text>
-              <Text style={s.eyebrow}>FINANCE LTD. · HRMS</Text>
-            </View>
-          </View>
+          )}
           {loading ? (
-            <ActivityIndicator size="large" color="#17694f" />
+            <ActivityIndicator size="large" color="#4e5aa8" />
           ) : !token ? (
             <>
-              <Text style={s.title}>Your workday,{"\n"}in one place.</Text>
+              <Text style={s.title}>Employee Engagement Portal</Text>
+              <Text style={s.subtitle}>Creating a great place to work.</Text>
               <Text style={s.subtitle}>
                 Sign in to record attendance at your assigned workplace.
               </Text>
@@ -651,45 +778,21 @@ export default function Attendance() {
             </View>
           ) : (
             <>
-              <Text style={s.eyebrow}>YOUR WORKSPACE</Text>
-              <Text style={s.title}>
-                Hello, {profile.user.name.split(" ")[0]}.
-              </Text>
-              <Text style={s.subtitle}>
-                A little clarity for every workday.
-              </Text>
-              <View style={s.tabs}>
-                <Button
-                  title="Today"
-                  secondary={history || more}
-                  onPress={() => {
-                    setHistory(false);
-                    setMore(false);
-                  }}
-                />
-                <Button
-                  title="History"
-                  secondary={!history || more}
-                  onPress={() => {
-                    setHistory(true);
-                    setMore(false);
-                  }}
-                />
-                <Button
-                  title="More"
-                  secondary={!more}
-                  onPress={() => setMore(true)}
-                />
-              </View>
-              {more ? (
+              {view !== "Punch" ? (
                 <More
                   api={moreApi}
                   userId={profile.user.id}
+                  section={view}
+                  onSection={setView}
+                  onPunch={() => setView("Punch")}
+                  onCounts={onCounts}
                   onSignOut={() => void logout()}
                   onPassword={() => setChanging(true)}
                 />
-              ) : !history ? (
-                <View style={s.card}>
+              ) : (
+                <>
+                  <Text style={s.crumb}>Attendance / Punch In / Out</Text>
+                  <View style={s.card}>
                   <Text style={s.badge}>
                     {open
                       ? "● WORKING NOW"
@@ -761,70 +864,18 @@ export default function Attendance() {
                       (!open && !done && !profile.workplace)
                     }
                   />
-                </View>
-              ) : (
-                <View style={s.card}>
-                  <Text style={s.heading}>Recent attendance</Text>
-                  <Text style={s.note}>Latest 100 shifts · {timezone}</Text>
-                  {shifts.length === 0 ? (
-                    <Text style={s.subtitle}>
-                      Your recorded shifts will appear here.
-                    </Text>
-                  ) : (
-                    shifts.map((shift) => (
-                      <View key={shift.id} style={s.historyRow}>
-                        <Text style={s.siteName}>{shift.workplace_name}</Text>
-                        <Text style={s.note}>In: {time(shift.in_at)}</Text>
-                        <Text style={s.note}>
-                          Out:{" "}
-                          {shift.out_at ? time(shift.out_at) : "Still working"}
-                        </Text>
-                        {shift.day_type && (
-                          <Text style={s.note}>
-                            {shift.day_type === "half_day"
-                              ? "Half day (" +
-                                JSON.parse(shift.half_day_reasons || "[]")
-                                  .map((r: string) =>
-                                    r === "late_in" ? "late in" : "left early",
-                                  )
-                                  .join(", ") +
-                                ")"
-                              : "Full day"}
-                          </Text>
-                        )}
-                        <Text style={s.siteName}>
-                          {(
-                            ((shift.out_at
-                              ? Date.parse(shift.out_at)
-                              : refreshedAt) -
-                              Date.parse(shift.in_at)) /
-                            3600000
-                          ).toFixed(2)}{" "}
-                          hours{!shift.out_at ? " · as of last refresh" : ""}
-                        </Text>
-                      </View>
-                    ))
-                  )}
-                </View>
+                  <Button
+                    title="My Attendance"
+                    secondary
+                    onPress={() => setView("My Attendance")}
+                  />
+                  </View>
+                  <Text style={s.note}>
+                    Location is captured only at punch-in and punch-out. No
+                    background tracking. Pull down to refresh.
+                  </Text>
+                </>
               )}
-              <Text style={s.note}>
-                Location is captured only at punch-in and punch-out. No
-                background tracking. Pull down to refresh.
-              </Text>
-              <View style={s.tabs}>
-                <Button
-                  title="Password"
-                  secondary
-                  onPress={() => setChanging(true)}
-                  disabled={busy}
-                />
-                <Button
-                  title="Sign out"
-                  secondary
-                  onPress={logout}
-                  disabled={busy}
-                />
-              </View>
             </>
           )}
           {!!message && (
@@ -839,7 +890,7 @@ export default function Attendance() {
   );
 }
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#f5f8f5" },
+  safe: { flex: 1, backgroundColor: "#f8f7fa" },
   scroll: {
     flexGrow: 1,
     padding: 26,
@@ -858,70 +909,129 @@ const s = StyleSheet.create({
   logo: {
     width: 44,
     height: 44,
-    backgroundColor: "#193c30",
+    backgroundColor: "#ac051b",
     borderRadius: 13,
     alignItems: "center",
     justifyContent: "center",
   },
-  logoText: { fontSize: 28, color: "#e3f3e8", fontWeight: "600" },
-  brandName: { fontSize: 21, fontWeight: "700", color: "#213c30" },
-  eyebrow: { fontSize: 10, letterSpacing: 1.5, color: "#779282", marginTop: 4 },
+  logoText: { fontSize: 28, color: "#ffffff", fontWeight: "600" },
+  brandName: { fontSize: 21, fontWeight: "700", color: "#2a2c3a" },
+  eyebrow: { fontSize: 10, letterSpacing: 1.5, color: "#8a8c99", marginTop: 4 },
   title: {
     fontSize: 35,
     fontWeight: "600",
     letterSpacing: -1.2,
-    color: "#213c30",
+    color: "#2a2c3a",
   },
-  subtitle: { fontSize: 14, color: "#73847a", lineHeight: 23 },
+  subtitle: { fontSize: 14, color: "#6f7282", lineHeight: 23 },
   card: {
     backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#e1eae3",
+    borderColor: "#eceaf1",
     borderRadius: 20,
     padding: 23,
     gap: 15,
   },
-  label: { fontSize: 12, fontWeight: "600", color: "#496252" },
+  label: { fontSize: 12, fontWeight: "600", color: "#555867" },
   input: {
-    backgroundColor: "#f9fbf9",
-    borderColor: "#dce6df",
+    backgroundColor: "#fafafc",
+    borderColor: "#e1e0e8",
     borderWidth: 1,
     borderRadius: 10,
     padding: 15,
-    color: "#213c30",
+    color: "#2a2c3a",
     fontSize: 16,
   },
   button: {
     paddingVertical: 17,
     paddingHorizontal: 22,
-    backgroundColor: "#17694f",
+    backgroundColor: "#4e5aa8",
     borderRadius: 12,
     alignItems: "center",
     marginTop: 6,
   },
-  secondary: { backgroundColor: "#e8f0e9" },
+  secondary: { backgroundColor: "#eceefa" },
   buttonText: { fontSize: 15, color: "#fff", fontWeight: "600" },
-  note: { color: "#7a8c7e", fontSize: 12, lineHeight: 20 },
+  note: { color: "#7a7d8c", fontSize: 12, lineHeight: 20 },
   heading: {
-    color: "#213c30",
+    color: "#2a2c3a",
     fontSize: 25,
     fontWeight: "600",
     letterSpacing: -0.5,
   },
   badge: {
-    color: "#277751",
+    color: "#ac051b",
     fontSize: 10,
     letterSpacing: 1.3,
     fontWeight: "600",
     marginBottom: 10,
   },
-  siteName: { fontWeight: "600", fontSize: 15, color: "#3b5946" },
-  callout: { backgroundColor: "#f1f6f1", borderRadius: 10, padding: 15 },
+  siteName: { fontWeight: "600", fontSize: 15, color: "#3a3c4a" },
+  callout: { backgroundColor: "#f3f2f7", borderRadius: 10, padding: 15 },
   tabs: { flexDirection: "row", gap: 12 },
+  crumb: {
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    fontWeight: "600",
+    color: "#2a2c3a",
+  },
+  topbar: {
+    backgroundColor: "#24262f",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  burger: { color: "#fff", fontSize: 26 },
+  bell: { color: "#fff", fontSize: 18 },
+  avatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#e7e3f3",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarText: { color: "#4e5aa8", fontWeight: "700" },
+  barCode: { color: "#fff", fontWeight: "700", fontSize: 16 },
+  barSub: { color: "#d7d8df", fontSize: 11 },
+  menuWrap: {
+    flex: 1,
+    flexDirection: "row",
+    backgroundColor: "rgba(0,0,0,0.35)",
+  },
+  menu: { width: 280, backgroundColor: "#ac051b", paddingBottom: 30 },
+  menuBrand: {
+    backgroundColor: "#fff",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    padding: 16,
+    paddingTop: 48,
+    marginBottom: 10,
+  },
+  menuBrandName: { color: "#ac051b", fontWeight: "800", fontSize: 17 },
+  menuBrandSub: { color: "#ac051b", fontWeight: "700", letterSpacing: 2 },
+  menuGroup: {
+    color: "#fbd5da",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  menuItem: { paddingVertical: 11, paddingHorizontal: 26 },
+  menuItemOn: { backgroundColor: "#8c0416" },
+  menuText: { color: "#fff", fontSize: 15, fontWeight: "600" },
   historyRow: {
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderColor: "#e7eee8",
+    borderColor: "#f0eff4",
     gap: 7,
   },
   message: {
@@ -932,7 +1042,7 @@ const s = StyleSheet.create({
     lineHeight: 22,
   },
   footer: {
-    color: "#a0afa3",
+    color: "#a2a4b0",
     textAlign: "center",
     fontSize: 9,
     letterSpacing: 2,
