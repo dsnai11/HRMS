@@ -24,7 +24,12 @@ import Constants from "expo-constants";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Notifications from "expo-notifications";
 import More from "./More";
-type User = { name: string; role: string; must_change_password: boolean };
+type User = {
+  id: number;
+  name: string;
+  role: string;
+  must_change_password: boolean;
+};
 type Shift = {
   id: number;
   workplace_name: string;
@@ -679,6 +684,7 @@ export default function Attendance() {
               {more ? (
                 <More
                   api={moreApi}
+                  userId={profile.user.id}
                   onSignOut={() => void logout()}
                   onPassword={() => setChanging(true)}
                 />
