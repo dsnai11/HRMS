@@ -209,6 +209,66 @@ h3 {
   align-items: center;
   gap: 12px;
 }
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  min-width: 0;
+}
+.people-search {
+  position: relative;
+  width: 300px;
+  max-width: 40vw;
+}
+.people-search input {
+  width: 100%;
+}
+.people-out {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+  max-height: 420px;
+  overflow: auto;
+  padding: 6px;
+}
+.people-out button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  color: inherit;
+  border: 0;
+  padding: 8px;
+  border-radius: 8px;
+}
+.people-out button:hover {
+  background: var(--soft, #f3f6f2);
+}
+.people-out small {
+  display: block;
+  color: var(--muted);
+}
+.people-out p {
+  margin: 8px;
+}
+.announcement {
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+.announcement h3 {
+  margin: 0 0 6px;
+}
+.announcement p {
+  margin: 0 0 6px;
+}
 .avatar {
   background: #eee9dc;
   color: #706245;
@@ -591,6 +651,12 @@ dialog h2 {
   .topbar {
     height: 65px;
     padding: 0 20px;
+  }
+  .topbar-left > span {
+    display: none;
+  }
+  .people-search {
+    width: 170px;
   }
   .content {
     padding: 25px 18px;

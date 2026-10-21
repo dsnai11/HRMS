@@ -142,6 +142,82 @@ function login() {
     });
   };
 }
+// Search box in the top bar: finds anyone in the company from any page. HR opens
+// the person's 360° profile; everyone else sees what the directory shows.
+function peopleSearch() {
+  const box = document.querySelector("#people-q");
+  const out = document.querySelector("#people-out");
+  if (!box) return;
+  let timer, found = [];
+  const close = () => (out.hidden = true);
+  box.oninput = () => {
+    clearTimeout(timer);
+    const q = box.value.trim();
+    if (!q) return close();
+    timer = setTimeout(async () => {
+      found = await api(`/directory?q=${encodeURIComponent(q)}`).catch(() => []);
+      if (box.value.trim() !== q) return;
+      out.innerHTML = found.length
+        ? found
+            .slice(0, 12)
+            .map(
+              (p, i) =>
+                `<button type="button" data-hit="${i}"><span class="avatar">${initials(p.name)}</span><span><strong>${esc(p.name)}</strong><small>${esc([p.designation_name, p.department_name, p.branch_name].filter(Boolean).join(" · ") || p.employee_code || "")}</small></span></button>`,
+            )
+            .join("") +
+          (found.length > 12
+            ? `<button type="button" data-all>See all ${found.length} in the directory →</button>`
+            : "")
+        : '<p class="muted">Nobody found.</p>';
+      out.hidden = false;
+      out.querySelectorAll("[data-hit]").forEach(
+        (b) =>
+          (b.onclick = () => {
+            const p = found[Number(b.dataset.hit)];
+            close();
+            if (has("employees.read")) return profile360Dialog(p.id, p.name);
+            viewDialog(
+              p.name,
+              `<p class="muted">${esc([p.designation_name, p.department_name].filter(Boolean).join(" · "))}</p>${[
+                ["Employee code", p.employee_code],
+                ["Branch", p.branch_name],
+                ["Reports to", p.manager_name],
+                ["Phone", p.phone],
+                ["Email", p.email],
+              ]
+                .filter(([, v]) => v)
+                .map(
+                  ([k, v]) =>
+                    `<div class="kv"><span>${k}</span><strong>${esc(v)}</strong></div>`,
+                )
+                .join(
+                  "",
+                )}${p.email || p.phone ? "" : '<p class="muted">Contact details are visible to HR and their manager.</p>'}`,
+            );
+          }),
+      );
+      out.querySelector("[data-all]")?.addEventListener("click", () => {
+        close();
+        page = "directory";
+        render().then(() => {
+          const q2 = document.querySelector("#dir-q");
+          if (q2) {
+            q2.value = q;
+            q2.dispatchEvent(new Event("input"));
+          }
+        });
+      });
+    }, 250);
+  };
+  box.onkeydown = (e) => e.key === "Escape" && close();
+  // The top bar is redrawn on every page; close clicks are wired once.
+  if (peopleSearch.wired) return;
+  peopleSearch.wired = true;
+  document.addEventListener("click", (e) => {
+    const list = document.querySelector("#people-out");
+    if (list && !e.target.closest(".people-search")) list.hidden = true;
+  });
+}
 function setup() {
   app.innerHTML = `<div class="login"><section class="login-story">${brand()}<div><div class="eyebrow">${esc(config.company)}</div><h1>Your workspace<br>starts here.</h1><p>Create your administrator account to add workplaces and employees.</p></div></section><section class="login-panel"><h2>Set up your workspace</h2><p class="muted">Use the private setup code provided with your deployment.</p><form id="setup"><label>Setup code<input type="password" name="setupToken" required autocomplete="off"></label><label>Your name<input name="name" required maxlength="150"></label><label>Administrator email<input name="email" type="email" required autocomplete="username"></label><label>Password (12+ characters)<input name="password" type="password" minlength="12" maxlength="128" required autocomplete="new-password"></label><button>Create administrator</button></form></section></div>`;
   document.querySelector("#setup").onsubmit = (e) => {
@@ -158,7 +234,8 @@ function shell() {
   const items = [
     has("attendance.read") && ["overview", "◫", "Overview"],
     has("insights.read") && ["insights", "▨", "Insights"],
-    ["announcements", "✉", "Announcements"],
+    me.role !== "super_admin" &&
+      !has("attendance.read") && ["mine", "⌂", "Home"],
     me.role !== "super_admin" && [
       "chat",
       "✆",
@@ -182,6 +259,7 @@ function shell() {
       "Hiring & exits",
     ],
     has("devices.manage") && ["devices", "▣", "Devices"],
+    has("roles.assign") && ["roles", "⚿", "Roles & rights"],
     has("security.read") && ["security", "⚠", "Security"],
     has("audit.read") && ["audit", "≡", "Activity log"],
     (me.is_manager || has("leave.approve") || me.approvals_pending) && [
@@ -206,7 +284,8 @@ function shell() {
     me.role !== "super_admin" && ["performance", "★", "Performance"],
     me.role !== "super_admin" && ["learning", "✎", "Learning"],
     ["documents", "▤", "Documents"],
-    me.role !== "super_admin" && ["mine", "◎", "My attendance"],
+    me.role !== "super_admin" &&
+      has("attendance.read") && ["mine", "◎", "My attendance"],
     ["directory", "☰", "Directory"],
     ["orgchart", "⌥", "Org chart"],
     me.role !== "super_admin" && ["refer", "✚", "Refer a candidate"],
@@ -218,9 +297,10 @@ function shell() {
   const workspace = has("employees.read")
     ? "HR workspace"
     : "Employee workspace";
-  app.innerHTML = `<div class="layout"><aside class="sidebar">${brand()}<div class="nav-label">WORKSPACE</div><nav class="nav">${items.map(([id, icon, label]) => `<button data-page="${id}" class="${page === id ? "selected" : ""}"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="sidebar-foot"><strong>${esc(me.company?.name || config.company)}</strong>Location-verified attendance<br>${esc(config.timezone)}</div></aside><main class="main"><header class="topbar"><span>${esc(workspace)}</span><div class="user">${companies.length > 1 ? `<select id="company" aria-label="Company">${companies.map((c) => `<option value="${c.id}" ${c.id === scope ? "selected" : ""}>${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("")}</select>` : ""}<button class="ghost bell" id="bell" aria-label="Notifications">🔔<span id="bell-n" class="bell-n"></span></button><span class="avatar">${initials(me.name)}</span><span class="name">${esc(me.name)}</span><button class="ghost" id="password">Password</button><button class="ghost" id="logout">Sign out</button></div></header><section class="content" id="content"><div class="loading">Loading…</div></section></main></div>`;
+  app.innerHTML = `<div class="layout"><aside class="sidebar">${brand()}<div class="nav-label">WORKSPACE</div><nav class="nav">${items.map(([id, icon, label]) => `<button data-page="${id}" class="${page === id ? "selected" : ""}"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}</nav><div class="sidebar-foot"><strong>${esc(me.company?.name || config.company)}</strong>Location-verified attendance<br>${esc(config.timezone)}</div></aside><main class="main"><header class="topbar"><div class="topbar-left"><span>${esc(workspace)}</span>${me.role === "super_admin" ? "" : '<div class="people-search"><input id="people-q" type="search" placeholder="Search people across the company" aria-label="Search people" autocomplete="off"><div id="people-out" class="people-out" hidden></div></div>'}</div><div class="user">${companies.length > 1 ? `<select id="company" aria-label="Company">${companies.map((c) => `<option value="${c.id}" ${c.id === scope ? "selected" : ""}>${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("")}</select>` : ""}<button class="ghost bell" id="bell" aria-label="Notifications">🔔<span id="bell-n" class="bell-n"></span></button><span class="avatar">${initials(me.name)}</span><span class="name">${esc(me.name)}</span><button class="ghost" id="password">Password</button><button class="ghost" id="logout">Sign out</button></div></header><section class="content" id="content"><div class="loading">Loading…</div></section></main></div>`;
   bellInit();
   chatInit();
+  peopleSearch();
   document.querySelector("#company")?.addEventListener("change", async (e) => {
     activeCompany =
       Number(e.target.value) === me.company_id ? null : Number(e.target.value);
@@ -278,6 +358,8 @@ function table(rows) {
 let renderId = 0;
 async function render() {
   const id = ++renderId;
+  // Announcements are on the front page (older alerts still link to the old page).
+  if (page === "announcements") page = landing();
   shell();
   if (me.must_change_password) {
     document.querySelector("#content").innerHTML =
@@ -310,17 +392,18 @@ async function render() {
     if (page === "teamcal") return await teamCalendarPage(id);
     if (page === "refer") return await referPage(id);
     if (page === "documents") return await documentsPage(id);
-    if (page === "announcements") return await announcementsPage(id);
+    if (page === "roles") return await rolesPage(id);
     if (page === "helpdesk") return await helpdeskPage(id);
     if (page === "policies") return await policiesPage(id);
     if (page === "chat") return await chatPage(id);
     if (page === "laxmi") return await laxmiPage(id);
     if (page === "hiring") return await hiringPage(id);
     if (page === "overview") {
-      const [stats, active, sites] = await Promise.all([
+      const [stats, active, sites, home] = await Promise.all([
         api("/admin/overview"),
         api("/admin/active"),
         api("/admin/workplaces"),
+        homeData(),
       ]);
       if (id !== renderId) return;
       document.querySelector("#content").innerHTML =
@@ -349,8 +432,9 @@ async function render() {
           )
           .join(
             "",
-          )}</div><div class="card"><div class="card-head"><div><h2>Who’s working now</h2><p class="muted">Most recent punch location. No continuous tracking.</p></div><span class="pill">${stats.active} active shifts</span></div>${table(active)}</div><div class="grid-two"><div class="card"><h2>Your workplaces</h2>${sites.length ? sites.map((s) => `<div class="site"><h3>${esc(s.name)}</h3><p class="muted">${s.latitude.toFixed(5)}, ${s.longitude.toFixed(5)}</p><span class="pill neutral">${s.radius} m radius</span></div>`).join("") : empty("Set up your first workplace", "Open Workplaces to define an attendance boundary.")}</div><div class="card"><div class="eyebrow">Designed for trust</div><h2>Right place. Right record.</h2><p class="muted">Employees punch in and out inside their assigned workplace. Every punch records server time and a fresh GPS reading.</p><div class="callout">Location is captured only at attendance events. GPS uncertainty must fit inside the workplace boundary.</div></div></div>`;
+          )}</div><div class="grid-two">${announcementsHtml(home.announcements)}${holidaysHtml(home.holidays)}</div><div class="card"><div class="card-head"><div><h2>Who’s working now</h2><p class="muted">Most recent punch location. No continuous tracking.</p></div><span class="pill">${stats.active} active shifts</span></div>${table(active)}</div><div class="grid-two"><div class="card"><h2>Your workplaces</h2>${sites.length ? sites.map((s) => `<div class="site"><h3>${esc(s.name)}</h3><p class="muted">${s.latitude.toFixed(5)}, ${s.longitude.toFixed(5)}</p><span class="pill neutral">${s.radius} m radius</span></div>`).join("") : empty("Set up your first workplace", "Open Workplaces to define an attendance boundary.")}</div><div class="card"><div class="eyebrow">Designed for trust</div><h2>Right place. Right record.</h2><p class="muted">Employees punch in and out inside their assigned workplace. Every punch records server time and a fresh GPS reading.</p><div class="callout">Location is captured only at attendance events. GPS uncertainty must fit inside the workplace boundary.</div></div></div>`;
       document.querySelector("#refresh").onclick = render;
+      announcementsWire();
     } else if (page === "employees") {
       await employeesPage(id);
       await importPeopleCard(id);
@@ -534,14 +618,27 @@ const ROLE_LABELS = {
   super_admin: "Platform owner",
   admin: "Admin",
   hr: "HR",
+  payroll: "Payroll",
   employee: "Employee",
+  custom: "Custom role",
 };
+const roleLabel = (p) =>
+  p.role === "custom"
+    ? p.custom_role_name || ROLE_LABELS.custom
+    : ROLE_LABELS[p.role] || p.role;
 const assignable = () =>
   me.role === "super_admin"
-    ? ["employee", "hr", "admin", "super_admin"]
+    ? ["employee", "hr", "payroll", "admin", "super_admin"]
     : me.role === "admin"
-      ? ["employee", "hr", "admin"]
+      ? ["employee", "hr", "payroll", "admin"]
       : ["employee"];
+// The role picker's choices: built-in roles, then the company's own roles as "custom:<id>".
+const roleChoices = (roles, customRoles = []) => [
+  ...roles.map((r) => [r, ROLE_LABELS[r]]),
+  ...(roles.includes("admin")
+    ? customRoles.map((r) => [`custom:${r.id}`, `${r.name} (custom)`])
+    : []),
+];
 const options = (items, selected, blank = "— None —") =>
   `<option value="">${esc(blank)}</option>${items.map((o) => `<option value="${o.id}" ${o.id === selected ? "selected" : ""}>${esc(o.name)}${o.employee_code ? ` (${esc(o.employee_code)})` : ""}</option>`).join("")}`;
 const input = (name, label, value = "", extra = "") =>
@@ -550,6 +647,7 @@ const input = (name, label, value = "", extra = "") =>
 async function employeesPage(id) {
   const org = await api("/admin/org");
   org.custom = await api("/custom-fields");
+  org.roles = has("roles.assign") ? (await api("/admin/roles")).custom : [];
   if (id !== renderId) return;
   const limit = 25;
   let offset = 0;
@@ -570,7 +668,7 @@ async function employeesPage(id) {
     if (id !== renderId) return;
     const rows = data.items;
     document.querySelector("#list").innerHTML = rows.length
-      ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Reports to</th><th>Workplace</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((e) => `<tr><td><div class="person"><span class="avatar">${initials(e.name)}</span><div>${esc(e.name)}<small>${esc(e.employee_code || "")} · ${esc(e.email)}</small></div></div></td><td>${esc(e.department_name || "—")}<small>${esc(e.designation_name || "")}</small></td><td>${esc(e.manager_name || "—")}</td><td>${esc(e.workplace_name || "—")}</td><td>${esc(ROLE_LABELS[e.role] || e.role)}</td><td><span class="pill ${e.active ? "" : "neutral"}">${e.active ? "Active" : "Inactive"}</span></td><td>${has("employees.write") ? `<button class="secondary" data-edit="${e.id}">Manage</button> <button class="ghost" data-p360="${e.id}" data-name="${esc(e.name)}">360°</button>` : ""}</td></tr>`).join("")}</tbody></table></div><div class="pager"><span class="muted">${offset + 1}–${offset + rows.length} of ${data.total}</span><button class="secondary" id="prev" ${offset ? "" : "disabled"}>← Previous</button><button class="secondary" id="next" ${offset + limit < data.total ? "" : "disabled"}>Next →</button></div>`
+      ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Reports to</th><th>Workplace</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((e) => `<tr><td><div class="person"><span class="avatar">${initials(e.name)}</span><div>${esc(e.name)}<small>${esc(e.employee_code || "")} · ${esc(e.email)}</small></div></div></td><td>${esc(e.department_name || "—")}<small>${esc(e.designation_name || "")}</small></td><td>${esc(e.manager_name || "—")}</td><td>${esc(e.workplace_name || "—")}</td><td>${esc(roleLabel(e))}</td><td><span class="pill ${e.active ? "" : "neutral"}">${e.active ? "Active" : "Inactive"}</span></td><td>${has("employees.write") ? `<button class="secondary" data-edit="${e.id}">Manage</button> <button class="ghost" data-p360="${e.id}" data-name="${esc(e.name)}">360°</button>` : ""}</td></tr>`).join("")}</tbody></table></div><div class="pager"><span class="muted">${offset + 1}–${offset + rows.length} of ${data.total}</span><button class="secondary" id="prev" ${offset ? "" : "disabled"}>← Previous</button><button class="secondary" id="next" ${offset + limit < data.total ? "" : "disabled"}>Next →</button></div>`
       : empty("No employees found", "Adjust the search or add an employee.");
     document
       .querySelector("#prev")
@@ -621,9 +719,11 @@ async function employeesPage(id) {
 
 function employeeDialog(org, e) {
   const roles = assignable();
+  const current =
+    e?.role === "custom" ? `custom:${e.custom_role_id}` : e?.role || "employee";
   dialog(
     e ? "Manage employee" : "Add employee",
-    `<div class="full"><strong>Account</strong></div>${e ? `<div class="full muted">${esc(e.email)}</div>${input("name", "Full name", e.name, 'maxlength="150" required')}` : `${input("name", "Full name", "", 'maxlength="150" required')}${input("email", "Email", "", 'type="email" required')}`}<label>${e ? "Reset password (optional)" : "Temporary password"}<input name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" ${e ? "" : "required"}></label>${roles.length > 1 && has("roles.assign") ? `<label>Role<select name="role">${roles.map((r) => `<option value="${r}" ${r === (e?.role || "employee") ? "selected" : ""}>${ROLE_LABELS[r]}</option>`).join("")}</select></label>` : ""}${e ? `<label>Account status<select name="active"><option value="true" ${e.active ? "selected" : ""}>Active</option><option value="false" ${e.active ? "" : "selected"}>Inactive</option></select></label>` : ""}<div class="full"><strong>Job</strong></div>${input("employee_code", "Employee code", e?.employee_code || "", 'maxlength="30" placeholder="Auto-generated"')}<label>Employment type<select name="employment_type"><option value="">—</option>${Object.entries(
+    `<div class="full"><strong>Account</strong></div>${e ? `<div class="full muted">${esc(e.email)}</div>${input("name", "Full name", e.name, 'maxlength="150" required')}` : `${input("name", "Full name", "", 'maxlength="150" required')}${input("email", "Email", "", 'type="email" required')}`}<label>${e ? "Reset password (optional)" : "Temporary password"}<input name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" ${e ? "" : "required"}></label>${roles.length > 1 && has("roles.assign") ? `<label>Role<select name="role">${roleChoices(roles, org.roles).map(([v, label]) => `<option value="${v}" ${v === current ? "selected" : ""}>${esc(label)}</option>`).join("")}</select></label>` : ""}${e ? `<label>Account status<select name="active"><option value="true" ${e.active ? "selected" : ""}>Active</option><option value="false" ${e.active ? "" : "selected"}>Inactive</option></select></label>` : ""}<div class="full"><strong>Job</strong></div>${input("employee_code", "Employee code", e?.employee_code || "", 'maxlength="30" placeholder="Auto-generated"')}<label>Employment type<select name="employment_type"><option value="">—</option>${Object.entries(
       EMPLOYMENT,
     )
       .map(
@@ -649,6 +749,10 @@ function employeeDialog(org, e) {
       ])
         b[k] = b[k] ? Number(b[k]) : null;
       b.custom = collectCustom(b);
+      if (b.role?.startsWith("custom:")) {
+        b.custom_role_id = Number(b.role.slice(7));
+        b.role = "custom";
+      }
       if (e) {
         b.active = b.active === "true";
         if (!b.password) delete b.password;
@@ -788,7 +892,7 @@ async function profileView(id) {
       "Your details as held by HR.",
       '<button class="secondary" id="edit">Edit contact details</button>',
     ) +
-    `<div class="card"><h2>${esc(p.name)}</h2><p class="muted">${esc(p.designation_name || "")}${p.designation_name && p.department_name ? " · " : ""}${esc(p.department_name || "")}</p>${row("Employee code", p.employee_code)}${row("Email", p.email)}${row("Role", ROLE_LABELS[p.role] || p.role)}${row("Reports to", p.manager_name)}${row("Branch", p.branch_name)}${row("Workplace", p.workplace_name)}${row("Employment", EMPLOYMENT[p.employment_type])}${row("Date of joining", p.date_of_joining)}</div><div class="card"><h2>Contact</h2>${row("Phone", p.phone)}${row("Address", p.address)}${row("Emergency contact", [p.emergency_name, p.emergency_relation, p.emergency_phone].filter(Boolean).join(" · "))}</div><p class="muted">To change your name, email, department or other job details, contact HR.</p>`;
+    `<div class="card"><h2>${esc(p.name)}</h2><p class="muted">${esc(p.designation_name || "")}${p.designation_name && p.department_name ? " · " : ""}${esc(p.department_name || "")}</p>${row("Employee code", p.employee_code)}${row("Email", p.email)}${row("Role", roleLabel({ ...p, custom_role_name: p.custom_role_name ?? me.role_name }))}${row("Reports to", p.manager_name)}${row("Branch", p.branch_name)}${row("Workplace", p.workplace_name)}${row("Employment", EMPLOYMENT[p.employment_type])}${row("Date of joining", p.date_of_joining)}</div><div class="card"><h2>Contact</h2>${row("Phone", p.phone)}${row("Address", p.address)}${row("Emergency contact", [p.emergency_name, p.emergency_relation, p.emergency_phone].filter(Boolean).join(" · "))}</div><p class="muted">To change your name, email, department or other job details, contact HR.</p>`;
   await securityCard(id);
   await bankCard(id);
   await profile360Card(id);
@@ -878,12 +982,18 @@ function getLocation() {
   });
 }
 async function employeeView(id) {
-  const [profile, shifts] = await Promise.all([api("/me"), api("/shifts")]);
+  const [profile, shifts, home] = await Promise.all([
+    api("/me"),
+    api("/shifts"),
+    homeData(),
+  ]);
   if (id !== renderId) return;
   const open = profile.openShift;
   document.querySelector("#content").innerHTML =
     heading(`Hello, ${me.name.split(" ")[0]}`, "Your workday, in one place.") +
-    `<div class="card punch-card"><span class="pill ${open ? "" : "neutral"}">${open ? "You are working" : "Not punched in"}</span><div class="big-clock">${open ? "Your shift is in progress" : "Ready for your day?"}</div><h2>${esc(open?.workplace_name || profile.workplace?.name || "No workplace assigned")}</h2><p class="muted">${open ? `Started ${time(open.in_at)}. Punch out at the same workplace${open.required_out_at ? ` after ${time(open.required_out_at)} for a full day` : ""}.` : `Punch in within ${profile.workplace?.radius || "—"} metres of your assigned workplace.`}</p><div class="callout">Attendance is recorded only from the company mobile app, at your assigned workplace.</div></div><div class="card"><h2>My recent attendance</h2>${table(shifts)}</div>`;
+    announcementsHtml(home.announcements) +
+    `<div class="grid-two"><div class="card punch-card"><span class="pill ${open ? "" : "neutral"}">${open ? "You are working" : "Not punched in"}</span><div class="big-clock">${open ? "Your shift is in progress" : "Ready for your day?"}</div><h2>${esc(open?.workplace_name || profile.workplace?.name || "No workplace assigned")}</h2><p class="muted">${open ? `Started ${time(open.in_at)}. Punch out at the same workplace${open.required_out_at ? ` after ${time(open.required_out_at)} for a full day` : ""}.` : `Punch in within ${profile.workplace?.radius || "—"} metres of your assigned workplace.`}</p><div class="callout">Attendance is recorded only from the company mobile app, at your assigned workplace.</div></div>${holidaysHtml(home.holidays)}</div><div class="card"><h2>My recent attendance</h2>${table(shifts)}</div>`;
+  announcementsWire();
 }
 // Start once every deferred script has run (they share this page's scope); an early
 // start could use a function from a later script before it exists.

@@ -31,6 +31,7 @@ import { registerPeople } from "./routes/people.js";
 import { registerSecurity } from "./routes/security.js";
 import { registerEngagement } from "./routes/engagement.js";
 import { registerInsights } from "./routes/insights.js";
+import { registerRoles } from "./routes/roles.js";
 import { scheduleRetention } from "./retention.js";
 import {
   registerLearning,
@@ -198,6 +199,7 @@ export function createApp({
     registerDocuments,
     registerPerformance,
     registerInsights,
+    registerRoles,
   ])
     register(router, app);
 
@@ -213,6 +215,15 @@ export function createApp({
         )
         .get(tokenHash(token), Date.now()));
     if (!user) throw new HttpError(401, "Please sign in again.");
+    if (user.role === "custom") {
+      const role = await db
+        .prepare(
+          "SELECT name,permissions FROM custom_roles WHERE id=? AND company_id=?",
+        )
+        .get(user.custom_role_id, user.company_id);
+      user.custom_role_name = role?.name ?? null;
+      user.custom_permissions = role ? JSON.parse(role.permissions) : [];
+    }
     return { user, token };
   }
   // Super administrators may act inside another company by naming it.

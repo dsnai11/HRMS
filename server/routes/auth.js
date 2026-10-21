@@ -7,7 +7,7 @@ import {
   tokenHash,
 } from "../db.js";
 import { HttpError, string, password, email, clientIp } from "../http.js";
-import { permissionsFor } from "../rbac.js";
+import { permissionsOf } from "../rbac.js";
 import { bindDevice, deviceFromHeaders } from "../devices.js";
 import { finishedToday } from "./attendance.js";
 import { pendingApprovals } from "../approval.js";
@@ -15,7 +15,7 @@ import { checkSecondFactor } from "./security.js";
 
 const dummyHash = passwordHash("unused-password-for-timing");
 // Roles that record attendance from a phone must register it.
-const PHONE_ROLES = ["employee", "hr"];
+const PHONE_ROLES = ["employee", "hr", "custom"];
 
 export const safeUser = (u) => ({
   id: u.id,
@@ -27,6 +27,7 @@ export const safeUser = (u) => ({
   employee_code: u.employee_code,
   active: Boolean(u.active),
   must_change_password: Boolean(u.must_change_password),
+  ...(u.role === "custom" ? { role_name: u.custom_role_name ?? null } : {}),
 });
 
 export function registerAuth(router, app) {
@@ -189,7 +190,7 @@ export function registerAuth(router, app) {
           require_selfie: Boolean(company.require_selfie),
           labels: JSON.parse(company.labels || "{}"),
         },
-        permissions: permissionsFor(user.role),
+        permissions: permissionsOf(user),
         is_manager: Boolean(
           await db
             .prepare(

@@ -86,7 +86,7 @@ Partly: Insights dashboards, payroll cost report by department, cost centre, bus
 
 ## Configuration and customisation scope
 
-Done: renamed terms, custom fields, shift and leave rules, salary components and statutory settings, custom approval chain **partly** (manager then HR; multi-level chains and escalation reminders are not built), role sets (fixed roles: admin, HR, payroll, manager, employee; custom roles are not built).
+Done: renamed terms, custom fields, shift and leave rules, salary components and statutory settings, custom approval chain **partly** (manager then HR; multi-level chains and escalation reminders are not built), role sets (fixed roles admin, HR, payroll, manager and employee, plus custom roles: administrators name a role and tick its rights under *Roles & rights*, then give it to people from the employee form).
 
 ## Things the proposal assumes that are not software
 

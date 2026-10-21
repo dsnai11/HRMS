@@ -73,25 +73,52 @@ function bellInit() {
   });
 }
 
-// ---- announcements -----------------------------------------------------------------------------------
-async function announcementsPage(id) {
-  const rows = await api("/announcements");
-  if (id !== renderId) return;
+// ---- front page: announcements and upcoming holidays ---------------------------------------------
+// Announcements live on the front page, so people see them as soon as they sign in.
+async function homeData() {
+  const now = today(),
+    year = Number(now.slice(0, 4));
+  const [announcements, ...years] = await Promise.all([
+    api("/announcements").catch(() => []),
+    api(`/holidays?year=${year}`).catch(() => []),
+    // Late in the year, the next year's first holidays are "upcoming" too.
+    now.slice(5) >= "10-01"
+      ? api(`/holidays?year=${year + 1}`).catch(() => [])
+      : [],
+  ]);
+  return {
+    announcements,
+    holidays: years
+      .flat()
+      .filter((h) => h.date >= now)
+      .slice(0, 8),
+  };
+}
+function announcementsHtml(rows) {
   const manage = has("announcements.manage");
-  document.querySelector("#content").innerHTML =
-    heading(
-      "Announcements",
-      "News and notices from your company.",
-      manage ? '<button id="post">Post an announcement</button>' : "",
-    ) +
-    (rows.length
+  return `<div class="card"><div class="card-head"><div><h2>Announcements</h2><p class="muted">News and notices from your company.</p></div>${manage ? '<button id="post">Post an announcement</button>' : ""}</div>${
+    rows.length
       ? rows
           .map(
             (a) =>
-              `<div class="card"><h2>${a.pinned ? "📌 " : ""}${esc(a.title)}</h2><p>${esc(a.body).replaceAll("\n", "<br>")}</p><small class="muted">${esc(a.author || "")} · ${time(a.created_at)}</small>${manage ? ` <button class="ghost" data-del="${a.id}">Remove</button>` : ""}</div>`,
+              `<div class="announcement"><h3>${a.pinned ? "📌 " : ""}${esc(a.title)}</h3><p>${esc(a.body).replaceAll("\n", "<br>")}</p><small class="muted">${esc(a.author || "")} · ${time(a.created_at)}</small>${manage ? ` <button class="ghost" data-del="${a.id}">Remove</button>` : ""}</div>`,
           )
           .join("")
-      : `<div class="card">${empty("No announcements", "Nothing has been posted.")}</div>`);
+      : empty("No announcements", "Nothing has been posted.")
+  }</div>`;
+}
+const holidaysHtml = (list) =>
+  `<div class="card"><h2>Upcoming holidays</h2>${
+    list.length
+      ? list
+          .map(
+            (h) =>
+              `<div class="kv"><span>${esc(h.name)}</span><strong>${fmtDate(h.date)}</strong></div>`,
+          )
+          .join("")
+      : '<p class="muted">No upcoming holidays have been added.</p>'
+  }</div>`;
+function announcementsWire() {
   document.querySelectorAll("[data-del]").forEach(
     (b) =>
       (b.onclick = () =>

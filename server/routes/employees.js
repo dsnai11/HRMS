@@ -61,11 +61,13 @@ const SELF_EDITABLE = [
 const SELECT = `u.id,u.name,u.email,u.role,u.employee_code,u.phone,u.active,u.must_change_password,
   u.workplace_id,w.name workplace_name,u.branch_id,b.name branch_name,u.department_id,d.name department_name,
   u.designation_id,g.name designation_name,u.manager_id,m.name manager_name,u.date_of_joining,u.employment_type,
-  u.grade_id,gr.name grade_name,u.cost_centre_id,cc.name cost_centre_name,u.business_unit_id,bu.name business_unit_name,u.custom`;
+  u.grade_id,gr.name grade_name,u.cost_centre_id,cc.name cost_centre_name,u.business_unit_id,bu.name business_unit_name,u.custom,
+  u.custom_role_id,cr.name custom_role_name`;
 const FULL = `${SELECT},u.date_of_birth,u.gender,u.address,u.emergency_name,u.emergency_phone,u.emergency_relation,u.company_id`;
 const JOINS = `FROM users u LEFT JOIN workplaces w ON w.id=u.workplace_id LEFT JOIN branches b ON b.id=u.branch_id
   LEFT JOIN departments d ON d.id=u.department_id LEFT JOIN designations g ON g.id=u.designation_id LEFT JOIN users m ON m.id=u.manager_id
-  LEFT JOIN grades gr ON gr.id=u.grade_id LEFT JOIN cost_centres cc ON cc.id=u.cost_centre_id LEFT JOIN business_units bu ON bu.id=u.business_unit_id`;
+  LEFT JOIN grades gr ON gr.id=u.grade_id LEFT JOIN cost_centres cc ON cc.id=u.cost_centre_id LEFT JOIN business_units bu ON bu.id=u.business_unit_id
+  LEFT JOIN custom_roles cr ON cr.id=u.custom_role_id`;
 
 function canManage(caller, target) {
   if (caller.role === "super_admin") return true;
@@ -75,6 +77,20 @@ function canManage(caller, target) {
 
 export function registerEmployees(router, app) {
   const { db, transaction } = app;
+
+  // A custom role must be one of this company's; any other role clears it.
+  const customRoleId = async (role, b, companyId) => {
+    if (role !== "custom") return null;
+    const id = optionalId(b.custom_role_id, "Custom role");
+    if (
+      !id ||
+      !(await db
+        .prepare("SELECT id FROM custom_roles WHERE id=? AND company_id=?")
+        .get(id, companyId))
+    )
+      throw new HttpError(400, "Choose one of your company's custom roles.");
+    return id;
+  };
 
   const profileValues = (b, only = Object.keys(PROFILE)) => {
     const out = {};
@@ -207,6 +223,7 @@ export function registerEmployees(router, app) {
     const role = b.role === undefined ? "employee" : b.role;
     if (!ROLES.includes(role) || !assignableRoles(user).includes(role))
       throw new HttpError(403, "You cannot assign that role.");
+    const roleId = await customRoleId(role, b, companyId);
     const profile = profileValues(b);
     const refs = await references(b, companyId);
     const custom =
@@ -233,6 +250,7 @@ export function registerEmployees(router, app) {
         employee_code: code,
         ...refs,
         manager_id: managerId,
+        ...(roleId ? { custom_role_id: roleId } : {}),
         ...(custom ? { custom: JSON.stringify(custom) } : {}),
       };
       const keys = Object.keys(cols);
@@ -304,10 +322,14 @@ export function registerEmployees(router, app) {
         )
           throw new HttpError(403, "You cannot assign that role.");
         set.role = b.role;
+        set.custom_role_id = await customRoleId(b.role, b, companyId);
       }
       if (
         id === user.id &&
-        (set.active === 0 || (set.role && set.role !== user.role))
+        (set.active === 0 ||
+          (set.role &&
+            (set.role !== user.role ||
+              (set.custom_role_id ?? null) !== (user.custom_role_id ?? null))))
       )
         throw new HttpError(
           409,

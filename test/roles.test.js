@@ -1,0 +1,123 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { openPglite } from "../server/pglite.js";
+import { createAdmin } from "../server/db.js";
+import { createApp } from "../server/index.js";
+
+const PW = "Temporary-pass-123";
+
+async function world(t) {
+  const db = await openPglite();
+  await createAdmin(db, {
+    name: "Owner",
+    email: "owner@example.test",
+    password: "Owner-password-123",
+    companyName: "Alpha Ltd",
+  });
+  const { server } = createApp({ db });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  t.after(
+    () =>
+      new Promise((resolve) => {
+        server.close(async () => {
+          await db.close();
+          resolve();
+        });
+        server.closeAllConnections();
+      }),
+  );
+  const base = `http://127.0.0.1:${server.address().port}/api`;
+  const call = async (path, body, token, method) => {
+    const res = await fetch(base + path, {
+      method: method ?? (body === undefined ? "GET" : "POST"),
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+    return { status: res.status, data: await res.json() };
+  };
+  // Phone-style sign-in, as in the other tests.
+  const signIn = async (email, password = PW) => {
+    const r = await call("/login", { email, password, native: true, device: { id: `phone-${email.replace(/[^A-Za-z0-9]/g, "-")}`.padEnd(16, "0").slice(0, 64), platform: "android", model: "T" } });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    return r.data.token;
+  };
+  const owner = await signIn("owner@example.test", "Owner-password-123");
+  const add = async (key, extra = {}) => {
+    const r = await call(
+      "/admin/employees",
+      { name: key.toUpperCase(), email: `${key}@example.test`, password: PW, ...extra },
+      owner,
+    );
+    if (r.status !== 201) return r;
+    await db.prepare("UPDATE users SET must_change_password=0 WHERE id=?").run(r.data.id);
+    return { id: r.data.id, token: await signIn(`${key}@example.test`) };
+  };
+  return { db, call, owner, add };
+}
+
+test("administrators define roles with chosen rights and give them to people", async (t) => {
+  const { call, owner, add } = await world(t);
+
+  const list = (await call("/admin/roles", undefined, owner)).data;
+  assert.ok(list.permissions.some((p) => p.key === "leave.approve"));
+  assert.ok(!list.permissions.some((p) => p.key === "roles.assign"));
+  assert.deepEqual(
+    list.built_in.map((r) => r.role),
+    ["admin", "hr", "payroll", "employee"],
+  );
+
+  // Bad input is refused.
+  assert.equal((await call("/admin/roles", { name: "HR", permissions: ["leave.read"] }, owner)).status, 409);
+  assert.equal((await call("/admin/roles", { name: "X", permissions: [] }, owner)).status, 400);
+  assert.equal((await call("/admin/roles", { name: "X", permissions: ["roles.assign"] }, owner)).status, 400);
+
+  const made = await call(
+    "/admin/roles",
+    { name: "Leave desk", description: "Handles leave only", permissions: ["leave.read", "leave.approve", "employees.read"] },
+    owner,
+  );
+  assert.equal(made.status, 201, JSON.stringify(made.data));
+  const roleId = made.data.id;
+  assert.equal((await call("/admin/roles", { name: "leave DESK", permissions: ["leave.read"] }, owner)).status, 409);
+
+  // A custom role needs a real role id.
+  assert.equal((await add("bad", { role: "custom" })).status, 400);
+  const desk = await add("desk", { role: "custom", custom_role_id: roleId });
+  const me = (await call("/me", undefined, desk.token)).data;
+  assert.equal(me.user.role, "custom");
+  assert.equal(me.user.role_name, "Leave desk");
+  // Organisation lists come with every custom role: the staff pages need them.
+  assert.deepEqual(me.permissions.sort(), ["employees.read", "leave.approve", "leave.read", "org.read"]);
+  assert.equal((await call("/admin/org", undefined, desk.token)).status, 200);
+
+  // The rights work, and only those rights.
+  assert.equal((await call("/admin/employees", undefined, desk.token)).status, 200);
+  assert.equal((await call("/admin/workplaces", { name: "X" }, desk.token)).status, 403);
+  assert.equal((await call("/admin/roles", undefined, desk.token)).status, 403);
+
+  // Changing the role applies on the next request.
+  assert.equal(
+    (await call(`/admin/roles/${roleId}`, { name: "Leave desk", permissions: ["leave.read"] }, owner, "PATCH")).status,
+    200,
+  );
+  assert.equal((await call("/admin/employees", undefined, desk.token)).status, 403);
+  assert.equal((await call("/admin/roles", undefined, owner)).data.custom[0].members, 1);
+
+  // A role in use cannot be deleted; after moving the person it can.
+  assert.equal((await call(`/admin/roles/${roleId}`, undefined, owner, "DELETE")).status, 409);
+  const edit = await call(`/admin/employees/${desk.id}`, { role: "hr" }, owner, "PATCH");
+  assert.equal(edit.status, 200, JSON.stringify(edit.data));
+  const after = (await call(`/admin/employees/${desk.id}`, undefined, owner)).data;
+  assert.equal(after.role, "hr");
+  assert.equal(after.custom_role_id, null);
+  assert.equal((await call(`/admin/roles/${roleId}`, undefined, owner, "DELETE")).status, 200);
+
+  // HR cannot manage roles or hand out custom roles.
+  const hr = await add("hr", { role: "hr" });
+  assert.equal((await call("/admin/roles", { name: "Y", permissions: ["leave.read"] }, hr.token)).status, 403);
+  // Administrators can create HR team and payroll accounts directly.
+  assert.ok((await add("pay", { role: "payroll" })).token);
+});

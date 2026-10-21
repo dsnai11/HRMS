@@ -32,6 +32,101 @@ async function directoryPage(id) {
   };
 }
 
+// ---- roles and rights (administrators) -------------------------------------------------------------
+// Built-in roles are shown for reference; custom roles get exactly the rights ticked.
+async function rolesPage(id) {
+  const data = await api("/admin/roles");
+  if (id !== renderId) return;
+  const label = new Map(data.permissions.map((p) => [p.key, p.label]));
+  const rights = (list) =>
+    list.length
+      ? list
+          .filter((k) => label.has(k))
+          .map((k) => esc(label.get(k)))
+          .join(" · ")
+      : "Their own records only";
+  document.querySelector("#content").innerHTML =
+    heading(
+      "Roles & rights",
+      "Decide what each kind of user can see and do. Give someone a role when you add them, or later from Employees → Manage.",
+      '<div class="actions"><button class="secondary" id="add-member">+ Add HR team member</button><button id="new-role">+ New role</button></div>',
+    ) +
+    `<div class="card"><div class="card-head"><div><h2>Your roles</h2><p class="muted">Roles you made, with the rights you chose. A change applies straight away.</p></div></div>${
+      data.custom.length
+        ? `<div class="table-wrap"><table><thead><tr><th>Role</th><th>People</th><th>Rights</th><th></th></tr></thead><tbody>${data.custom
+            .map(
+              (r) =>
+                `<tr><td><strong>${esc(r.name)}</strong>${r.description ? `<small>${esc(r.description)}</small>` : ""}</td><td>${r.members}</td><td><small>${rights(r.permissions)}</small></td><td><button class="secondary" data-role-edit="${r.id}">Edit</button> <button class="ghost" data-role-del="${r.id}">Delete</button></td></tr>`,
+            )
+            .join("")}</tbody></table></div>`
+        : empty(
+            "No roles of your own yet",
+            "Make one, for example \"HR Executive\" who can manage leave and attendance but not payroll.",
+          )
+    }</div><div class="card"><h2>Built-in roles</h2><p class="muted">These are fixed. Anyone with people reporting to them also gets their team's approvals.</p><div class="table-wrap"><table><thead><tr><th>Role</th><th>People</th><th>Rights</th></tr></thead><tbody>${data.built_in
+      .map(
+        (r) =>
+          `<tr><td><strong>${esc(ROLE_LABELS[r.role])}</strong></td><td>${r.members}</td><td><small>${r.role === "admin" ? "Everything, including roles and rights" : rights(r.permissions)}</small></td></tr>`,
+      )
+      .join("")}</tbody></table></div></div>`;
+  const groups = [...new Set(data.permissions.map((p) => p.group))];
+  const roleDialog = (r = { name: "", description: "", permissions: [] }) =>
+    dialog(
+      r.id ? `Edit ${r.name}` : "New role",
+      `${input("name", "Role name", r.name, 'required maxlength="60" placeholder="e.g. HR Executive"')}${input("description", "What is it for? (optional)", r.description, 'maxlength="300"')}<p class="full muted">Every role can see the organisation lists (departments, branches, workplaces), and a right to change something includes seeing it.</p>${groups
+        .map(
+          (g) =>
+            `<div class="full"><strong>${esc(g)}</strong><div class="check-grid">${data.permissions
+              .filter((p) => p.group === g)
+              .map(
+                (p) =>
+                  `<label class="check"><input type="checkbox" name="perm:${p.key}" ${r.permissions.includes(p.key) ? "checked" : ""}> ${esc(p.label)}</label>`,
+              )
+              .join("")}</div></div>`,
+        )
+        .join("")}`,
+      async (f) => {
+        const body = {
+          name: f.name,
+          description: f.description,
+          permissions: Object.keys(f)
+            .filter((k) => k.startsWith("perm:"))
+            .map((k) => k.slice(5)),
+        };
+        if (r.id) await api(`/admin/roles/${r.id}`, body, "PATCH");
+        else await api("/admin/roles", body);
+        notice(r.id ? "Role updated." : "Role created.");
+      },
+    );
+  document.querySelector("#new-role").onclick = () => roleDialog();
+  document.querySelectorAll("[data-role-edit]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        roleDialog(data.custom.find((r) => r.id === Number(b.dataset.roleEdit)))),
+  );
+  document.querySelectorAll("[data-role-del]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        busy(b, async () => {
+          const r = data.custom.find((x) => x.id === Number(b.dataset.roleDel));
+          if (!confirm(`Delete the role ${r.name}?`)) return;
+          await api(`/admin/roles/${r.id}`, undefined, "DELETE");
+          notice("Role deleted.");
+          await render();
+        })),
+  );
+  // Opens the ordinary employee form; pick HR, Payroll or one of your roles there.
+  document.querySelector("#add-member").onclick = (e) =>
+    busy(e.target, async () => {
+      const org = await api("/admin/org");
+      org.custom = await api("/custom-fields");
+      org.roles = data.custom;
+      employeeDialog(org);
+      const pick = document.querySelector('dialog select[name="role"]');
+      if (pick) pick.value = "hr";
+    });
+}
+
 // ---- referrals ---------------------------------------------------------------------------------
 async function referPage(id) {
   const [openings, mine] = await Promise.all([
