@@ -27,6 +27,7 @@ const HR = [
   "attendance.import",
   "credit.manage",
   "bot.manage",
+  "hrchat.use",
 ];
 const PAYROLL = ["payroll.manage", "payroll.read"];
 const ADMIN = [
@@ -81,6 +82,7 @@ export const GRANTABLE = {
   "policies.manage": ["Engagement", "Publish policies"],
   "helpdesk.manage": ["Engagement", "Answer helpdesk tickets"],
   "bot.manage": ["Engagement", "Laxmi assistant knowledge and log"],
+  "hrchat.use": ["Engagement", "HR team chat (the private HR Team room)"],
   "insights.read": ["Reports", "Insights dashboards"],
   "security.read": ["Reports", "Security overview"],
   "audit.read": ["Reports", "Activity log"],

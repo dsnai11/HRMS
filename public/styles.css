@@ -2465,3 +2465,7 @@ dialog .gallery-full {
   color: #b9bdd6;
   font-size: 13px;
 }
+.avatar.team {
+  background: linear-gradient(135deg, #ac051b, #4e5aa8);
+  color: #fff;
+}

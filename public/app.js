@@ -326,6 +326,7 @@ function navGroups() {
           "hiring",
           "Hiring & exits",
         ],
+        has("recruitment.manage") && ["rms", "RMS (resumes)"],
         has("devices.manage") && ["devices", "Devices"],
         has("roles.assign") && ["roles", "Roles & rights"],
         has("security.read") && ["security", "Security"],
@@ -476,6 +477,7 @@ async function render() {
     if (page === "documents") return await documentsPage(id);
     if (page === "roles") return await rolesPage(id);
     if (page === "commandcentre") return await commandCentrePage(id);
+    if (page === "rms") return await rmsPage(id);
     if (page === "helpdesk") return await helpdeskPage(id);
     if (page === "policies") return await policiesPage(id);
     if (page === "chat") return await chatPage(id);

@@ -130,7 +130,7 @@ type Profile = {
 
 type ChatRoom = {
   id: number;
-  kind: "direct" | "group";
+  kind: "direct" | "group" | "team";
   title: string;
   members: number;
   unread: number | string;
@@ -149,7 +149,7 @@ type ChatMessage = {
 };
 type RoomInfo = {
   id: number;
-  kind: "direct" | "group";
+  kind: "direct" | "group" | "team";
   name: string | null;
   is_admin: boolean;
   members: { id: number; name: string; is_admin: number | boolean }[];
@@ -1460,7 +1460,7 @@ function MessagesScreen({
 
   if (room !== null) {
     const title = info
-      ? info.kind === "group"
+      ? info.kind !== "direct"
         ? (info.name ?? "Group")
         : (info.members.find((m) => m.id !== userId)?.name ??
           "Former colleague")
@@ -1471,7 +1471,9 @@ function MessagesScreen({
           <View style={{ flex: 1 }}>
             <Text style={s.heading}>{title}</Text>
             <Text style={s.note}>
-              {info?.kind === "group"
+              {info?.kind === "team"
+                ? "HR team only · " + info.members.length + " people"
+                : info?.kind === "group"
                 ? info.members.length + " people"
                 : "Direct message"}
             </Text>
@@ -1620,17 +1622,19 @@ function MessagesScreen({
           >
             <View style={s.avatar}>
               <Text style={s.avatarText}>
-                {r.kind === "group" ? "#" : initials(r.title)}
+                {r.kind === "team" ? "🛡" : r.kind === "group" ? "#" : initials(r.title)}
               </Text>
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.strong}>{r.title}</Text>
               <Text style={s.note} numberOfLines={1}>
                 {r.last_body
-                  ? (r.kind === "group" && r.last_from
+                  ? (r.kind !== "direct" && r.last_from
                       ? r.last_from.split(" ")[0] + ": "
                       : "") + r.last_body
-                  : r.kind === "group"
+                  : r.kind === "team"
+                    ? "HR team only"
+                    : r.kind === "group"
                     ? r.members + " people"
                     : "No messages yet"}
               </Text>
