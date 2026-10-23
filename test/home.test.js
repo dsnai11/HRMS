@@ -136,3 +136,28 @@ test("payroll uploads Form 16 by employee code and the employee downloads it", a
   assert.equal((await call("/admin/form16", { fy: "2025-26", employee_code: "LIF101", mime: "application/pdf", data: pdf("x") }, emp.token)).status, 403);
   assert.equal((await call("/admin/form16?fy=2025-26", undefined, owner)).data.length, 1);
 });
+
+test("extra profile sections: personal, medical, nominees and HR-only insurance", async (t) => {
+  const { call, owner, add } = await world(t);
+  const emp = await add("emp");
+  const put = (b, token = emp.token) => call("/profile/details", b, token, "PUT");
+  assert.equal((await put({ personal: { blood_group: "Z+" } })).status, 400);
+  assert.equal((await put({ nominees: [{ name: "Ma", share: 60 }] })).status, 400, "shares add to 100");
+  assert.equal((await put({ insurance: [] })).status, 403, "insurance is HR's");
+  const ok = await put({
+    personal: { father_name: "Ram", blood_group: "B+", marital_status: "married", children: 2 },
+    medical: { allergies: "Penicillin" },
+    nominees: [{ name: "Sita", relation: "Wife", share: 60 }, { name: "Ma", relation: "Mother", share: 40 }],
+  });
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  // Only what is sent changes.
+  await put({ medical: { allergies: "None" } });
+  const mine = (await call("/profile/details", undefined, emp.token)).data;
+  assert.equal(mine.personal.blood_group, "B+");
+  assert.equal(mine.medical.allergies, "None");
+  assert.equal(mine.nominees.length, 2);
+  const hr = await call(`/admin/employees/${emp.id}/details`, { insurance: [{ type: "health", provider: "Star", sum_insured: 500000, valid_till: "2027-03-31" }] }, owner, "PUT");
+  assert.equal(hr.status, 200, JSON.stringify(hr.data));
+  assert.equal((await call("/profile/details", undefined, emp.token)).data.insurance[0].provider, "Star");
+  assert.equal(hr.data.nominees.length, 2, "HR's save keeps the employee's sections");
+});

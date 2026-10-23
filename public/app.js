@@ -735,7 +735,7 @@ async function employeesPage(id) {
     if (id !== renderId) return;
     const rows = data.items;
     document.querySelector("#list").innerHTML = rows.length
-      ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Reports to</th><th>Workplace</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((e) => `<tr><td><div class="person"><span class="avatar">${initials(e.name)}</span><div>${esc(e.name)}<small>${esc(e.employee_code || "")} · ${esc(e.email)}</small></div></div></td><td>${esc(e.department_name || "—")}<small>${esc(e.designation_name || "")}</small></td><td>${esc(e.manager_name || "—")}</td><td>${esc(e.workplace_name || "—")}</td><td>${esc(roleLabel(e))}</td><td><span class="pill ${e.active ? "" : "neutral"}">${e.active ? "Active" : "Inactive"}</span></td><td>${has("employees.write") ? `<button class="secondary" data-edit="${e.id}">Manage</button> <button class="ghost" data-p360="${e.id}" data-name="${esc(e.name)}">360°</button>` : ""}</td></tr>`).join("")}</tbody></table></div><div class="pager"><span class="muted">${offset + 1}–${offset + rows.length} of ${data.total}</span><button class="secondary" id="prev" ${offset ? "" : "disabled"}>← Previous</button><button class="secondary" id="next" ${offset + limit < data.total ? "" : "disabled"}>Next →</button></div>`
+      ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Reports to</th><th>Workplace</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((e) => `<tr><td><div class="person"><span class="avatar">${initials(e.name)}</span><div>${esc(e.name)}<small>${esc(e.employee_code || "")} · ${esc(e.email)}</small></div></div></td><td>${esc(e.department_name || "—")}<small>${esc(e.designation_name || "")}</small></td><td>${esc(e.manager_name || "—")}</td><td>${esc(e.workplace_name || "—")}</td><td>${esc(roleLabel(e))}</td><td><span class="pill ${e.active ? "" : "neutral"}">${e.active ? "Active" : "Inactive"}</span></td><td>${has("employees.write") ? `<button class="secondary" data-edit="${e.id}">Manage</button> <button class="ghost" data-p360="${e.id}" data-name="${esc(e.name)}">360°</button>` : ""}${has("employees.read") ? ` <button class="ghost" data-details="${e.id}" data-name="${esc(e.name)}">Details</button>` : ""}</td></tr>`).join("")}</tbody></table></div><div class="pager"><span class="muted">${offset + 1}–${offset + rows.length} of ${data.total}</span><button class="secondary" id="prev" ${offset ? "" : "disabled"}>← Previous</button><button class="secondary" id="next" ${offset + limit < data.total ? "" : "disabled"}>Next →</button></div>`
       : empty("No employees found", "Adjust the search or add an employee.");
     document
       .querySelector("#prev")
@@ -760,6 +760,13 @@ async function employeesPage(id) {
           (b.onclick = () =>
             profile360Dialog(Number(b.dataset.p360), b.dataset.name)),
       );
+    document.querySelectorAll("[data-details]").forEach(
+      (b) =>
+        (b.onclick = () =>
+          busy(b, () =>
+            employeeDetailsDialog(Number(b.dataset.details), b.dataset.name),
+          )),
+    );
     document
       .querySelectorAll("[data-edit]")
       .forEach(
@@ -961,6 +968,7 @@ async function profileView(id) {
     ) +
     `<div class="card"><h2>${esc(p.name)}</h2><p class="muted">${esc(p.designation_name || "")}${p.designation_name && p.department_name ? " · " : ""}${esc(p.department_name || "")}</p>${row("Employee code", p.employee_code)}${row("Email", p.email)}${row("Role", roleLabel({ ...p, custom_role_name: p.custom_role_name ?? me.role_name }))}${row("Reports to", p.manager_name)}${row("Branch", p.branch_name)}${row("Workplace", p.workplace_name)}${row("Employment", EMPLOYMENT[p.employment_type])}${row("Date of joining", p.date_of_joining)}</div><div class="card"><h2>Contact</h2>${row("Phone", p.phone)}${row("Address", p.address)}${row("Emergency contact", [p.emergency_name, p.emergency_relation, p.emergency_phone].filter(Boolean).join(" · "))}</div><p class="muted">To change your name, email, department or other job details, contact HR.</p>`;
   await securityCard(id);
+  await myDetailsCard(id);
   await bankCard(id);
   await profile360Card(id);
   document.querySelector("#edit").onclick = () =>

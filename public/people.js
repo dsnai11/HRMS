@@ -679,3 +679,115 @@ async function myRosterCard(id) {
   card.innerHTML = `<h2>My roster, next two weeks</h2>${rows.map((r) => `<div class="activity"><strong>${fmtDate(r.date)}</strong> · ${r.off ? "Rest day" : `${esc(r.policy_name || "")} (${r.start_time}–${r.earliest_out})`}</div>`).join("")}`;
   document.querySelector("#content").append(card);
 }
+
+// ---- extra profile sections: personal, medical, nominees, insurance -------------------------------
+// The employee edits the first three; insurance is recorded by HR. `path` is
+// "/profile/details" for oneself, or "/admin/employees/<id>/details" for HR.
+const MARITAL = { single: "Single", married: "Married", divorced: "Divorced", widowed: "Widowed" };
+function detailsHtml(d, hr) {
+  const row = (label, value) =>
+    `<div class="kv"><span class="muted">${label}</span><strong>${esc(value ?? "—") || "—"}</strong></div>`;
+  const p = d.personal,
+    m = d.medical;
+  return `<div class="grid-two"><div class="card"><div class="card-head"><h2>Personal information</h2><button class="secondary" data-edit-details="personal">Edit</button></div>${row("Father's name", p.father_name)}${row("Blood group", p.blood_group)}${row("Marital status", MARITAL[p.marital_status])}${row("Children", p.children)}${row("Nationality", p.nationality)}${row("Personal email", p.personal_email)}</div><div class="card"><div class="card-head"><h2>Medical information</h2><button class="secondary" data-edit-details="medical">Edit</button></div>${row("Allergies", m.allergies)}${row("Medical conditions", m.conditions)}${row("Family doctor", m.doctor)}<p class="muted">Seen only by you and HR, for emergencies.</p></div></div><div class="grid-two"><div class="card"><div class="card-head"><h2>Nominees</h2><button class="secondary" data-edit-details="nominees">Edit</button></div>${
+    d.nominees.length
+      ? d.nominees
+          .map(
+            (n) =>
+              `<div class="kv"><span>${esc(n.name)}<small>${esc([n.relation, n.date_of_birth && fmtDate(n.date_of_birth)].filter(Boolean).join(" · "))}</small></span><strong>${n.share}%</strong></div>`,
+          )
+          .join("")
+      : '<p class="muted">No nominees recorded. Nominees receive benefits such as PF, gratuity and insurance.</p>'
+  }</div><div class="card"><div class="card-head"><h2>Insurance</h2>${hr ? '<button class="secondary" data-edit-details="insurance">Edit</button>' : ""}</div>${
+    d.insurance.length
+      ? d.insurance
+          .map(
+            (i) =>
+              `<div class="kv"><span>${esc(i.provider || "Policy")} <span class="pill neutral">${esc(i.type)}</span><small>${esc([i.policy_no && `No. ${i.policy_no}`, i.covers, i.valid_till && `valid till ${fmtDate(i.valid_till)}`].filter(Boolean).join(" · "))}</small></span><strong>${i.sum_insured ? inr(i.sum_insured) : ""}</strong></div>`,
+          )
+          .join("")
+      : `<p class="muted">${hr ? "No policies recorded." : "HR records the insurance cover provided to you."}</p>`
+  }</div></div>`;
+}
+function detailsWire(root, d, path, hr) {
+  const save = async (body) => {
+    await api(path, body, "PUT");
+    notice("Saved.");
+  };
+  const lines = (list, fields) =>
+    list.map((x) => fields.map((k) => x[k] ?? "").join(", ")).join("\n");
+  const forms = {
+    personal: () =>
+      dialog(
+        "Personal information",
+        `${input("father_name", "Father's name", d.personal.father_name ?? "", 'maxlength="100"')}<label>Blood group<select name="blood_group"><option value="">—</option>${d.options.blood_groups.map((b) => `<option ${d.personal.blood_group === b ? "selected" : ""}>${b}</option>`).join("")}</select></label><label>Marital status<select name="marital_status"><option value="">—</option>${Object.entries(MARITAL).map(([k, v]) => `<option value="${k}" ${d.personal.marital_status === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>${input("children", "Number of children", d.personal.children ?? "", 'type="number" min="0" max="20"')}${input("nationality", "Nationality", d.personal.nationality ?? "Indian", 'maxlength="50"')}${input("personal_email", "Personal email", d.personal.personal_email ?? "", 'type="email"')}`,
+        (f) =>
+          save({
+            personal: { ...f, children: f.children === "" ? null : Number(f.children) },
+          }),
+      ),
+    medical: () =>
+      dialog(
+        "Medical information",
+        `${input("allergies", "Allergies", d.medical.allergies ?? "", 'maxlength="300"')}${input("conditions", "Medical conditions", d.medical.conditions ?? "", 'maxlength="300"')}${input("doctor", "Family doctor and phone", d.medical.doctor ?? "", 'maxlength="150"')}`,
+        (f) => save({ medical: f }),
+      ),
+    nominees: () =>
+      dialog(
+        "Nominees",
+        `<label class="full">One per line: name, relation, date of birth (YYYY-MM-DD), share %<textarea name="list" rows="5" placeholder="Sunita Devi, Mother, 1965-04-12, 100">${esc(lines(d.nominees, ["name", "relation", "date_of_birth", "share"]))}</textarea></label><p class="full muted">Shares must add up to 100%.</p>`,
+        (f) =>
+          save({
+            nominees: f.list
+              .split("\n")
+              .map((l) => l.split(",").map((x) => x.trim()))
+              .filter((x) => x[0])
+              .map(([name, relation, date_of_birth, share]) => ({
+                name,
+                relation: relation || null,
+                date_of_birth: date_of_birth || null,
+                share: Number(share || 100),
+              })),
+          }),
+      ),
+    insurance: () =>
+      dialog(
+        "Insurance",
+        `<label class="full">One per line: type (health, life, accident, other), insurer, policy number, sum insured, valid till (YYYY-MM-DD), who is covered<textarea name="list" rows="5" placeholder="health, Star Health, P123456, 500000, 2027-03-31, Self, spouse and two children">${esc(lines(d.insurance, ["type", "provider", "policy_no", "sum_insured", "valid_till", "covers"]))}</textarea></label>`,
+        (f) =>
+          save({
+            insurance: f.list
+              .split("\n")
+              .map((l) => l.split(",").map((x) => x.trim()))
+              .filter((x) => x[0])
+              .map(([type, provider, policy_no, sum, valid_till, ...covers]) => ({
+                type: type.toLowerCase(),
+                provider: provider || null,
+                policy_no: policy_no || null,
+                sum_insured: sum ? Number(sum) : null,
+                valid_till: valid_till || null,
+                covers: covers.join(", ") || null,
+              })),
+          }),
+      ),
+  };
+  root.querySelectorAll("[data-edit-details]").forEach(
+    (b) => (b.onclick = () => (b.dataset.editDetails !== "insurance" || hr) && forms[b.dataset.editDetails]()),
+  );
+}
+async function myDetailsCard(id) {
+  const d = await api("/profile/details");
+  if (id !== renderId) return;
+  const box = document.createElement("div");
+  box.innerHTML = detailsHtml(d, false);
+  document.querySelector("#content").append(box);
+  detailsWire(box, d, "/profile/details", false);
+}
+async function employeeDetailsDialog(userId, name) {
+  const d = await api(`/admin/employees/${userId}/details`);
+  viewDialog(`${name} · details`, `<div id="emp-details">${detailsHtml(d, has("employees.write"))}</div>`);
+  const box = document.querySelector("#emp-details");
+  if (!has("employees.write"))
+    box.querySelectorAll("[data-edit-details]").forEach((b) => b.remove());
+  detailsWire(box, d, `/admin/employees/${userId}/details`, has("employees.write"));
+}
