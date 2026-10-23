@@ -1,4 +1,10 @@
-import { STEPS, chainOf, mayDecideStep } from "../approval-chain.js";
+import {
+  STEPS,
+  chainOf,
+  mayDecideStep,
+  nextStep,
+  stepApprovers,
+} from "../approval-chain.js";
 import {
   HttpError,
   string,
@@ -7,7 +13,7 @@ import {
   oneOf,
   optionalString,
 } from "../http.js";
-import { mayDecide, inboxScope } from "../approval.js";
+import { inboxScope } from "../approval.js";
 import { daysBetween, localToUtcMs, monthOf } from "../calendar.js";
 import { companySettings } from "../leave-ledger.js";
 import { evaluatePunchIn, halfDayReasons } from "../policy.js";
@@ -103,6 +109,25 @@ export function registerRegularization(router, app) {
       throw e;
     }
     await audit("regularization_requested", { id, kind, date });
+    // Waits on the first step of the company's correction approval chain.
+    const chain = await chainOf(db, user.company_id, "correction");
+    const step = Math.min(
+      await nextStep(db, user.company_id, user.id, chain, 0),
+      chain.length - 1,
+    );
+    await db
+      .prepare("UPDATE regularizations SET step=?,step_at=? WHERE id=?")
+      .run(step, nowIso(), id);
+    await app.notify(
+      await stepApprovers(db, user.company_id, user.id, chain[step]),
+      {
+        companyId: user.company_id,
+        kind: "approval",
+        title: `${user.name} asked to correct attendance for ${date}`,
+        body: `Waiting for: ${STEPS[chain[step]]}`,
+        link: "approvals",
+      },
+    );
     return send(201, { id });
   });
 
@@ -267,8 +292,50 @@ export function registerRegularization(router, app) {
       const b = await body();
       const decision = oneOf(b.decision, "Decision", ["approved", "rejected"]);
       const note = optionalString(b.note, "Note", 300);
-      if (!(await mayDecide(app, user, r.user_id)))
+      const chain = await chainOf(db, companyId, "correction");
+      if (!(await mayDecideStep(app, user, r, chain)))
         throw new HttpError(403, "You cannot decide this request.");
+      // An approval before the last step moves the correction on instead of applying it.
+      const following =
+        decision === "approved"
+          ? await nextStep(db, companyId, r.user_id, chain, r.step + 1)
+          : chain.length;
+      if (following < chain.length) {
+        const moved = await db
+          .prepare(
+            "UPDATE regularizations SET step=?,step_at=?,approvals=?,reminded_at=NULL,escalated_at=NULL WHERE id=? AND status='pending' AND step=?",
+          )
+          .run(
+            following,
+            nowIso(),
+            JSON.stringify([
+              ...JSON.parse(r.approvals || "[]"),
+              { step: chain[r.step], by: user.id, name: user.name, at: nowIso(), note },
+            ]),
+            r.id,
+            r.step,
+          );
+        if (!moved.changes)
+          throw new HttpError(409, "This correction has changed. Refresh and try again.");
+        await app.audit(
+          user,
+          "regularization_step_approved",
+          { id: r.id, employeeId: r.user_id, step: chain[r.step] },
+          companyId,
+        );
+        const who = await db.prepare("SELECT name FROM users WHERE id=?").get(r.user_id);
+        await app.notify(
+          await stepApprovers(db, companyId, r.user_id, chain[following]),
+          {
+            companyId,
+            kind: "approval",
+            title: `${who.name}'s attendance correction needs your approval`,
+            body: `Approved by ${user.name}. Waiting for: ${STEPS[chain[following]]}`,
+            link: "approvals",
+          },
+        );
+        return send(200, { ok: true, status: "pending", step: chain[following] });
+      }
       await transaction(async () => {
         const fresh = await db
           .prepare("SELECT status FROM regularizations WHERE id=?")
@@ -317,13 +384,23 @@ export function registerRegularization(router, app) {
           step_number: r.step + 1,
           steps: chain.length,
         });
+    const cchain = await chainOf(db, user.company_id, "correction");
+    const fixes = [];
+    for (const r of await db
+      .prepare(
+        `${SELECT} WHERE r.company_id=? AND r.status='pending' AND r.user_id<>?${scope.sql} ORDER BY r.date,r.id LIMIT 200`,
+      )
+      .all(...args))
+      if (await mayDecideStep(app, user, r, cchain))
+        fixes.push({
+          ...r,
+          step_name: STEPS[cchain[r.step]] ?? "HR",
+          step_number: r.step + 1,
+          steps: cchain.length,
+        });
     return send(200, {
       leave: mine,
-      regularizations: await db
-        .prepare(
-          `${SELECT} WHERE r.company_id=? AND r.status='pending' AND r.user_id<>?${scope.sql} ORDER BY r.date,r.id LIMIT 200`,
-        )
-        .all(...args),
+      regularizations: fixes,
     });
   });
 }

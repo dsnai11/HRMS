@@ -55,7 +55,7 @@ async function world(t) {
     await db.prepare("UPDATE users SET must_change_password=0 WHERE id=?").run(r.data.id);
     return { id: r.data.id, token: await signIn(`${key}@example.test`) };
   };
-  return { db, call, owner, add };
+  return { db, call, owner, add, base };
 }
 
 
@@ -92,4 +92,26 @@ test("home page data, optional holidays and leave contact details", async (t) =>
   assert.deepEqual([mine.address_on_leave, mine.contact_on_leave, mine.handover_name], ["Jaipur", "98290", "MATE"]);
   const inbox = (await call("/approvals", undefined, boss.token)).data.leave[0];
   assert.equal(inbox.handover_name, "MATE");
+});
+
+test("a medical document travels with a leave request to its approver only", async (t) => {
+  const { call, owner, add, base } = await world(t);
+  const mgr = await add("mgr");
+  const emp = await add("emp", { manager_id: mgr.id });
+  const other = await add("other");
+  await call("/admin/leave-types/seed-defaults", {}, owner);
+  const pdf = Buffer.from("%PDF-1.4\n%test\n").toString("base64");
+  const doc = await call("/documents", { kind: "medical", name: "Medical", mime: "application/pdf", data: pdf }, emp.token);
+  assert.equal(doc.status, 201, JSON.stringify(doc.data));
+  const lwp = (await call("/leave/balances", undefined, emp.token)).data.find((b) => b.unlimited);
+  const y = new Date().getFullYear();
+  // Someone else's document cannot be attached.
+  const foreign = await call("/documents", { kind: "medical", name: "X", mime: "application/pdf", data: pdf }, other.token);
+  assert.equal((await call("/leave/requests", { leave_type_id: lwp.leave_type_id, from_date: `${y}-12-29`, to_date: `${y}-12-29`, document_id: foreign.data.id }, emp.token)).status, 400);
+  const made = await call("/leave/requests", { leave_type_id: lwp.leave_type_id, from_date: `${y}-12-29`, to_date: `${y}-12-29`, document_id: doc.data.id }, emp.token);
+  assert.equal(made.status, 201, JSON.stringify(made.data));
+  const open = (who) => fetch(`${base}/documents/${doc.data.id}/file`, { headers: { Authorization: `Bearer ${who.token}` } }).then((r) => r.status);
+  assert.equal(await open(mgr), 200);
+  assert.equal(await open(other), 404);
+  assert.equal((await call("/leave/requests", undefined, emp.token)).data[0].document_id, doc.data.id);
 });

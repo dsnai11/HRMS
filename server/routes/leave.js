@@ -96,6 +96,7 @@ export function registerLeave(router, app) {
       .get(companyId);
     return {
       leave_chain: await chainOf(db, companyId),
+      correction_chain: await chainOf(db, companyId, "correction"),
       approval_steps: STEPS,
       approval_reminder_hours: c?.approval_reminder_hours ?? 24,
       approval_escalate_hours: c?.approval_escalate_hours ?? 72,
@@ -170,20 +171,21 @@ export function registerLeave(router, app) {
           0,
           31,
         );
-      if (b.leave_chain !== undefined) {
-        const steps = Array.isArray(b.leave_chain) ? b.leave_chain : [];
-        if (
-          !steps.length ||
-          steps.length > 3 ||
-          steps.some((x) => !STEPS[x]) ||
-          new Set(steps).size !== steps.length
-        )
-          throw new HttpError(
-            400,
-            "Choose one to three different approval steps.",
-          );
-        set.leave_chain = JSON.stringify(steps);
-      }
+      for (const key of ["leave_chain", "correction_chain"])
+        if (b[key] !== undefined) {
+          const steps = Array.isArray(b[key]) ? b[key] : [];
+          if (
+            !steps.length ||
+            steps.length > 3 ||
+            steps.some((x) => !STEPS[x]) ||
+            new Set(steps).size !== steps.length
+          )
+            throw new HttpError(
+              400,
+              "Choose one to three different approval steps.",
+            );
+          set[key] = JSON.stringify(steps);
+        }
       for (const [key, label] of [
         ["approval_reminder_hours", "Reminder after (hours)"],
         ["approval_escalate_hours", "Escalate after (hours)"],
@@ -609,6 +611,16 @@ export function registerLeave(router, app) {
     const address = optionalString(b.address_on_leave, "Address on leave", 300);
     const contact = optionalString(b.contact_on_leave, "Contact number", 20);
     const handover = optionalId(b.handover_to, "Work handled by");
+    const documentId = optionalId(b.document_id, "Document");
+    if (
+      documentId &&
+      !(await db
+        .prepare(
+          "SELECT id FROM documents WHERE id=? AND user_id=? AND deleted_at IS NULL",
+        )
+        .get(documentId, user.id))
+    )
+      throw new HttpError(400, "Upload the document first, then attach it.");
     if (
       handover &&
       (handover === user.id ||
@@ -665,7 +677,7 @@ export function registerLeave(router, app) {
         (
           await db
             .prepare(
-              "INSERT INTO leave_requests(company_id,user_id,leave_type_id,from_date,to_date,half_day,days,leave_year,reason,address_on_leave,contact_on_leave,handover_to,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              "INSERT INTO leave_requests(company_id,user_id,leave_type_id,from_date,to_date,half_day,days,leave_year,reason,address_on_leave,contact_on_leave,handover_to,document_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             )
             .run(
               user.company_id,
@@ -680,6 +692,7 @@ export function registerLeave(router, app) {
               address,
               contact,
               handover,
+              documentId,
               now(app),
             )
         ).lastInsertRowid,

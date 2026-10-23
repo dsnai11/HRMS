@@ -11,11 +11,13 @@ export const STEPS = {
   hr: "HR",
 };
 
-export async function chainOf(db, companyId) {
+// kind: "leave" or "correction" (attendance corrections have their own chain).
+export async function chainOf(db, companyId, kind = "leave") {
+  const column = kind === "correction" ? "correction_chain" : "leave_chain";
   const c = await db
-    .prepare("SELECT leave_chain FROM companies WHERE id=?")
+    .prepare(`SELECT ${column} chain FROM companies WHERE id=?`)
     .get(companyId);
-  const steps = JSON.parse(c?.leave_chain || '["manager"]').filter(
+  const steps = JSON.parse(c?.chain || '["manager"]').filter(
     (s) => STEPS[s],
   );
   return steps.length ? steps : ["manager"];
@@ -86,60 +88,67 @@ export async function mayDecideStep(app, approver, request, chain) {
   ).includes(approver.id);
 }
 
-// Reminds approvers about leave waiting too long at their step, and once a request
-// has waited past the escalation time, tells HR. Runs hourly.
+// Reminds approvers about leave and attendance corrections waiting too long at their
+// step, and once one has waited past the escalation time, tells HR. Runs hourly.
+const PENDING = [
+  ["leave_requests", "leave", "leave"],
+  ["regularizations", "correction", "attendance correction"],
+];
 export async function sendApprovalReminders(app) {
   const { db } = app;
   const now = app.clock();
-  const rows = await db
-    .prepare(
-      `SELECT r.id,r.company_id,r.user_id,r.step,r.step_at,r.created_at,r.reminded_at,r.escalated_at,u.name,
-         c.approval_reminder_hours rh,c.approval_escalate_hours eh
-       FROM leave_requests r JOIN users u ON u.id=r.user_id JOIN companies c ON c.id=r.company_id
-       WHERE r.status='pending' AND c.active=1`,
-    )
-    .all();
   const chains = new Map();
   let reminded = 0,
     escalated = 0;
-  for (const r of rows) {
-    if (!chains.has(r.company_id))
-      chains.set(r.company_id, await chainOf(db, r.company_id));
-    const step = chains.get(r.company_id)[r.step] ?? "hr";
-    const waiting = now - Date.parse(r.step_at || r.created_at);
-    const hours = Math.floor(waiting / 3600000);
-    if (!r.escalated_at && waiting >= r.eh * 3600000) {
-      await app.notify(await hrApprovers(db, r.company_id, r.user_id), {
-        companyId: r.company_id,
-        kind: "approval",
-        title: `Escalated: ${r.name}'s leave has waited ${hours} hours`,
-        body: `Still waiting for: ${STEPS[step]}. HR can decide it.`,
-        link: "approvals",
-        email: true,
-        sms: true,
-      });
-      await db
-        .prepare("UPDATE leave_requests SET escalated_at=? WHERE id=?")
-        .run(new Date(now).toISOString(), r.id);
-      escalated += 1;
-    } else if (
-      now - Date.parse(r.reminded_at || r.step_at || r.created_at) >=
-      r.rh * 3600000
-    ) {
-      await app.notify(
-        await stepApprovers(db, r.company_id, r.user_id, step),
-        {
+  for (const [table, kind, what] of PENDING) {
+    const rows = await db
+      .prepare(
+        `SELECT r.id,r.company_id,r.user_id,r.step,r.step_at,r.created_at,r.reminded_at,r.escalated_at,u.name,
+           c.approval_reminder_hours rh,c.approval_escalate_hours eh
+         FROM ${table} r JOIN users u ON u.id=r.user_id JOIN companies c ON c.id=r.company_id
+         WHERE r.status='pending' AND c.active=1`,
+      )
+      .all();
+    for (const r of rows) {
+      const key = `${kind}:${r.company_id}`;
+      if (!chains.has(key))
+        chains.set(key, await chainOf(db, r.company_id, kind));
+      const step = chains.get(key)[r.step] ?? "hr";
+      const waiting = now - Date.parse(r.step_at || r.created_at);
+      const hours = Math.floor(waiting / 3600000);
+      if (!r.escalated_at && waiting >= r.eh * 3600000) {
+        await app.notify(await hrApprovers(db, r.company_id, r.user_id), {
           companyId: r.company_id,
           kind: "approval",
-          title: `Reminder: ${r.name}'s leave is waiting for you`,
-          body: `Waiting ${hours} hours for: ${STEPS[step]}.`,
+          title: `Escalated: ${r.name}'s ${what} has waited ${hours} hours`,
+          body: `Still waiting for: ${STEPS[step]}. HR can decide it.`,
           link: "approvals",
-        },
-      );
-      await db
-        .prepare("UPDATE leave_requests SET reminded_at=? WHERE id=?")
-        .run(new Date(now).toISOString(), r.id);
-      reminded += 1;
+          email: true,
+          sms: true,
+        });
+        await db
+          .prepare(`UPDATE ${table} SET escalated_at=? WHERE id=?`)
+          .run(new Date(now).toISOString(), r.id);
+        escalated += 1;
+      } else if (
+        now - Date.parse(r.reminded_at || r.step_at || r.created_at) >=
+        r.rh * 3600000
+      ) {
+        await app.notify(
+          await stepApprovers(db, r.company_id, r.user_id, step),
+          {
+            companyId: r.company_id,
+            kind: "approval",
+            title: `Reminder: ${r.name}'s ${what} is waiting for you`,
+            body: `Waiting ${hours} hours for: ${STEPS[step]}.`,
+            link: "approvals",
+          },
+        );
+        await db
+          .prepare(`UPDATE ${table} SET reminded_at=? WHERE id=?`)
+          .run(new Date(now).toISOString(), r.id);
+        reminded += 1;
+      }
     }
   }
   return { reminded, escalated };

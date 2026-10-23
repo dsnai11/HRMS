@@ -7,6 +7,7 @@ const DOC_KIND = {
   experience: "Experience letter",
   bank: "Bank proof",
   offer_letter: "Offer letter",
+  medical: "Medical",
   other: "Other",
 };
 const REVIEW_STATUS = {

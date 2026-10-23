@@ -66,6 +66,8 @@ const leaveExtras = (r) =>
     r.address_on_leave && `Address: ${esc(r.address_on_leave)}`,
     r.contact_on_leave && `Contact: ${esc(r.contact_on_leave)}`,
     r.handover_name && `Work handled by ${esc(r.handover_name)}`,
+    r.document_id &&
+      `<a href="/api/documents/${r.document_id}/file" target="_blank" rel="noopener">Medical document ↗</a>`,
     r.status === "pending" &&
       JSON.parse(r.approvals || "[]").length &&
       `Approved so far by ${JSON.parse(r.approvals)
@@ -101,7 +103,7 @@ async function timeOffPage(id) {
             )
             .join(
               "",
-            )}</select></label><p class="error-text full" id="leave-error" role="alert"></p><div class="actions full"><button>Submit</button></div></form>`
+            )}</select></label><label class="full">Upload Medical Document (optional; PDF, JPG or PNG up to 2 MB)<input type="file" name="medical" accept="application/pdf,image/jpeg,image/png"></label><p class="error-text full" id="leave-error" role="alert"></p><div class="actions full"><button>Submit</button></div></form>`
         : empty("No leave types yet", "HR has not set up leave for your company.")
     }</div><div class="card"><h2>Leave Balance</h2><div class="lb-row"><span>Leave Summary For Year</span><strong>${month.slice(0, 4)}</strong></div>${bal
       .map(
@@ -160,6 +162,23 @@ async function timeOffPage(id) {
       const half = form.is_half.checked;
       busy(e.submitter, async () => {
         try {
+          // The document is stored first, then attached to the request.
+          const file = form.medical.files[0];
+          let documentId = null;
+          if (file) {
+            if (file.size > 2 * 1024 * 1024)
+              throw new Error("The document can be up to 2 MB.");
+            if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type))
+              throw new Error("Use a PDF, JPG or PNG document.");
+            documentId = (
+              await api("/documents", {
+                kind: "medical",
+                name: `Medical, leave from ${f.from_date}`,
+                mime: file.type,
+                data: await toB64(file),
+              })
+            ).id;
+          }
           const r = await api("/leave/requests", {
             leave_type_id: Number(f.leave_type_id),
             from_date: f.from_date,
@@ -169,6 +188,7 @@ async function timeOffPage(id) {
             address_on_leave: f.address_on_leave || null,
             contact_on_leave: f.contact_on_leave || null,
             handover_to: f.handover_to ? Number(f.handover_to) : null,
+            document_id: documentId,
           });
           notice(`Leave request sent for approval: ${r.days} day(s).`);
           await render();
@@ -235,7 +255,7 @@ async function approvalsPage(id) {
         : empty("Nothing waiting", "No leave requests need your decision.")
     }</div><div class="card"><h2>Attendance corrections</h2>${
       data.regularizations.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th>Date</th><th>Times</th><th></th></tr></thead><tbody>${data.regularizations.map((r) => `<tr><td>${esc(r.employee_name)}<small>${esc(r.employee_code || "")}</small></td><td>${esc(REG_KINDS[r.kind])}<small>${esc(r.reason)}</small></td><td>${fmtDate(r.date)}</td><td>${esc([r.in_time, r.out_time].filter(Boolean).join(" – ") || "Standard day")}</td><td>${buttons("reg", r)}</td></tr>`).join("")}</tbody></table></div>`
+        ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th>Date</th><th>Times</th><th></th></tr></thead><tbody>${data.regularizations.map((r) => `<tr><td>${esc(r.employee_name)}<small>${esc(r.employee_code || "")}</small></td><td>${esc(REG_KINDS[r.kind])}<small>${esc(r.reason)}</small>${r.steps > 1 ? `<small>Step ${r.step_number} of ${r.steps}: ${esc(r.step_name)}</small>` : ""}</td><td>${fmtDate(r.date)}</td><td>${esc([r.in_time, r.out_time].filter(Boolean).join(" – ") || "Standard day")}</td><td>${buttons("reg", r)}</td></tr>`).join("")}</tbody></table></div>`
         : empty("Nothing waiting", "No corrections need your decision.")
     }</div>`;
   document.querySelectorAll("[data-act]").forEach(
@@ -321,21 +341,27 @@ async function leaveAdminTabHtml(tab) {
         new Date(2000, i, 1).toLocaleString("en", { month: "long" }),
       ]),
       s.leave_year_start_month,
-    )}${input("leave_start_year", "First leave year with balances", s.leave_start_year ?? "", 'type="number" min="2000" max="2100"')}<div class="full"><strong>Weekly offs</strong></div><div class="full checks">${days.map((d, i) => `<label class="check"><input type="checkbox" name="wo${i}" ${s.weekly_off_days.includes(i) ? "checked" : ""}> ${d}</label>`).join("")}</div><div class="full"><strong>Saturdays off</strong> <span class="muted">(in addition to the above)</span></div><div class="full checks">${[1, 2, 3, 4, 5].map((n) => `<label class="check"><input type="checkbox" name="sat${n}" ${s.weekly_off_saturdays.includes(n) ? "checked" : ""}> ${["1st", "2nd", "3rd", "4th", "5th"][n - 1]}</label>`).join("")}</div><div class="full"><strong>Attendance</strong></div>${input("attendance_start_date", "Counted from (blank = the day your company started)", s.attendance_start_date || "", 'type="date"')}<div class="full"><strong>Attendance corrections</strong></div>${input("regularization_window_days", "Allowed up to (days back)", s.regularization_window_days, 'type="number" min="0" max="90"')}${input("regularization_monthly_limit", "Per person per month (0 = unlimited)", s.regularization_monthly_limit, 'type="number" min="0" max="31"')}<div class="full"><strong>Leave approval chain</strong> <span class="muted">(each step approves in turn; HR can act at any step)</span></div>${[0, 1, 2]
+    )}${input("leave_start_year", "First leave year with balances", s.leave_start_year ?? "", 'type="number" min="2000" max="2100"')}<div class="full"><strong>Weekly offs</strong></div><div class="full checks">${days.map((d, i) => `<label class="check"><input type="checkbox" name="wo${i}" ${s.weekly_off_days.includes(i) ? "checked" : ""}> ${d}</label>`).join("")}</div><div class="full"><strong>Saturdays off</strong> <span class="muted">(in addition to the above)</span></div><div class="full checks">${[1, 2, 3, 4, 5].map((n) => `<label class="check"><input type="checkbox" name="sat${n}" ${s.weekly_off_saturdays.includes(n) ? "checked" : ""}> ${["1st", "2nd", "3rd", "4th", "5th"][n - 1]}</label>`).join("")}</div><div class="full"><strong>Attendance</strong></div>${input("attendance_start_date", "Counted from (blank = the day your company started)", s.attendance_start_date || "", 'type="date"')}<div class="full"><strong>Attendance corrections</strong></div>${input("regularization_window_days", "Allowed up to (days back)", s.regularization_window_days, 'type="number" min="0" max="90"')}${input("regularization_monthly_limit", "Per person per month (0 = unlimited)", s.regularization_monthly_limit, 'type="number" min="0" max="31"')}${[
+      ["leave_chain", "chain", "Leave approval chain"],
+      ["correction_chain", "cchain", "Attendance correction approval chain"],
+    ]
       .map(
-        (i) =>
-          `<label>Step ${i + 1}<select name="chain${i}">${i ? '<option value="">— None —</option>' : ""}${Object.entries(
-            s.approval_steps,
-          )
+        ([key, prefix, title]) =>
+          `<div class="full"><strong>${title}</strong> <span class="muted">(each step approves in turn; HR can act at any step)</span></div>${[0, 1, 2]
             .map(
-              ([k, v]) =>
-                `<option value="${k}" ${s.leave_chain[i] === k ? "selected" : ""}>${esc(v)}</option>`,
+              (i) =>
+                `<label>Step ${i + 1}<select name="${prefix}${i}">${i ? '<option value="">— None —</option>' : ""}${Object.entries(
+                  s.approval_steps,
+                )
+                  .map(
+                    ([k, v]) =>
+                      `<option value="${k}" ${s[key][i] === k ? "selected" : ""}>${esc(v)}</option>`,
+                  )
+                  .join("")}</select></label>`,
             )
-            .join("")}</select></label>`,
+            .join("")}`,
       )
-      .join(
-        "",
-      )}${input("approval_reminder_hours", "Remind the approver after (hours)", s.approval_reminder_hours, 'type="number" min="1" max="720"')}${input("approval_escalate_hours", "Escalate to HR after (hours)", s.approval_escalate_hours, 'type="number" min="1" max="720"')}<div class="full form-actions"><button>Save</button></div></form></div>`;
+      .join("")}${input("approval_reminder_hours", "Remind the approver after (hours)", s.approval_reminder_hours, 'type="number" min="1" max="720"')}${input("approval_escalate_hours", "Escalate to HR after (hours)", s.approval_escalate_hours, 'type="number" min="1" max="720"')}<div class="full form-actions"><button>Save</button></div></form></div>`;
   }
   if (tab === "requests") {
     const q = leaveAdminCache.status ?? "pending";
@@ -526,6 +552,9 @@ async function leaveAdminWire(tab) {
           ),
           leave_chain: [0, 1, 2]
             .map((i) => f.get(`chain${i}`))
+            .filter(Boolean),
+          correction_chain: [0, 1, 2]
+            .map((i) => f.get(`cchain${i}`))
             .filter(Boolean),
           approval_reminder_hours: Number(f.get("approval_reminder_hours")),
           approval_escalate_hours: Number(f.get("approval_escalate_hours")),

@@ -1,6 +1,7 @@
 import { HttpError, integer, oneOf, string } from "../http.js";
 import { requireOwned } from "../scope.js";
 import { can } from "../rbac.js";
+import { mayDecide } from "../approval.js";
 
 export const KINDS = [
   "id_proof",
@@ -10,6 +11,7 @@ export const KINDS = [
   "experience",
   "bank",
   "offer_letter",
+  "medical",
   "other",
 ];
 export const TYPES = {
@@ -126,7 +128,14 @@ export function registerDocuments(router, app) {
         user.company_id,
         "document",
       );
-      if (d.deleted_at || !mayAccess(user, d.user_id))
+      // Whoever may decide a leave request may also open its supporting document.
+      const forLeave = async () => {
+        const r = await db
+          .prepare("SELECT user_id FROM leave_requests WHERE document_id=? AND company_id=?")
+          .get(d.id, user.company_id);
+        return r ? mayDecide(app, user, r.user_id) : false;
+      };
+      if (d.deleted_at || !(mayAccess(user, d.user_id) || (await forLeave())))
         throw new HttpError(404, "Document not found.");
       if (d.user_id !== user.id)
         await audit("document_viewed", { id: d.id, employeeId: d.user_id });

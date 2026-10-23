@@ -191,3 +191,31 @@ test("360 feedback rounds are anonymous and hide small groups", async (t) => {
   assert.ok(!JSON.stringify(hr).match(/rater_id/));
   assert.equal((await call("/admin/feedback-rounds", undefined, owner)).data[0].submitted, 8);
 });
+
+test("attendance corrections follow their own approval chain", async (t) => {
+  const { call, owner, add, app, tick } = await world(t);
+  const head = await add("head");
+  const mgr = await add("mgr", { manager_id: head.id });
+  const hr = await add("hr", { role: "hr" });
+  const site = (await call("/admin/workplaces", { name: "Office", latitude: 26.9, longitude: 75.8, radius: 150, max_accuracy: 50 }, owner)).data.id;
+  const emp = await add("emp", { manager_id: mgr.id, workplace_id: site });
+  const set = await call("/admin/leave-settings", { correction_chain: ["manager", "hr"] }, owner, "PATCH");
+  assert.deepEqual(set.data.correction_chain, ["manager", "hr"]);
+  assert.deepEqual(set.data.leave_chain, ["manager"], "leave keeps its own chain");
+
+  const r = await call("/regularizations", { kind: "on_duty", date: "2026-11-02", reason: "Client visit" }, emp.token);
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  const inbox = async (who) => (await call("/approvals", undefined, who.token)).data.regularizations.map((x) => x.step_name);
+  assert.deepEqual(await inbox(mgr), ["Reporting manager"]);
+  const decide = (who) => call(`/regularizations/${r.data.id}/decision`, { decision: "approved" }, who.token);
+  assert.equal((await decide(mgr)).data.step, "hr");
+  assert.deepEqual(await inbox(mgr), []);
+  assert.deepEqual(await inbox(hr), ["HR"]);
+  tick(25);
+  assert.equal((await sendApprovalReminders(app)).reminded, 1);
+  const last = await decide(hr);
+  assert.equal(last.status, 200, JSON.stringify(last.data));
+  const mine = (await call("/regularizations", undefined, emp.token)).data.find((x) => x.id === r.data.id);
+  assert.equal(mine.status, "approved");
+  assert.equal(JSON.parse(mine.approvals).length, 1);
+});
