@@ -64,6 +64,7 @@ async function payrollPage(id) {
         )),
     );
   await payrollWire(tab);
+  if (tab === "statutory" && has("payroll.manage")) await form16AdminCard(id);
 }
 
 const payrollCache = {};
@@ -646,4 +647,68 @@ async function payslipsPage(id) {
   await ytdCard(id);
   await declarationCard(id);
   await taxStatementCard(id);
+  await form16Card(id);
+}
+
+// ---- Form 16 ------------------------------------------------------------------------------------------
+// Employees download the Form 16 payroll uploaded for them.
+async function form16Card(id) {
+  const list = await api("/form16");
+  if (id !== renderId) return;
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>Form 16</h2>${
+    list.length
+      ? list
+          .map(
+            (d) =>
+              `<div class="kv"><span>${esc(d.name)}</span><a class="button secondary" href="/api/documents/${d.id}/file" target="_blank" rel="noopener">Download</a></div>`,
+          )
+          .join("")
+      : '<p class="muted">Your Form 16 appears here once payroll uploads it, usually by mid-June.</p>'
+  }`;
+  document.querySelector("#content").append(card);
+}
+
+// Payroll uploads the signed PDFs from TRACES, many at once, each named by the
+// employee code (for example E1002.pdf or E1002_Form16.pdf).
+async function form16AdminCard(id) {
+  const now = new Date();
+  const start = now.getMonth() >= 3 ? now.getFullYear() - 1 : now.getFullYear() - 2;
+  const fy = `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
+  const list = await api(`/admin/form16?fy=${fy}`);
+  if (id !== renderId) return;
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<div class="card-head"><div><h2>Form 16</h2><p class="muted">Upload the signed Form 16 PDFs from TRACES. Name each file by employee code, for example E1002.pdf or E1002_Form16.pdf. Employees are told and download it from Payslips.</p></div></div><form id="f16" class="form-grid">${input("fy", "Financial year", fy, 'required pattern="20[0-9]{2}-[0-9]{2}"')}<label>PDF files<input type="file" name="files" accept="application/pdf" multiple required></label><div class="actions full"><button>Upload</button></div></form><div id="f16-out"></div><p class="muted">${list.length} uploaded for FY ${esc(fy)}.</p>`;
+  document.querySelector("#content").append(card);
+  card.querySelector("#f16").onsubmit = (e) => {
+    e.preventDefault();
+    const f = e.target;
+    busy(e.submitter, async () => {
+      const results = [];
+      for (const file of f.files.files) {
+        const code = file.name.replace(/\.pdf$/i, "").split(/[_\s]/)[0];
+        try {
+          if (file.size > 2 * 1024 * 1024) throw new Error("larger than 2 MB");
+          const r = await api("/admin/form16", {
+            fy: f.fy.value.trim(),
+            employee_code: code,
+            mime: "application/pdf",
+            data: await toB64(file),
+          });
+          results.push([file.name, `Uploaded for ${esc(r.employee)}`, true]);
+        } catch (err) {
+          results.push([file.name, esc(err.message), false]);
+        }
+      }
+      card.querySelector("#f16-out").innerHTML = results
+        .map(
+          ([n, msg, ok]) =>
+            `<div class="kv"><span>${esc(n)}</span><span class="pill ${ok ? "" : "danger"}">${msg}</span></div>`,
+        )
+        .join("");
+      notice(`${results.filter((r) => r[2]).length} of ${results.length} uploaded.`);
+    });
+  };
 }

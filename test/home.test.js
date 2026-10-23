@@ -115,3 +115,24 @@ test("a medical document travels with a leave request to its approver only", asy
   assert.equal(await open(other), 404);
   assert.equal((await call("/leave/requests", undefined, emp.token)).data[0].document_id, doc.data.id);
 });
+
+test("payroll uploads Form 16 by employee code and the employee downloads it", async (t) => {
+  const { call, owner, add, base } = await world(t);
+  const emp = await add("emp", { employee_code: "LIF101" });
+  const other = await add("other");
+  const pdf = (s) => Buffer.from(`%PDF-1.4\n${s}\n`).toString("base64");
+  const up = (b) => call("/admin/form16", { mime: "application/pdf", ...b }, owner);
+  assert.equal((await up({ fy: "2025-27", employee_code: "LIF101", data: pdf("a") })).status, 400);
+  assert.equal((await up({ fy: "2025-26", employee_code: "NOPE", data: pdf("a") })).status, 404);
+  assert.equal((await up({ fy: "2025-26", employee_code: "lif101", data: Buffer.from("not a pdf").toString("base64") })).status, 400);
+  assert.equal((await up({ fy: "2025-26", employee_code: "lif101", data: pdf("first") })).status, 201);
+  const again = await up({ fy: "2025-26", employee_code: "LIF101", data: pdf("second") });
+  assert.equal(again.data.employee, "EMP");
+  const mine = (await call("/form16", undefined, emp.token)).data;
+  assert.deepEqual(mine.map((d) => d.name), ["Form 16 FY 2025-26"], "the new upload replaces the old");
+  const file = await fetch(`${base}/documents/${mine[0].id}/file`, { headers: { Authorization: `Bearer ${emp.token}` } });
+  assert.match(await file.text(), /second/);
+  assert.equal((await call("/form16", undefined, other.token)).data.length, 0);
+  assert.equal((await call("/admin/form16", { fy: "2025-26", employee_code: "LIF101", mime: "application/pdf", data: pdf("x") }, emp.token)).status, 403);
+  assert.equal((await call("/admin/form16?fy=2025-26", undefined, owner)).data.length, 1);
+});
