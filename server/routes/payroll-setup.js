@@ -55,15 +55,20 @@ const PRIVATE_FIELDS = {
     /^.{2,100}$/,
     "Account holder name is too short or too long",
   ],
+  aadhaar: [/^[2-9]\d{11}$/, "Aadhaar must be 12 digits and cannot start with 0 or 1"],
+  // A separate account for reimbursements, if the employee wants one.
+  reimb_bank_account: [/^\d{6,20}$/, "Reimbursement bank account must be 6–20 digits"],
+  reimb_ifsc: [/^[A-Z]{4}0[A-Z0-9]{6}$/, "Reimbursement IFSC must look like HDFC0001234"],
+  reimb_bank_name: [/^.{2,60}$/, "Reimbursement bank name is too short or too long"],
 };
-const SENSITIVE = ["pan", "uan", "esi_ip", "bank_account"];
+const SENSITIVE = ["pan", "uan", "esi_ip", "bank_account", "aadhaar", "reimb_bank_account"];
 
 /** Validates the fields present in `input` and merges them over `base`; throws 400 on a bad value. */
 export function cleanPrivate(input, base = {}) {
   const data = { ...base };
   for (const [field, [pattern, message]] of Object.entries(PRIVATE_FIELDS)) {
     if (input[field] === undefined) continue;
-    const free = field === "bank_name" || field === "account_holder";
+    const free = ["bank_name", "account_holder", "reimb_bank_name"].includes(field);
     const v =
       typeof input[field] === "string"
         ? free
@@ -482,7 +487,7 @@ export function registerPayrollSetup(router, app) {
       ).n;
       const items = await db
         .prepare(
-          `SELECT u.id,u.name,u.employee_code,d.name department_name,s.monthly_gross,s.effective_from,s.tax_regime,s.pf_applicable,s.esi_applicable
+          `SELECT u.id,u.name,u.employee_code,d.name department_name,s.monthly_gross,s.effective_from,s.tax_regime,s.pf_applicable,s.esi_applicable,s.vpf_percent
          FROM users u LEFT JOIN departments d ON d.id=u.department_id
          LEFT JOIN employee_salaries s ON s.id=(SELECT id FROM employee_salaries WHERE user_id=u.id ORDER BY effective_from DESC LIMIT 1)
          WHERE ${clause} ORDER BY u.name,u.id LIMIT ? OFFSET ?`,
@@ -561,6 +566,10 @@ export function registerPayrollSetup(router, app) {
       esi_applicable: flag("esi_applicable", 0),
       pt_applicable: flag("pt_applicable", 1),
       eps_eligible: flag("eps_eligible", 1),
+      vpf_percent:
+        b.vpf_percent === undefined || b.vpf_percent === "" || b.vpf_percent === null
+          ? 0
+          : number(Number(b.vpf_percent), "VPF %", 0, 100),
       tax_regime: regime,
       declared_deductions: declared,
     };
@@ -640,7 +649,7 @@ export function registerPayrollSetup(router, app) {
         (
           await db
             .prepare(
-              "INSERT INTO employee_salaries(company_id,user_id,effective_from,monthly_gross,pf_applicable,esi_applicable,pt_applicable,eps_eligible,tax_regime,declared_deductions,note,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              "INSERT INTO employee_salaries(company_id,user_id,effective_from,monthly_gross,pf_applicable,esi_applicable,pt_applicable,eps_eligible,vpf_percent,tax_regime,declared_deductions,note,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             )
             .run(
               companyId,
@@ -651,6 +660,7 @@ export function registerPayrollSetup(router, app) {
               flags.esi_applicable,
               flags.pt_applicable,
               flags.eps_eligible,
+              flags.vpf_percent,
               flags.tax_regime,
               flags.declared_deductions,
               spec.note,

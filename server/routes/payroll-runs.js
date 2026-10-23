@@ -163,6 +163,7 @@ export function registerPayrollRuns(router, app) {
           esi_applicable: Boolean(salary.esi_applicable),
           pt_applicable: Boolean(salary.pt_applicable),
           eps_eligible: Boolean(salary.eps_eligible),
+          vpf_percent: Number(salary.vpf_percent ?? 0),
           tax_regime: salary.tax_regime,
           declared_deductions: salary.declared_deductions,
         },

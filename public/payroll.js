@@ -562,7 +562,7 @@ function salaryDialog(e) {
         ["old", "Old regime"],
       ],
       e.tax_regime || "new",
-    )}${input("declared_deductions", "Declared deductions, old regime (₹ a year)", 0, 'type="number" min="0"')}<label class="check"><input type="checkbox" name="pf_applicable" ${e.monthly_gross ? (e.pf_applicable ? "checked" : "") : "checked"}> PF applies</label><label class="check"><input type="checkbox" name="eps_eligible" checked> Eligible for EPS (pension)</label><label class="check"><input type="checkbox" name="esi_applicable" ${e.esi_applicable ? "checked" : ""}> ESI applies (wages up to ₹21,000)</label><label class="check"><input type="checkbox" name="pt_applicable" checked> Professional tax applies</label><label class="full">Note<input name="note" maxlength="300"></label>`,
+    )}${input("declared_deductions", "Declared deductions, old regime (₹ a year)", 0, 'type="number" min="0"')}<label class="check"><input type="checkbox" name="pf_applicable" ${e.monthly_gross ? (e.pf_applicable ? "checked" : "") : "checked"}> PF applies</label><label class="check"><input type="checkbox" name="eps_eligible" checked> Eligible for EPS (pension)</label>${input("vpf_percent", "Voluntary PF (% of PF wages, optional)", e.vpf_percent || "", 'type="number" min="0" max="100" step="0.5"')}<label class="check"><input type="checkbox" name="esi_applicable" ${e.esi_applicable ? "checked" : ""}> ESI applies (wages up to ₹21,000)</label><label class="check"><input type="checkbox" name="pt_applicable" checked> Professional tax applies</label><label class="full">Note<input name="note" maxlength="300"></label>`,
     async (b) => {
       const body = {
         effective_from: b.effective_from,
@@ -570,6 +570,7 @@ function salaryDialog(e) {
         tax_regime: b.tax_regime,
         declared_deductions: Number(b.declared_deductions || 0),
         note: b.note || undefined,
+        vpf_percent: Number(b.vpf_percent || 0),
       };
       for (const k of [
         "pf_applicable",
@@ -613,12 +614,13 @@ async function privateDialog(e) {
     );
   dialog(
     `Bank & IDs for ${e.name}`,
-    `<p class="full muted">Stored encrypted. Existing values are masked; type a new value to replace one, or leave a field as it is to keep it.</p>${input("account_holder", "Account holder", d.account_holder || "", 'maxlength="100"')}${input("bank_name", "Bank", d.bank_name || "", 'maxlength="60"')}${input("bank_account", "Account number", "", `placeholder="${esc(d.bank_account || "")}" inputmode="numeric"`)}${input("ifsc", "IFSC", d.ifsc || "", 'maxlength="11"')}${input("pan", "PAN", "", `placeholder="${esc(d.pan || "")}" maxlength="10"`)}${input("uan", "UAN (PF)", "", `placeholder="${esc(d.uan || "")}" maxlength="12"`)}${input("esi_ip", "ESI number", "", `placeholder="${esc(d.esi_ip || "")}" maxlength="17"`)}`,
+    `<p class="full muted">Stored encrypted. Existing values are masked; type a new value to replace one, or leave a field as it is to keep it.</p>${input("account_holder", "Account holder", d.account_holder || "", 'maxlength="100"')}${input("bank_name", "Bank", d.bank_name || "", 'maxlength="60"')}${input("bank_account", "Account number", "", `placeholder="${esc(d.bank_account || "")}" inputmode="numeric"`)}${input("ifsc", "IFSC", d.ifsc || "", 'maxlength="11"')}${input("pan", "PAN", "", `placeholder="${esc(d.pan || "")}" maxlength="10"`)}${input("uan", "UAN (PF)", "", `placeholder="${esc(d.uan || "")}" maxlength="12"`)}${input("esi_ip", "ESI number", "", `placeholder="${esc(d.esi_ip || "")}" maxlength="17"`)}${input("aadhaar", "Aadhaar", "", `placeholder="${esc(d.aadhaar || "")}" maxlength="12" inputmode="numeric"`)}<div class="full"><strong>Reimbursement account</strong> <span class="muted">(only if claims should go to a different account)</span></div>${input("reimb_bank_name", "Bank", d.reimb_bank_name || "", 'maxlength="60"')}${input("reimb_bank_account", "Account number", "", `placeholder="${esc(d.reimb_bank_account || "")}" inputmode="numeric"`)}${input("reimb_ifsc", "IFSC", d.reimb_ifsc || "", 'maxlength="11"')}`,
     async (b) => {
       const body = Object.fromEntries(
         Object.entries(b).filter(
           ([k, v]) =>
-            v !== "" || ["account_holder", "bank_name", "ifsc"].includes(k),
+            v !== "" ||
+            ["account_holder", "bank_name", "ifsc", "reimb_bank_name", "reimb_ifsc"].includes(k),
         ),
       );
       await api(`/admin/employees/${e.id}/private`, body, "PUT");

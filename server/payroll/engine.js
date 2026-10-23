@@ -154,7 +154,7 @@ export function professionalTax(slabs, { gross, gender, monthNumber }) {
  *   lines        monthly salary lines { code, name, amount, is_basic, taxable, esi_wage }
  *   attendance   { paid_days } from the muster
  *   adjustments  one-off { kind: "earning"|"deduction", name, amount, taxable }
- *   flags        { pf_applicable, esi_applicable, pt_applicable, eps_eligible, tax_regime, declared_deductions }
+ *   flags        { pf_applicable, esi_applicable, pt_applicable, eps_eligible, vpf_percent, tax_regime, declared_deductions }
  *   person       { gender, date_of_birth }
  *   ptSlabs      slab rows for the employee's state
  *   ytd          { taxable_income, tds_deducted, pt_deducted } earned earlier this tax year
@@ -203,6 +203,12 @@ export function computePayslip({
       restrictToCeiling: config.pf.restrictToCeiling,
       epsEligible: flags.eps_eligible !== false,
     });
+    // Voluntary PF: extra employee contribution on the same wages; the employer pays
+    // nothing extra, and the ECR reports it inside the employee share.
+    if (flags.vpf_percent > 0) {
+      pf.vpf = round((pf.base * flags.vpf_percent) / 100);
+      pf.employee += pf.vpf;
+    }
   }
   // ESI.
   let esi = null;
@@ -273,7 +279,7 @@ export function computePayslip({
   const deductionLines = [
     pf && {
       code: "PF",
-      name: "Provident fund (employee)",
+      name: pf.vpf ? "Provident fund (employee, incl. VPF)" : "Provident fund (employee)",
       amount: pf.employee,
     },
     esi &&

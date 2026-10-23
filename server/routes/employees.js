@@ -40,6 +40,10 @@ const PROFILE = {
   date_of_joining: ["Date of joining", isoDate],
   employment_type: ["Employment type", choice(EMPLOYMENT)],
   address: ["Address", (v, l) => optionalString(v, l, 300)],
+  division: ["Division", (v, l) => optionalString(v, l, 80)],
+  section: ["Section", (v, l) => optionalString(v, l, 80)],
+  employee_level: ["Employee level", (v, l) => optionalString(v, l, 40)],
+  job_title_code: ["Job title code", (v, l) => optionalString(v, l, 30)],
   emergency_name: [
     "Emergency contact name",
     (v, l) => optionalString(v, l, 100),
@@ -62,7 +66,7 @@ const SELECT = `u.id,u.name,u.email,u.role,u.employee_code,u.phone,u.active,u.mu
   u.workplace_id,w.name workplace_name,u.branch_id,b.name branch_name,u.department_id,d.name department_name,
   u.designation_id,g.name designation_name,u.manager_id,m.name manager_name,u.date_of_joining,u.employment_type,
   u.grade_id,gr.name grade_name,u.cost_centre_id,cc.name cost_centre_name,u.business_unit_id,bu.name business_unit_name,u.custom,
-  u.custom_role_id,cr.name custom_role_name`;
+  u.custom_role_id,cr.name custom_role_name,u.division,u.section,u.employee_level,u.job_title_code`;
 const FULL = `${SELECT},u.date_of_birth,u.gender,u.address,u.emergency_name,u.emergency_phone,u.emergency_relation,u.company_id`;
 const JOINS = `FROM users u LEFT JOIN workplaces w ON w.id=u.workplace_id LEFT JOIN branches b ON b.id=u.branch_id
   LEFT JOIN departments d ON d.id=u.department_id LEFT JOIN designations g ON g.id=u.designation_id LEFT JOIN users m ON m.id=u.manager_id

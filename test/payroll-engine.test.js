@@ -546,3 +546,24 @@ test("one-off earnings and deductions", () => {
       broke.warnings.includes("deductions_over_50_percent"),
   );
 });
+
+test("voluntary PF adds to the employee share only", () => {
+  const plain = computePayslip(base());
+  const vpf = computePayslip(base({ flags: { ...base().flags, vpf_percent: 10 } }));
+  assert.equal(vpf.pf.vpf, Math.round((plain.pf.base * 10) / 100));
+  assert.equal(vpf.pf.employee, plain.pf.employee + vpf.pf.vpf);
+  assert.equal(vpf.pf.employerEpf, plain.pf.employerEpf, "the employer pays nothing extra");
+  assert.equal(vpf.net_pay, plain.net_pay - vpf.pf.vpf);
+  assert.match(vpf.deductions.find((d) => d.code === "PF").name, /VPF/);
+});
+
+test("Aadhaar and the reimbursement account are validated with the other IDs", async () => {
+  const { cleanPrivate } = await import("../server/routes/payroll-setup.js");
+  assert.deepEqual(cleanPrivate({ aadhaar: "2345 6789 0123".replace(/ /g, ""), reimb_ifsc: "hdfc0001234", reimb_bank_name: " HDFC Bank " }), {
+    aadhaar: "234567890123",
+    reimb_ifsc: "HDFC0001234",
+    reimb_bank_name: "HDFC Bank",
+  });
+  assert.throws(() => cleanPrivate({ aadhaar: "123456789012" }), /Aadhaar/);
+  assert.throws(() => cleanPrivate({ reimb_bank_account: "12ab" }), /Reimbursement bank account/);
+});
