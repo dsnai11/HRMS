@@ -1,6 +1,8 @@
 // In-app notifications, with email when a mail provider is configured
 // (RESEND_API_KEY and MAIL_FROM). Notifications are best-effort: a failure here
 // never fails the action that caused it.
+import { SMS_KINDS, sendSms, smsConfigured } from "./sms.js";
+
 export function createNotifier(app, env = process.env) {
   const { db, clock } = app;
   const mailConfigured = () => Boolean(env.RESEND_API_KEY && env.MAIL_FROM);
@@ -48,7 +50,7 @@ export function createNotifier(app, env = process.env) {
     return true;
   }
 
-  /** notify([userId…], { companyId, kind, title, body, link, email }) */
+  /** notify([userId…], { companyId, kind, title, body, link, email, sms }) */
   async function notify(userIds, n) {
     try {
       const ids = [...new Set(userIds.filter(Boolean))];
@@ -88,6 +90,15 @@ export function createNotifier(app, env = process.env) {
           sendMail({ id: outbox, to_email: u.email, subject, body });
         }
       }
+      // Text messages for the alerts that matter most, when a provider is set up.
+      if ((n.sms ?? SMS_KINDS.has(n.kind)) && smsConfigured(env))
+        for (const id of ids) {
+          const u = await db
+            .prepare("SELECT phone,active FROM users WHERE id=?")
+            .get(id);
+          if (u?.active && u.phone)
+            void sendSms(app, n.companyId, u.phone, `${n.title}. ${app.company ?? ""}`.trim(), env);
+        }
       // Phone push, not awaited: the request should not wait on Google.
       if (n.inApp !== false && app.push) void app.push(ids, n);
     } catch (e) {

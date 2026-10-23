@@ -116,6 +116,7 @@ export async function sendApprovalReminders(app) {
         body: `Still waiting for: ${STEPS[step]}. HR can decide it.`,
         link: "approvals",
         email: true,
+        sms: true,
       });
       await db
         .prepare("UPDATE leave_requests SET escalated_at=? WHERE id=?")

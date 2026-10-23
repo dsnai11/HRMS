@@ -58,7 +58,7 @@ Done: salary structures, one-run payroll from attendance and leave, PF, ESI, pro
 
 ## Module 08: Performance
 
-Done: goals with weights, KRAs by designation, self and manager review, release, continuous feedback. **Partly:** anonymised 360° rounds. Feedback today is named praise, improvement and private notes; a multi-rater anonymous round is not built.
+Done: goals with weights, KRAs by designation, self and manager review, release, continuous feedback, and anonymous 360° rounds (PER-05): HR opens a round, each person is rated by themselves, their manager, their team and peers; results are group averages with unsigned comments, and the peers-and-team group stays hidden below three answers.
 
 ## Module 10: Employee self-service
 
@@ -78,15 +78,15 @@ Done on the web portal (branch `claude/stage7-bot`):
 - **Laxmi** (*Ask Laxmi*): answers from the person's own records (leave balance, holidays, payday, latest payslip, this month's attendance; for managers, who in the team is on leave or punched in and what waits for approval); a guided leave application that fills in the request and sends it only when the person presses Confirm; HR's knowledge base and the company policies as searchable answers; a log of every question and answer with helpful / not helpful feedback, so HR can add answers for what went unanswered.
 - **Free text by Claude**, optional: with `ANTHROPIC_API_KEY` set, questions the rules cannot answer go to Claude with only the asking person's own facts and matching knowledge-base entries. It has no tools and cannot act.
 
-**Partly:** not in the phone app yet. Chat is text only (no files, no read receipts per person).
+Also in the phone app (Messages and Ask Laxmi). Chat is text only (no files, no read receipts per person).
 
 ## Module 12: Reports, analytics and compliance
 
-Partly: Insights dashboards, payroll cost report by department, cost centre, business unit, branch, grade and employment type against budget, statutory exports (ECR, ESIC, PF and ESI challans, PT, LWF), tax statements, gratuity liability, activity log. Still to do: an HR command-centre page and a scheduled report delivery.
+Done: the HR Command Centre (live headcount by department and branch, joiners and leavers this month, monthly and 12-month attrition, open positions, attendance and leave today, workforce mix by gender, age and service), Insights dashboards, payroll cost report by department, cost centre, business unit, branch, grade and employment type against budget, statutory exports (ECR, ESIC, PF and ESI challans, PT, LWF), tax statements, gratuity liability, activity log, and reports emailed on a schedule (daily, weekly or monthly).
 
 ## Configuration and customisation scope
 
-Done: renamed terms, custom fields, shift and leave rules, salary components and statutory settings, custom approval chain **partly** (manager then HR; multi-level chains and escalation reminders are not built), role sets (fixed roles admin, HR, payroll, manager and employee, plus custom roles: administrators name a role and tick its rights under *Roles & rights*, then give it to people from the employee form).
+Done: renamed terms, custom fields, shift and leave rules, salary components and statutory settings, multi-level leave approval (up to three steps: manager, manager's manager, HR) with reminders and escalation to HR, custom roles with chosen rights, optionally limited to branches (region- or entity-wise permission sets), and SMS alerts through Twilio or any HTTP gateway (**needs you:** an SMS account with DLT-registered templates). Attendance corrections still use a single approval step.
 
 ## Things the proposal assumes that are not software
 
