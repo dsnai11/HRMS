@@ -195,6 +195,7 @@ async function performancePage(id) {
     mine: "My goals & reviews",
     ...(me.is_manager ? { team: "My team's reviews" } : {}),
     feedback: "Feedback",
+    multirater: "360° feedback",
     ...(manage ? { cycles: "Review cycles", kras: "KRAs" } : {}),
   };
   if (!tabs[perfTab]) perfTab = "mine";
@@ -221,6 +222,7 @@ const goalRows = (goals, mine) =>
         mine ? "Add a goal, or ask your manager to set some." : "No goals yet.",
       );
 async function perfHtml(tab) {
+  if (tab === "multirater") return multiRaterHtml();
   if (tab === "mine") {
     const [goals, reviews] = await Promise.all([
       api("/goals"),
@@ -261,6 +263,7 @@ async function perfHtml(tab) {
   return `<div class="card"><div class="card-head"><div><h2>Training</h2></div><button id="new-training">Assign training</button></div>${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Course</th><th>Hours</th><th>Due</th><th>Completed</th><th></th></tr></thead><tbody>${rows.map((t) => `<tr><td>${esc(t.title)}${t.mandatory ? ' <span class="pill">Mandatory</span>' : ""}</td><td>${t.hours}</td><td>${t.due_date ? fmtDate(t.due_date) : "—"}</td><td>${t.completed} of ${t.assigned}</td><td><button class="secondary" data-train="${t.id}" data-name="${esc(t.title)}">Records</button></td></tr>`).join("")}</tbody></table></div>` : empty("No training", "Assign a course to everyone or to selected people.")}</div>`;
 }
 function perfWire(tab) {
+  if (tab === "multirater") return multiRaterWire();
   const on = (s, fn) =>
     document.querySelector(s)?.addEventListener("click", fn);
   const each = (s, fn) =>
@@ -460,4 +463,142 @@ function perfWire(tab) {
           })),
     );
   });
+}
+
+// ---- 360° feedback rounds -------------------------------------------------------------------------
+// Answer for colleagues, read your own results once a round closes, and (HR) run rounds.
+// Answers are anonymous: results show averages by group, never names.
+const ABOUT = {
+  self: "Yourself",
+  manager: "Someone in your team",
+  report: "Your manager",
+  peer: "A colleague",
+};
+let mrCache = {};
+const resultTable = (r) =>
+  `<div class="table-wrap"><table><thead><tr><th>Statement</th>${r.groups.map((g) => `<th>${esc(g.label)}<small>${g.hidden ? `fewer than ${r.min_group} answers, hidden` : `${g.answered} answer(s)`}</small></th>`).join("")}</tr></thead><tbody>${r.questions
+    .map(
+      (q) =>
+        `<tr><td>${esc(q.text)}</td>${r.groups.map((g) => `<td>${q[g.key] ?? "—"}</td>`).join("")}</tr>`,
+    )
+    .join(
+      "",
+    )}</tbody></table></div>${r.comments.length ? `<h3>Comments</h3>${r.comments.map((c) => `<p class="callout">${esc(c)}</p>`).join("")}` : ""}`;
+async function multiRaterHtml() {
+  const manage = has("performance.manage");
+  const [tasks, results, rounds] = await Promise.all([
+    api("/feedback/tasks"),
+    api("/feedback/results"),
+    manage ? api("/admin/feedback-rounds") : [],
+  ]);
+  mrCache = { tasks, rounds };
+  const open = tasks.filter((x) => !x.submitted_at && x.status === "open");
+  return (
+    `<div class="card"><h2>Feedback to give</h2><p class="muted">Rate each statement from 1 (rarely) to 5 (always). Your answers are anonymous: people see only averages, and small groups are hidden.</p>${
+      open.length
+        ? `<div class="table-wrap"><table><thead><tr><th>About</th><th>Round</th><th>Answer by</th><th></th></tr></thead><tbody>${open.map((x) => `<tr><td>${esc(x.subject_name)}<small>${esc(ABOUT[x.relation])}</small></td><td>${esc(x.round_name)}</td><td>${fmtDate(x.closes_on)}</td><td><button data-answer="${x.id}">Give feedback</button></td></tr>`).join("")}</tbody></table></div>`
+        : empty("Nothing to answer", "Requests for feedback appear here.")
+    }</div>` +
+    `<div class="card"><h2>My 360° results</h2>${
+      results.length
+        ? results.map((r) => `<h3>${esc(r.name)}</h3>${resultTable(r)}`).join("")
+        : empty(
+            "No results yet",
+            "Your results appear here when a round you were part of closes.",
+          )
+    }</div>` +
+    (manage
+      ? `<div class="card"><div class="card-head"><div><h2>360° rounds</h2><p class="muted">Each person is rated by themselves, their manager, their team and up to the chosen number of peers.</p></div><button id="mr-new">Start a round</button></div>${
+          rounds.length
+            ? `<div class="table-wrap"><table><thead><tr><th>Round</th><th>People</th><th>Answered</th><th>Closes</th><th>Status</th><th></th></tr></thead><tbody>${rounds.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.subjects}</td><td>${r.submitted} of ${r.requests}</td><td>${fmtDate(r.closes_on)}</td><td><span class="pill ${r.status === "open" ? "" : "neutral"}">${esc(r.status)}</span></td><td>${r.status === "open" ? `<button class="secondary" data-mr-close="${r.id}">Close and share results</button> ` : ""}<button class="ghost" data-mr-results="${r.id}">Results</button></td></tr>`).join("")}</tbody></table></div>`
+            : empty("No rounds yet", "Start one to collect anonymous feedback.")
+        }</div>`
+      : "")
+  );
+}
+function multiRaterWire() {
+  document.querySelectorAll("[data-answer]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const x = mrCache.tasks.find((t) => t.id === Number(b.dataset.answer));
+        const words = ["Rarely", "Sometimes", "Often", "Usually", "Always"];
+        dialog(
+          `Feedback about ${x.subject_name}`,
+          `<p class="full muted">${esc(x.round_name)} · anonymous</p>${x.questions
+            .map(
+              (q, i) =>
+                `<label class="full">${esc(q)}<select name="q${i}" required><option value="">Choose…</option>${[1, 2, 3, 4, 5].map((n) => `<option value="${n}">${n} · ${words[n - 1]}</option>`).join("")}</select></label>`,
+            )
+            .join(
+              "",
+            )}<label class="full">Comment (optional, shown without your name)<textarea name="comment" rows="3" maxlength="1000"></textarea></label>`,
+          async (f) => {
+            await api(`/feedback/tasks/${x.id}`, {
+              ratings: x.questions.map((_, i) => Number(f[`q${i}`])),
+              comment: f.comment || null,
+            });
+            notice("Thank you. Your feedback was saved anonymously.");
+          },
+        );
+      }),
+  );
+  document.querySelector("#mr-new")?.addEventListener("click", async () => {
+    const [people, questions] = await Promise.all([
+      api("/directory"),
+      api("/feedback/default-questions"),
+    ]);
+    dialog(
+      "Start a 360° round",
+      `${input("name", "Round name", "", 'required maxlength="100" placeholder="e.g. Annual 2026"')}${input("closes_on", "Answers close on", "", 'type="date" required')}${input("peers", "Peers per person", 3, 'type="number" min="0" max="8"')}<label class="full">Statements to rate (one per line)<textarea name="questions" rows="6">${esc(questions.join("\n"))}</textarea></label><div class="full"><strong>People to get feedback</strong><div class="check-grid">${people.map((p) => `<label class="check"><input type="checkbox" name="s:${p.id}"> ${esc(p.name)}</label>`).join("")}</div></div>`,
+      async (f) => {
+        await api("/admin/feedback-rounds", {
+          name: f.name,
+          closes_on: f.closes_on,
+          peers: Number(f.peers),
+          questions: f.questions
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean),
+          subject_ids: Object.keys(f)
+            .filter((k) => k.startsWith("s:"))
+            .map((k) => Number(k.slice(2))),
+        });
+        notice("Round started. Everyone asked has been told.");
+      },
+    );
+  });
+  document.querySelectorAll("[data-mr-close]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        busy(b, async () => {
+          if (
+            !confirm(
+              "Close this round? People then see their results and no more answers are taken.",
+            )
+          )
+            return;
+          await api(`/admin/feedback-rounds/${b.dataset.mrClose}/close`, {});
+          notice("Closed. Each person has been told their results are ready.");
+          await render();
+        })),
+  );
+  document.querySelectorAll("[data-mr-results]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        busy(b, async () => {
+          const d = await api(
+            `/admin/feedback-rounds/${b.dataset.mrResults}/results`,
+          );
+          viewDialog(
+            `${d.round.name} · results`,
+            d.people
+              .map(
+                (p) =>
+                  `<h3>${esc(p.name)} <small class="muted">${p.responses} answer(s)</small></h3>${resultTable(p)}`,
+              )
+              .join("") ||
+              empty("No answers yet", "Results appear as people answer."),
+          );
+        })),
+  );
 }

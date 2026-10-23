@@ -146,3 +146,48 @@ test("command centre figures and scheduled report emails", async (t) => {
   assert.equal(await sendScheduledReports(app), 0);
   assert.equal((await call(`/admin/report-schedules/${s.data.id}`, undefined, owner, "DELETE")).status, 200);
 });
+
+test("360 feedback rounds are anonymous and hide small groups", async (t) => {
+  const { call, owner, add } = await world(t);
+  const mgr = await add("mgr");
+  const subj = await add("subj", { manager_id: mgr.id });
+  const peers = [];
+  for (const k of ["p1", "p2", "p3"]) peers.push(await add(k, { manager_id: mgr.id }));
+  const rep = await add("rep", { manager_id: subj.id });
+
+  const r = await call("/admin/feedback-rounds", { name: "H2 2026", closes_on: "2026-11-30", subject_ids: [subj.id, rep.id], peers: 3 }, owner);
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  const tasks = async (who) => (await call("/feedback/tasks", undefined, who.token)).data;
+  assert.deepEqual((await tasks(subj)).map((x) => [x.subject_name, x.relation]).sort(), [["REP", "manager"], ["SUBJ", "self"]]);
+  assert.equal((await tasks(peers[0]))[0].relation, "peer");
+  const answer = async (who, subject, ratings, comment) => {
+    const task = (await tasks(who)).find((x) => x.subject_name === subject);
+    return call(`/feedback/tasks/${task.id}`, { ratings, comment }, who.token);
+  };
+  const five = [5, 5, 5, 5, 5];
+  assert.equal((await answer(mgr, "SUBJ", [5, 5], null)).status, 400);
+  assert.equal((await answer(mgr, "SUBJ", [4, 4, 4, 4, 4], "Reliable")).status, 200);
+  assert.equal((await answer(mgr, "SUBJ", five, null)).status, 409, "only once");
+  await answer(subj, "SUBJ", five);
+  for (const p of peers) await answer(p, "SUBJ", [3, 3, 3, 3, 3], "Helpful");
+  await answer(rep, "SUBJ", [2, 2, 2, 2, 2]);
+  // REP gets only self and manager answers.
+  await answer(subj, "REP", five, "Good start");
+  await answer(rep, "REP", five);
+
+  assert.deepEqual((await call("/feedback/results", undefined, subj.token)).data, [], "nothing before the round closes");
+  assert.equal((await call(`/admin/feedback-rounds/${r.data.id}/close`, {}, owner)).status, 200);
+  assert.equal((await answer(peers[0], "SUBJ", five)).status, 409, "closed rounds take no answers");
+
+  const mine = (await call("/feedback/results", undefined, subj.token)).data[0];
+  assert.equal(mine.responses, 6);
+  assert.deepEqual([mine.questions[0].self, mine.questions[0].manager, mine.questions[0].others], [5, 4, 2.8]);
+  assert.ok(!JSON.stringify(mine).match(/rater|P1|P2|MGR/), "no rater identities");
+  const theirs = (await call("/feedback/results", undefined, rep.token)).data[0];
+  assert.equal(theirs.questions[0].others, null);
+  // HR sees the same averages, never who answered.
+  const hr = (await call(`/admin/feedback-rounds/${r.data.id}/results`, undefined, owner)).data;
+  assert.equal(hr.people.length, 2);
+  assert.ok(!JSON.stringify(hr).match(/rater_id/));
+  assert.equal((await call("/admin/feedback-rounds", undefined, owner)).data[0].submitted, 8);
+});

@@ -34,6 +34,7 @@ import { registerInsights } from "./routes/insights.js";
 import { registerRoles } from "./routes/roles.js";
 import { registerHome } from "./routes/home.js";
 import { scheduleApprovalReminders } from "./approval-chain.js";
+import { registerFeedbackRounds } from "./routes/feedback-rounds.js";
 import {
   registerScheduledReports,
   scheduleReports,
@@ -208,6 +209,7 @@ export function createApp({
     registerRoles,
     registerHome,
     registerScheduledReports,
+    registerFeedbackRounds,
   ])
     register(router, app);
 
