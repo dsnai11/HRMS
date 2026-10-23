@@ -652,3 +652,78 @@ async function commandCentrePage(id) {
       },
     );
 }
+
+// ---- Engagement gallery -------------------------------------------------------------------------------
+// Event photos on the Home page. HR posts them; photos are shrunk in the browser to at
+// most 1600 px wide and saved as JPEG so each stays well under the 1 MB limit.
+const shrinkPhoto = (file) =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * scale);
+      c.height = Math.round(img.height * scale);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL("image/jpeg", 0.82).split(",")[1]);
+    };
+    img.onerror = () => reject(new Error("That file is not a photo."));
+    img.src = url;
+  });
+async function galleryCard(id) {
+  const g = await api("/gallery?limit=12").catch(() => ({ items: [], categories: [] }));
+  if (id !== renderId) return;
+  const manage = has("announcements.manage");
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<div class="card-head"><h2>Engagement Gallery</h2>${manage ? '<button class="secondary" id="photo-add">Post a photo</button>' : ""}</div>${
+    g.items.length
+      ? `<div class="gallery">${g.items
+          .map(
+            (p) =>
+              `<button type="button" class="gallery-item" data-photo="${p.id}"><img src="/api/gallery/${p.id}/image" alt="${esc(p.title)}" loading="lazy"><span><strong>${esc(p.title)}</strong><small>${esc(p.category)} · ${fmtDate(p.event_date)}${p.branch_name ? ` · ${esc(p.branch_name)}` : ""}</small></span></button>`,
+          )
+          .join("")}</div>`
+      : '<p class="muted">Photos from HR days, celebrations and awards appear here.</p>'
+  }`;
+  document.querySelector("#content").append(card);
+  card.querySelectorAll("[data-photo]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const p = g.items.find((x) => x.id === Number(b.dataset.photo));
+        viewDialog(
+          p.title,
+          `<img class="gallery-full" src="/api/gallery/${p.id}/image" alt="${esc(p.title)}"><p class="muted">${esc(p.category)} · ${fmtDate(p.event_date)}${p.posted_by_name ? ` · posted by ${esc(p.posted_by_name)}` : ""}</p>${manage ? `<button class="ghost" id="photo-del">Remove photo</button>` : ""}`,
+        );
+        document.querySelector("#photo-del")?.addEventListener("click", (e) =>
+          busy(e.target, async () => {
+            await api(`/admin/gallery/${p.id}`, undefined, "DELETE");
+            document.querySelector("dialog")?.remove();
+            await render();
+          }),
+        );
+      }),
+  );
+  card.querySelector("#photo-add")?.addEventListener("click", async () => {
+    const org = await api("/admin/org");
+    dialog(
+      "Post a photo",
+      `${input("title", "Title", "", 'required maxlength="120" placeholder="e.g. Diwali celebration, Jaipur HO"')}${sel("category", "Category", g.categories.map((c) => [c, c]))}${input("event_date", "Event date", today(), 'type="date" required')}<label>Branch<select name="branch_id">${options(org.branches, null, "Everyone")}</select></label><label class="full">Photo (JPG or PNG)<input type="file" name="photo" accept="image/jpeg,image/png" required></label>`,
+      async (f) => {
+        const file = document.querySelector("dialog input[name=photo]").files[0];
+        if (!file) throw new Error("Choose a photo.");
+        await api("/admin/gallery", {
+          title: f.title,
+          category: f.category,
+          event_date: f.event_date,
+          branch_id: f.branch_id ? Number(f.branch_id) : null,
+          mime: "image/jpeg",
+          data: await shrinkPhoto(file),
+        });
+        notice("Photo posted.");
+      },
+    );
+  });
+}

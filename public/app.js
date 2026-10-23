@@ -1129,6 +1129,7 @@ async function employeeView(id) {
     `<div class="card"><h2>Employee Search</h2><form id="emp-search"><div class="search-row"><input name="code" placeholder="Code" aria-label="Employee code"><input name="name" placeholder="Name" aria-label="Name"></div><div class="actions"><button>Search</button></div></form><div id="emp-results"></div></div>` +
     `<div class="home-grid">${leaveCard}${announceCard}${holidayCard}${birthdayCard}${orgCard}${todayCard}</div>`;
   announcementsWire();
+  await galleryCard(id);
   document.querySelectorAll("[data-hol]").forEach(
     (b) =>
       (b.onclick = () => {

@@ -161,3 +161,24 @@ test("extra profile sections: personal, medical, nominees and HR-only insurance"
   assert.equal((await call("/profile/details", undefined, emp.token)).data.insurance[0].provider, "Star");
   assert.equal(hr.data.nominees.length, 2, "HR's save keeps the employee's sections");
 });
+
+test("engagement gallery: HR posts photos, branch photos stay in their branch", async (t) => {
+  const { db, call, owner, add, base } = await world(t);
+  const b = Number((await db.prepare("INSERT INTO branches(company_id,name,created_at) VALUES(1,'Jaipur',?)").run(new Date().toISOString())).lastInsertRowid);
+  const inJaipur = await add("jai", { branch_id: b });
+  const elsewhere = await add("else");
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from("photo")]).toString("base64");
+  const post = (body, token = owner) => call("/admin/gallery", { mime: "image/jpeg", data: jpeg, category: "Event", ...body }, token);
+  assert.equal((await post({ title: "x", data: Buffer.from("nope").toString("base64") })).status, 400);
+  assert.equal((await post({ title: "Diwali" }, elsewhere.token)).status, 403);
+  const all = await post({ title: "Diwali", event_date: "2026-11-08" });
+  assert.equal(all.status, 201, JSON.stringify(all.data));
+  await post({ title: "Jaipur HR Day", branch_id: b });
+  const titles = async (who) => (await call("/gallery", undefined, who.token)).data.items.map((p) => p.title).sort();
+  assert.deepEqual(await titles(inJaipur), ["Diwali", "Jaipur HR Day"]);
+  assert.deepEqual(await titles(elsewhere), ["Diwali"]);
+  const img = await fetch(`${base}/gallery/${all.data.id}/image`, { headers: { Authorization: `Bearer ${elsewhere.token}` } });
+  assert.equal(img.headers.get("content-type"), "image/jpeg");
+  assert.equal((await call(`/admin/gallery/${all.data.id}`, undefined, owner, "DELETE")).status, 200);
+  assert.deepEqual(await titles(elsewhere), []);
+});
