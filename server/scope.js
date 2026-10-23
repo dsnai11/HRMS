@@ -1,4 +1,5 @@
 import { HttpError } from "./http.js";
+import { permissionsFor } from "./rbac.js";
 
 // Confirms a referenced row exists and belongs to the caller's company, so ids
 // from another company can never be attached to this one.
@@ -23,3 +24,21 @@ export function branchScope(user, userIdColumn = "u.id") {
 }
 export const inBranchScope = (user, branchId) =>
   !user.branch_scope?.length || user.branch_scope.includes(branchId);
+
+// Active people in a company holding any of these rights, through a built-in role or a
+// custom one; used to choose who hears about HR events. Rows are { id }.
+export async function staffWith(db, companyId, perms, exceptId = 0) {
+  const rows = await db
+    .prepare(
+      `SELECT u.id,u.role,r.permissions FROM users u LEFT JOIN custom_roles r ON r.id=u.custom_role_id
+       WHERE u.company_id=? AND u.active=1 AND u.id<>? AND u.role IN ('admin','hr','payroll','custom')`,
+    )
+    .all(companyId, exceptId);
+  return rows
+    .filter((u) => {
+      const has =
+        u.role === "custom" ? JSON.parse(u.permissions || "[]") : permissionsFor(u.role);
+      return perms.some((p) => has.includes(p));
+    })
+    .map((u) => ({ id: u.id }));
+}

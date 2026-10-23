@@ -157,3 +157,22 @@ test("a role limited to branches sees and decides only for those branches", asyn
   const decide = (id) => call(`/leave/requests/${id}/decision`, { decision: "approved" }, hr.token);
   assert.equal((await decide(reqB.data.id)).status, 403);
 });
+
+test("standard HR roles are added in one step and work like any role", async (t) => {
+  const { call, owner, add } = await world(t);
+  const list = (await call("/admin/roles/templates", undefined, owner)).data;
+  assert.ok(list.some((r) => r.name === "HR Executive"));
+  const made = await call("/admin/roles/templates", { names: ["HR Executive", "Payroll Executive"] }, owner);
+  assert.equal(made.data.created, 2);
+  assert.equal((await call("/admin/roles/templates", { names: ["HR Executive"] }, owner)).data.created, 0, "no duplicates");
+  const roles = (await call("/admin/roles", undefined, owner)).data.custom;
+  const exec = roles.find((r) => r.name === "HR Executive");
+  assert.ok(exec.permissions.includes("leave.approve") && !exec.permissions.includes("payroll.read"));
+  const pay = roles.find((r) => r.name === "Payroll Executive");
+  assert.ok(pay.permissions.includes("payroll.manage") && !pay.permissions.includes("payroll.approve"));
+  const person = await add("execu", { role: "custom", custom_role_id: exec.id });
+  assert.equal((await call("/admin/employees", undefined, person.token)).status, 200);
+  assert.equal((await call("/admin/roles/templates", {}, person.token)).status, 403);
+  // Everything at once adds the rest.
+  assert.equal((await call("/admin/roles/templates", {}, owner)).data.created, list.length - 2);
+});

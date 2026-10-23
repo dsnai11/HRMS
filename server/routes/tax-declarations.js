@@ -6,7 +6,7 @@ import {
   optionalString,
   string,
 } from "../http.js";
-import { requireOwned } from "../scope.js";
+import { requireOwned, staffWith } from "../scope.js";
 import {
   ageCategory,
   incomeTax,
@@ -263,11 +263,7 @@ export function registerTaxDeclarations(router, app) {
         .run(nowIso(), d.id);
       await apply({ ...d, status: "submitted" });
       await audit("tax_declaration_submitted", { year });
-      const payroll = await db
-        .prepare(
-          "SELECT id FROM users WHERE company_id=? AND active=1 AND role IN ('payroll','admin')",
-        )
-        .all(user.company_id);
+      const payroll = await staffWith(db, user.company_id, ["payroll.manage"]);
       await app.notify(
         payroll.map((p) => p.id),
         {

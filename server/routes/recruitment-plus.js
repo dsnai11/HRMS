@@ -11,7 +11,7 @@ import {
   string,
 } from "../http.js";
 import { tokenHash } from "../db.js";
-import { requireOwned } from "../scope.js";
+import { requireOwned, staffWith } from "../scope.js";
 import { can } from "../rbac.js";
 import { checkFile } from "./documents.js";
 
@@ -239,11 +239,7 @@ export function registerRecruitmentPlus(router, app) {
     (process.env.APP_URL || process.env.PUBLIC_URL || "").replace(/\/$/, "");
   const hrIds = async (companyId) =>
     (
-      await db
-        .prepare(
-          "SELECT id FROM users WHERE company_id=? AND active=1 AND role IN ('admin','hr')",
-        )
-        .all(companyId)
+      await staffWith(db, companyId, ["recruitment.manage"])
     ).map((r) => r.id);
 
   // ---- requisitions: a manager asks, HR approves -------------------------------------------

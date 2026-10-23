@@ -7,7 +7,7 @@ import {
   optionalString,
   string,
 } from "../http.js";
-import { requireOwned } from "../scope.js";
+import { requireOwned, staffWith } from "../scope.js";
 import { can } from "../rbac.js";
 
 const CATEGORIES = [
@@ -265,11 +265,7 @@ export function registerEngagement(router, app) {
       await audit("ticket_opened", { id });
       return id;
     });
-    const staff = await db
-      .prepare(
-        "SELECT id FROM users WHERE company_id=? AND active=1 AND role IN ('hr','admin')",
-      )
-      .all(user.company_id);
+    const staff = await staffWith(db, user.company_id, ["helpdesk.manage"]);
     await app.notify(
       staff.map((s) => s.id).filter((x) => x !== user.id),
       {

@@ -9,7 +9,7 @@ import {
   string,
 } from "../http.js";
 import { tokenHash } from "../db.js";
-import { requireOwned } from "../scope.js";
+import { requireOwned, staffWith } from "../scope.js";
 import { offerLetter } from "../letters.js";
 import {
   decryptJson,
@@ -137,11 +137,7 @@ export function registerPreboarding(router, app) {
 
   const hrIds = async (companyId) =>
     (
-      await db
-        .prepare(
-          "SELECT id FROM users WHERE company_id=? AND active=1 AND role IN ('admin','hr')",
-        )
-        .all(companyId)
+      await staffWith(db, companyId, ["recruitment.manage", "employees.write"])
     ).map((r) => r.id);
 
   async function creditInfo(p) {

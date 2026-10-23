@@ -54,7 +54,7 @@ async function rolesPage(id) {
     heading(
       "Roles & rights",
       "Decide what each kind of user can see and do. Give someone a role when you add them, or later from Employees → Manage.",
-      '<div class="actions"><button class="secondary" id="add-member">+ Add HR team member</button><button id="new-role">+ New role</button></div>',
+      '<div class="actions"><button class="secondary" id="add-member">+ Add HR team member</button><button class="secondary" id="add-standard">+ Standard HR roles</button><button id="new-role">+ New role</button></div>',
     ) +
     `<div class="card"><div class="card-head"><div><h2>Your roles</h2><p class="muted">Roles you made, with the rights you chose. A change applies straight away.</p></div></div>${
       data.custom.length
@@ -118,6 +118,29 @@ async function rolesPage(id) {
       },
     );
   document.querySelector("#new-role").onclick = () => roleDialog();
+  // Ready-made HR roles: tick the ones the company needs, then adjust them like any role.
+  document.querySelector("#add-standard").onclick = (e) =>
+    busy(e.target, async () => {
+      const templates = await api("/admin/roles/templates");
+      const have = new Set(data.custom.map((r) => r.name.toLowerCase()));
+      dialog(
+        "Add standard HR roles",
+        `<p class="full muted">Each becomes one of your roles. Change its rights or limit it to branches afterwards; give it to people from the employee form.</p>${templates
+          .map(
+            (t) =>
+              `<label class="check full"><input type="checkbox" name="t:${esc(t.name)}" ${have.has(t.name.toLowerCase()) ? "disabled" : "checked"}><span><strong>${esc(t.name)}</strong>${have.has(t.name.toLowerCase()) ? " (already added)" : ""}<small>${esc(t.description)}</small><small>${rights(t.permissions)}</small></span></label>`,
+          )
+          .join("")}`,
+        async (f) => {
+          const names = Object.keys(f)
+            .filter((k) => k.startsWith("t:"))
+            .map((k) => k.slice(2));
+          if (!names.length) throw new Error("Tick at least one role.");
+          const r = await api("/admin/roles/templates", { names });
+          notice(`${r.created} role(s) added.`);
+        },
+      );
+    });
   document.querySelectorAll("[data-role-edit]").forEach(
     (b) =>
       (b.onclick = () =>

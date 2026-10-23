@@ -13,6 +13,77 @@ const IMPLIES = {
   "payroll.manage": ["payroll.read"],
   "payroll.approve": ["payroll.read"],
 };
+// Standard roles for an HR department. An administrator adds them in one step and
+// can then change their rights or limit them to branches like any custom role.
+export const HR_TEMPLATES = [
+  {
+    name: "HR Manager",
+    description: "Runs HR: people, leave, hiring, exits, performance and policies. No payroll.",
+    permissions: [
+      "employees.read", "employees.write", "changes.manage", "org.read", "org.manage",
+      "attendance.read", "attendance.import", "devices.manage", "leave.read",
+      "leave.approve", "leave.manage", "recruitment.manage", "credit.manage",
+      "exit.manage", "assets.manage", "performance.manage", "announcements.manage",
+      "policies.manage", "helpdesk.manage", "bot.manage", "insights.read", "security.read",
+    ],
+  },
+  {
+    name: "HR Executive",
+    description: "Day-to-day HR: employee records, attendance, leave approvals and the helpdesk.",
+    permissions: [
+      "employees.read", "employees.write", "attendance.read", "devices.manage",
+      "leave.read", "leave.approve", "helpdesk.manage", "announcements.manage",
+    ],
+  },
+  {
+    name: "Branch HR",
+    description: "HR for one or more branches. Limit it to branches after adding it.",
+    permissions: [
+      "employees.read", "employees.write", "attendance.read", "devices.manage",
+      "leave.read", "leave.approve", "helpdesk.manage",
+    ],
+  },
+  {
+    name: "Recruiter",
+    description: "Openings, candidates, interviews, offers and credit checks.",
+    permissions: ["employees.read", "recruitment.manage", "credit.manage"],
+  },
+  {
+    name: "Onboarding & Exits",
+    description: "Joining tasks, assets, probation, resignations and settlements.",
+    permissions: ["employees.read", "employees.write", "changes.manage", "assets.manage", "exit.manage"],
+  },
+  {
+    name: "Attendance Officer",
+    description: "Attendance records and imports, phone approvals, the muster and leave balances.",
+    permissions: ["employees.read", "attendance.read", "attendance.import", "devices.manage", "leave.read"],
+  },
+  {
+    name: "Payroll Executive",
+    description: "Prepares payroll. Cannot approve a payroll run.",
+    permissions: ["employees.read", "attendance.read", "leave.read", "payroll.read", "payroll.manage"],
+  },
+  {
+    name: "Payroll Approver",
+    description: "Reviews and approves payroll runs prepared by others.",
+    permissions: ["employees.read", "payroll.read", "payroll.approve"],
+  },
+  {
+    name: "HR Helpdesk",
+    description: "Answers employee questions, posts announcements and policies, runs Ask Laxmi.",
+    permissions: ["employees.read", "helpdesk.manage", "announcements.manage", "policies.manage", "bot.manage"],
+  },
+  {
+    name: "Performance Lead",
+    description: "Review cycles, goals, KRAs and 360° feedback rounds.",
+    permissions: ["employees.read", "performance.manage", "insights.read"],
+  },
+  {
+    name: "HR Viewer",
+    description: "Read-only: employee records, attendance, leave and dashboards.",
+    permissions: ["employees.read", "attendance.read", "leave.read", "insights.read"],
+  },
+];
 const withImplied = (list) => [
   ...new Set(["org.read", ...list, ...list.flatMap((p) => IMPLIES[p] ?? [])]),
 ];
@@ -144,6 +215,42 @@ export function registerRoles(router, app) {
       );
       await audit("role_created", { id, name: r.name });
       return send(201, { id });
+    },
+  );
+  router.get(
+    "/api/admin/roles/templates",
+    { perm: "roles.assign" },
+    async ({ send }) => send(200, HR_TEMPLATES),
+  );
+  // Adds the chosen standard HR roles (all when none are named); existing names are kept.
+  router.post(
+    "/api/admin/roles/templates",
+    { perm: "roles.assign" },
+    async ({ user, companyId, body, send, audit }) => {
+      const wanted = (await body()).names;
+      const list = HR_TEMPLATES.filter(
+        (t) => !Array.isArray(wanted) || !wanted.length || wanted.includes(t.name),
+      );
+      let created = 0;
+      for (const t of list) {
+        if (await nameTaken(companyId, t.name)) continue;
+        await db
+          .prepare(
+            "INSERT INTO custom_roles(company_id,name,description,permissions,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+          )
+          .run(
+            companyId,
+            t.name,
+            t.description,
+            JSON.stringify(withImplied(t.permissions)),
+            user.id,
+            nowIso(),
+            nowIso(),
+          );
+        created += 1;
+      }
+      await audit("roles_templates_added", { created });
+      return send(201, { created });
     },
   );
   // A change applies from each member's next request; nobody needs to sign in again.

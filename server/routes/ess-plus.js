@@ -1,5 +1,5 @@
 import { HttpError, integer, oneOf, optionalString, string } from "../http.js";
-import { requireOwned } from "../scope.js";
+import { requireOwned, staffWith } from "../scope.js";
 import { can } from "../rbac.js";
 import { appointmentLetter, changeLetter, offerLetter } from "../letters.js";
 import {
@@ -206,11 +206,7 @@ export function registerEssPlus(router, app) {
         ).lastInsertRowid,
       );
       await audit("bank_change_requested", { id });
-      const reviewers = await db
-        .prepare(
-          "SELECT id FROM users WHERE company_id=? AND active=1 AND role IN ('hr','payroll','admin') AND id<>?",
-        )
-        .all(user.company_id, user.id);
+      const reviewers = await staffWith(db, user.company_id, ["payroll.manage", "employees.write"], user.id);
       await app.notify(
         reviewers.map((r) => r.id),
         {

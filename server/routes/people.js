@@ -12,7 +12,7 @@ import {
   string,
 } from "../http.js";
 import { passwordHash } from "../db.js";
-import { requireOwned } from "../scope.js";
+import { requireOwned, staffWith } from "../scope.js";
 import { can } from "../rbac.js";
 import { changeLetter } from "../letters.js";
 
@@ -148,11 +148,7 @@ export function registerPeople(router, app) {
       await audit("referral_submitted", { id });
       return id;
     });
-    const hr = await db
-      .prepare(
-        "SELECT id FROM users WHERE company_id=? AND active=1 AND role IN ('hr','admin')",
-      )
-      .all(user.company_id);
+    const hr = await staffWith(db, user.company_id, ["recruitment.manage"]);
     await app.notify(
       hr.map((h) => h.id),
       {

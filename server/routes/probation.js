@@ -1,5 +1,5 @@
 import { HttpError, integer, number } from "../http.js";
-import { requireOwned } from "../scope.js";
+import { requireOwned, staffWith } from "../scope.js";
 
 const addMonths = (d, n) => {
   const x = new Date(`${d}T00:00:00Z`);
@@ -105,11 +105,7 @@ export async function sendProbationReminders(app) {
     .all(soon);
   for (const u of due) {
     const hr = (
-      await db
-        .prepare(
-          "SELECT id FROM users WHERE company_id=? AND active=1 AND role IN ('admin','hr')",
-        )
-        .all(u.company_id)
+      await staffWith(db, u.company_id, ["changes.manage", "employees.write"])
     ).map((r) => r.id);
     await app.notify([u.manager_id, ...hr], {
       companyId: u.company_id,
