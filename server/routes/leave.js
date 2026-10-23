@@ -10,7 +10,13 @@ import {
 } from "../http.js";
 import { can } from "../rbac.js";
 import { branchScope, requireOwned } from "../scope.js";
-import { mayDecide } from "../approval.js";
+import {
+  STEPS,
+  chainOf,
+  mayDecideStep,
+  nextStep,
+  stepApprovers,
+} from "../approval-chain.js";
 import { eachDay, daysBetween, leaveYearOf } from "../calendar.js";
 import {
   companySettings,
@@ -79,6 +85,20 @@ export function registerLeave(router, app) {
       weekly_off_saturdays: s.weekOff.saturdays,
       regularization_window_days: s.regularizationWindowDays,
       regularization_monthly_limit: s.regularizationMonthlyLimit,
+      ...(await approvalSettings(companyId)),
+    };
+  };
+  const approvalSettings = async (companyId) => {
+    const c = await db
+      .prepare(
+        "SELECT approval_reminder_hours,approval_escalate_hours FROM companies WHERE id=?",
+      )
+      .get(companyId);
+    return {
+      leave_chain: await chainOf(db, companyId),
+      approval_steps: STEPS,
+      approval_reminder_hours: c?.approval_reminder_hours ?? 24,
+      approval_escalate_hours: c?.approval_escalate_hours ?? 72,
     };
   };
   router.get(
@@ -150,6 +170,26 @@ export function registerLeave(router, app) {
           0,
           31,
         );
+      if (b.leave_chain !== undefined) {
+        const steps = Array.isArray(b.leave_chain) ? b.leave_chain : [];
+        if (
+          !steps.length ||
+          steps.length > 3 ||
+          steps.some((x) => !STEPS[x]) ||
+          new Set(steps).size !== steps.length
+        )
+          throw new HttpError(
+            400,
+            "Choose one to three different approval steps.",
+          );
+        set.leave_chain = JSON.stringify(steps);
+      }
+      for (const [key, label] of [
+        ["approval_reminder_hours", "Reminder after (hours)"],
+        ["approval_escalate_hours", "Escalate after (hours)"],
+      ])
+        if (b[key] !== undefined)
+          set[key] = Math.round(number(b[key], label, 1, 720));
       const keys = Object.keys(set);
       if (!keys.length) throw new HttpError(400, "Nothing to update.");
       await transaction(async () => {
@@ -662,8 +702,31 @@ export function registerLeave(router, app) {
       await audit("leave_requested", { id, type: type.code, from, to, days });
       return id;
     });
+    // The request waits on the first step of the company's approval chain.
+    const chain = await chainOf(db, user.company_id);
+    const step = Math.min(
+      await nextStep(db, user.company_id, user.id, chain, 0),
+      chain.length - 1,
+    );
+    await db
+      .prepare("UPDATE leave_requests SET step=?,step_at=? WHERE id=?")
+      .run(step, now(app), id);
+    await tellApprovers(user.company_id, user, chain[step], {
+      title: `${user.name} asked for ${days} day(s) of ${type.name}`,
+    });
     return send(201, { id, days });
   });
+
+  async function tellApprovers(companyId, requester, step, { title, body }) {
+    const ids = await stepApprovers(db, companyId, requester.id, step);
+    await app.notify(ids, {
+      companyId,
+      kind: "approval",
+      title,
+      body: body ?? `Waiting for: ${STEPS[step] ?? "HR"}`,
+      link: "approvals",
+    });
+  }
 
   const SELECT_REQ = `SELECT r.*,t.name type_name,t.code type_code,t.paid,u.name employee_name,u.employee_code,h.name handover_name FROM leave_requests r
     JOIN leave_types t ON t.id=r.leave_type_id JOIN users u ON u.id=r.user_id LEFT JOIN users h ON h.id=r.handover_to`;
@@ -747,8 +810,46 @@ export function registerLeave(router, app) {
       const b = await body();
       const decision = oneOf(b.decision, "Decision", ["approved", "rejected"]);
       const note = optionalString(b.note, "Note", 300);
-      if (!(await mayDecide(app, user, r.user_id)))
+      const chain = await chainOf(db, companyId);
+      if (!(await mayDecideStep(app, user, r, chain)))
         throw new HttpError(403, "You cannot decide this request.");
+      // An approval before the last step moves the request on instead of finishing it.
+      const following =
+        decision === "approved"
+          ? await nextStep(db, companyId, r.user_id, chain, r.step + 1)
+          : chain.length;
+      if (following < chain.length) {
+        const moved = await db
+          .prepare(
+            "UPDATE leave_requests SET step=?,step_at=?,approvals=?,reminded_at=NULL,escalated_at=NULL WHERE id=? AND status='pending' AND step=?",
+          )
+          .run(
+            following,
+            now(app),
+            JSON.stringify([
+              ...JSON.parse(r.approvals || "[]"),
+              { step: chain[r.step], by: user.id, name: user.name, at: now(app), note },
+            ]),
+            r.id,
+            r.step,
+          );
+        if (!moved.changes)
+          throw new HttpError(409, "This request has changed. Refresh and try again.");
+        await app.audit(
+          user,
+          "leave_step_approved",
+          { id: r.id, employeeId: r.user_id, step: chain[r.step] },
+          companyId,
+        );
+        const requester = await db
+          .prepare("SELECT id,name FROM users WHERE id=?")
+          .get(r.user_id);
+        await tellApprovers(companyId, requester, chain[following], {
+          title: `${requester.name}'s leave needs your approval`,
+          body: `Approved by ${user.name}. Waiting for: ${STEPS[chain[following]]}`,
+        });
+        return send(200, { ok: true, status: "pending", step: chain[following] });
+      }
       await transaction(async () => {
         const fresh = await db
           .prepare("SELECT status FROM leave_requests WHERE id=?")

@@ -1,3 +1,4 @@
+import { STEPS, chainOf, mayDecideStep } from "../approval-chain.js";
 import {
   HttpError,
   string,
@@ -300,12 +301,24 @@ export function registerRegularization(router, app) {
     const scope = await inboxScope(app, user);
     if (!scope) return send(200, { leave: [], regularizations: [] });
     const args = [user.company_id, user.id, ...scope.params];
+    const leave = await db
+      .prepare(
+        `SELECT r.*,t.name type_name,t.code type_code,u.name employee_name,u.employee_code,h.name handover_name FROM leave_requests r JOIN leave_types t ON t.id=r.leave_type_id JOIN users u ON u.id=r.user_id LEFT JOIN users h ON h.id=r.handover_to WHERE r.company_id=? AND r.status='pending' AND r.user_id<>?${scope.sql} ORDER BY r.from_date,r.id LIMIT 200`,
+      )
+      .all(...args);
+    // Only requests waiting at a step this person can act on, with where they are.
+    const chain = await chainOf(db, user.company_id);
+    const mine = [];
+    for (const r of leave)
+      if (await mayDecideStep(app, user, r, chain))
+        mine.push({
+          ...r,
+          step_name: STEPS[chain[r.step]] ?? "HR",
+          step_number: r.step + 1,
+          steps: chain.length,
+        });
     return send(200, {
-      leave: await db
-        .prepare(
-          `SELECT r.*,t.name type_name,t.code type_code,u.name employee_name,u.employee_code,h.name handover_name FROM leave_requests r JOIN leave_types t ON t.id=r.leave_type_id JOIN users u ON u.id=r.user_id LEFT JOIN users h ON h.id=r.handover_to WHERE r.company_id=? AND r.status='pending' AND r.user_id<>?${scope.sql} ORDER BY r.from_date,r.id LIMIT 200`,
-        )
-        .all(...args),
+      leave: mine,
       regularizations: await db
         .prepare(
           `${SELECT} WHERE r.company_id=? AND r.status='pending' AND r.user_id<>?${scope.sql} ORDER BY r.date,r.id LIMIT 200`,

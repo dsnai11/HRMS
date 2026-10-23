@@ -66,6 +66,11 @@ const leaveExtras = (r) =>
     r.address_on_leave && `Address: ${esc(r.address_on_leave)}`,
     r.contact_on_leave && `Contact: ${esc(r.contact_on_leave)}`,
     r.handover_name && `Work handled by ${esc(r.handover_name)}`,
+    r.status === "pending" &&
+      JSON.parse(r.approvals || "[]").length &&
+      `Approved so far by ${JSON.parse(r.approvals)
+        .map((a) => esc(a.name))
+        .join(", ")}`,
   ]
     .filter(Boolean)
     .map((x) => `<small>${x}</small>`)
@@ -109,7 +114,7 @@ async function timeOffPage(id) {
     `<div class="card"><div class="card-head"><div><h2>${monthLabel(month)}</h2><p class="muted">${cal.payable_days !== undefined ? `Payable days ${cal.payable_days} · Loss of pay ${cal.lop_days}` : ""}</p></div><div class="actions"><button class="secondary" id="prev">←</button><button class="secondary" id="next">→</button></div></div>${calendarGrid(days, month)}</div>` +
     `<div class="card"><h2>My leave requests</h2>${
       reqs.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Type</th><th>Dates</th><th>Days</th><th>Status</th><th></th></tr></thead><tbody>${reqs.map((r) => `<tr><td>${esc(r.type_name)}<small>${esc(r.reason || "")}</small></td><td>${rangeText(r)}</td><td>${r.days}</td><td>${STATUS_PILL(r.status)}${r.decision_note ? `<small>${esc(r.decision_note)}</small>` : ""}</td><td>${["pending", "approved"].includes(r.status) && (r.status === "pending" || r.from_date > today()) ? `<button class="ghost" data-cancel-leave="${r.id}">Cancel</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+        ? `<div class="table-wrap"><table><thead><tr><th>Type</th><th>Dates</th><th>Days</th><th>Status</th><th></th></tr></thead><tbody>${reqs.map((r) => `<tr><td>${esc(r.type_name)}<small>${esc(r.reason || "")}</small>${leaveExtras(r)}</td><td>${rangeText(r)}</td><td>${r.days}</td><td>${STATUS_PILL(r.status)}${r.decision_note ? `<small>${esc(r.decision_note)}</small>` : ""}</td><td>${["pending", "approved"].includes(r.status) && (r.status === "pending" || r.from_date > today()) ? `<button class="ghost" data-cancel-leave="${r.id}">Cancel</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
         : empty("No leave requests", "Requests you make will appear here.")
     }</div>` +
     `<div class="card"><h2>Attendance corrections</h2>${
@@ -226,7 +231,7 @@ async function approvalsPage(id) {
     heading("Approvals", "Requests from your team waiting for a decision.") +
     `<div class="card"><h2>Leave requests</h2>${
       data.leave.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th><th></th></tr></thead><tbody>${data.leave.map((r) => `<tr><td>${esc(r.employee_name)}<small>${esc(r.employee_code || "")}</small></td><td>${esc(r.type_name)}<small>${esc(r.reason || "")}</small>${leaveExtras(r)}</td><td>${rangeText(r)}</td><td>${r.days}</td><td>${buttons("leave", r)}</td></tr>`).join("")}</tbody></table></div>`
+        ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th><th></th></tr></thead><tbody>${data.leave.map((r) => `<tr><td>${esc(r.employee_name)}<small>${esc(r.employee_code || "")}</small></td><td>${esc(r.type_name)}<small>${esc(r.reason || "")}</small>${leaveExtras(r)}${r.steps > 1 ? `<small>Step ${r.step_number} of ${r.steps}: ${esc(r.step_name)}</small>` : ""}</td><td>${rangeText(r)}</td><td>${r.days}</td><td>${buttons("leave", r)}</td></tr>`).join("")}</tbody></table></div>`
         : empty("Nothing waiting", "No leave requests need your decision.")
     }</div><div class="card"><h2>Attendance corrections</h2>${
       data.regularizations.length
@@ -316,7 +321,21 @@ async function leaveAdminTabHtml(tab) {
         new Date(2000, i, 1).toLocaleString("en", { month: "long" }),
       ]),
       s.leave_year_start_month,
-    )}${input("leave_start_year", "First leave year with balances", s.leave_start_year ?? "", 'type="number" min="2000" max="2100"')}<div class="full"><strong>Weekly offs</strong></div><div class="full checks">${days.map((d, i) => `<label class="check"><input type="checkbox" name="wo${i}" ${s.weekly_off_days.includes(i) ? "checked" : ""}> ${d}</label>`).join("")}</div><div class="full"><strong>Saturdays off</strong> <span class="muted">(in addition to the above)</span></div><div class="full checks">${[1, 2, 3, 4, 5].map((n) => `<label class="check"><input type="checkbox" name="sat${n}" ${s.weekly_off_saturdays.includes(n) ? "checked" : ""}> ${["1st", "2nd", "3rd", "4th", "5th"][n - 1]}</label>`).join("")}</div><div class="full"><strong>Attendance</strong></div>${input("attendance_start_date", "Counted from (blank = the day your company started)", s.attendance_start_date || "", 'type="date"')}<div class="full"><strong>Attendance corrections</strong></div>${input("regularization_window_days", "Allowed up to (days back)", s.regularization_window_days, 'type="number" min="0" max="90"')}${input("regularization_monthly_limit", "Per person per month (0 = unlimited)", s.regularization_monthly_limit, 'type="number" min="0" max="31"')}<div class="full form-actions"><button>Save</button></div></form></div>`;
+    )}${input("leave_start_year", "First leave year with balances", s.leave_start_year ?? "", 'type="number" min="2000" max="2100"')}<div class="full"><strong>Weekly offs</strong></div><div class="full checks">${days.map((d, i) => `<label class="check"><input type="checkbox" name="wo${i}" ${s.weekly_off_days.includes(i) ? "checked" : ""}> ${d}</label>`).join("")}</div><div class="full"><strong>Saturdays off</strong> <span class="muted">(in addition to the above)</span></div><div class="full checks">${[1, 2, 3, 4, 5].map((n) => `<label class="check"><input type="checkbox" name="sat${n}" ${s.weekly_off_saturdays.includes(n) ? "checked" : ""}> ${["1st", "2nd", "3rd", "4th", "5th"][n - 1]}</label>`).join("")}</div><div class="full"><strong>Attendance</strong></div>${input("attendance_start_date", "Counted from (blank = the day your company started)", s.attendance_start_date || "", 'type="date"')}<div class="full"><strong>Attendance corrections</strong></div>${input("regularization_window_days", "Allowed up to (days back)", s.regularization_window_days, 'type="number" min="0" max="90"')}${input("regularization_monthly_limit", "Per person per month (0 = unlimited)", s.regularization_monthly_limit, 'type="number" min="0" max="31"')}<div class="full"><strong>Leave approval chain</strong> <span class="muted">(each step approves in turn; HR can act at any step)</span></div>${[0, 1, 2]
+      .map(
+        (i) =>
+          `<label>Step ${i + 1}<select name="chain${i}">${i ? '<option value="">— None —</option>' : ""}${Object.entries(
+            s.approval_steps,
+          )
+            .map(
+              ([k, v]) =>
+                `<option value="${k}" ${s.leave_chain[i] === k ? "selected" : ""}>${esc(v)}</option>`,
+            )
+            .join("")}</select></label>`,
+      )
+      .join(
+        "",
+      )}${input("approval_reminder_hours", "Remind the approver after (hours)", s.approval_reminder_hours, 'type="number" min="1" max="720"')}${input("approval_escalate_hours", "Escalate to HR after (hours)", s.approval_escalate_hours, 'type="number" min="1" max="720"')}<div class="full form-actions"><button>Save</button></div></form></div>`;
   }
   if (tab === "requests") {
     const q = leaveAdminCache.status ?? "pending";
@@ -505,6 +524,11 @@ async function leaveAdminWire(tab) {
           regularization_monthly_limit: Number(
             f.get("regularization_monthly_limit"),
           ),
+          leave_chain: [0, 1, 2]
+            .map((i) => f.get(`chain${i}`))
+            .filter(Boolean),
+          approval_reminder_hours: Number(f.get("approval_reminder_hours")),
+          approval_escalate_hours: Number(f.get("approval_escalate_hours")),
         };
         if (f.get("leave_start_year"))
           body.leave_start_year = Number(f.get("leave_start_year"));

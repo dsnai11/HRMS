@@ -33,6 +33,7 @@ import { registerEngagement } from "./routes/engagement.js";
 import { registerInsights } from "./routes/insights.js";
 import { registerRoles } from "./routes/roles.js";
 import { registerHome } from "./routes/home.js";
+import { scheduleApprovalReminders } from "./approval-chain.js";
 import { scheduleRetention } from "./retention.js";
 import {
   registerLearning,
@@ -394,6 +395,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   });
   scheduleRetention(db);
   scheduleProbationReminders(app);
+  scheduleApprovalReminders(app);
   scheduleLearningReminders(app);
   scheduleCompOffExpiry(app);
   server.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () =>
