@@ -1,10 +1,18 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Image,
   Linking,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -29,6 +37,7 @@ type Props = {
   section: Section;
   onSection: (s: Section) => void;
   onPunch: () => void;
+  onSlidePunch: () => Promise<void>;
   onCounts: (alerts: number, messages: number) => void;
   files: Files;
   onSignOut: () => void;
@@ -183,6 +192,7 @@ export const SECTIONS = [
   "Ask Laxmi",
   "Payslips",
   "Requests",
+  "OD Log History",
   "Directory",
   "Helpdesk",
   "Alerts",
@@ -198,7 +208,8 @@ export const MENU: [string, [Section | "Punch", string][]][] = [
     [
       ["Punch", "Punch In / Out"],
       ["My Attendance", "My Attendance"],
-      ["Requests", "Attendance Requests"],
+      ["Requests", "Regularization"],
+      ["OD Log History", "OD Log History"],
     ],
   ],
   ["Leave", [["Leave", "My Leaves"]]],
@@ -309,6 +320,7 @@ export default function More({
   section,
   onSection,
   onPunch,
+  onSlidePunch,
   onCounts,
   files,
   onSignOut,
@@ -340,7 +352,7 @@ export default function More({
           api={api}
           files={files}
           onSection={onSection}
-          onPunch={onPunch}
+          onSlidePunch={onSlidePunch}
         />
       )}
       {section === "My Attendance" && <MyAttendanceScreen api={api} />}
@@ -356,6 +368,7 @@ export default function More({
       {section === "Ask Laxmi" && <LaxmiScreen api={api} onGoto={onSection} />}
       {section === "Payslips" && <PayslipsScreen api={api} files={files} />}
       {section === "Requests" && <RequestsScreen api={api} />}
+      {section === "OD Log History" && <OdLogScreen api={api} />}
       {section === "Directory" && <DirectoryScreen api={api} />}
       {section === "Helpdesk" && <HelpdeskScreen api={api} />}
       {section === "Alerts" && <AlertsScreen api={api} onChange={setUnread} />}
@@ -415,6 +428,123 @@ async function attempt(fn: () => Promise<unknown>, done?: string) {
     );
     return false;
   }
+}
+
+// ---- slide to punch -------------------------------------------------------------------------
+// Drag the knob to the end to punch; letting go early springs it back, so a punch is
+// never recorded by a stray tap.
+function SlideToPunch({
+  label,
+  disabled,
+  onDone,
+}: {
+  label: string;
+  disabled?: boolean;
+  onDone: () => Promise<void> | void;
+}) {
+  const KNOB = 52;
+  const [x] = useState(() => new Animated.Value(0));
+  const [width, setWidth] = useState(0);
+  const [working, setWorking] = useState(false);
+  const max = Math.max(width - KNOB - 8, 1);
+  const responder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => !disabled && !working,
+        onMoveShouldSetPanResponder: () => !disabled && !working,
+        onPanResponderMove: (_, g) => x.setValue(Math.min(Math.max(g.dx, 0), max)),
+        onPanResponderRelease: (_, g) => {
+          if (g.dx >= max * 0.85) {
+            Animated.timing(x, { toValue: max, duration: 120, useNativeDriver: false }).start(
+              async () => {
+                setWorking(true);
+                try {
+                  await onDone();
+                } finally {
+                  setWorking(false);
+                  Animated.spring(x, { toValue: 0, useNativeDriver: false }).start();
+                }
+              },
+            );
+          } else Animated.spring(x, { toValue: 0, useNativeDriver: false }).start();
+        },
+      }),
+    [disabled, working, max, onDone, x],
+  );
+  return (
+    <View
+      style={[s.slider, disabled && { opacity: 0.55 }]}
+      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+      accessibilityRole="adjustable"
+      accessibilityLabel={label}
+      accessibilityActions={[{ name: "activate" }]}
+      onAccessibilityAction={() => !disabled && void onDone()}
+    >
+      <Animated.View
+        style={[s.sliderFill, { width: Animated.add(x, KNOB + 4) }]}
+      />
+      <Text style={s.sliderText}>{working ? "Recording…" : label}</Text>
+      <Animated.View
+        {...responder.panHandlers}
+        style={[s.sliderKnob, { transform: [{ translateX: x }] }]}
+      >
+        <Text style={s.sliderArrow}>›</Text>
+      </Animated.View>
+    </View>
+  );
+}
+
+// The top of Home, as on the old app: the punch-in time, the slider, and two tiles.
+function PunchHero({
+  today,
+  leaves,
+  onSlidePunch,
+}: {
+  today: TodayInfo | null;
+  leaves: number | null;
+  onSlidePunch: () => Promise<void>;
+}) {
+  const open = today?.openShift,
+    done = today?.todayShift;
+  const date = new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(new Date());
+  return (
+    <View style={s.hero}>
+      <View style={s.heroBlob} />
+      <View style={s.heroBlob2} />
+      <View style={s.timeBox}>
+        <Text style={s.timeLabel}>{open ? "Time In" : done ? "Time Out" : "Not punched in"}</Text>
+        <Text style={s.timeValue}>
+          {open ? clock(open.in_at) : done?.out_at ? clock(done.out_at) : "--:--"}
+        </Text>
+      </View>
+      <SlideToPunch
+        label={open ? "Slide to Punch Out" : done ? "Slide to update Punch Out" : "Slide to Punch In"}
+        disabled={!today}
+        onDone={onSlidePunch}
+      />
+      <View style={s.tiles}>
+        <View style={[s.tile, { backgroundColor: "#3aa0f0" }]}>
+          <Text style={s.tileLabel}>Leaves Remaining</Text>
+          <Text style={s.tileValue}>{leaves ?? "—"}</Text>
+        </View>
+        <View
+          style={[
+            s.tile,
+            { backgroundColor: open ? "#5fcf80" : done ? "#8f9bd9" : "#f0a04b" },
+          ]}
+        >
+          <Text style={s.tileLabel}>{date}</Text>
+          <Text style={s.tileValue}>
+            {open ? "Working" : done ? "Done" : "Not in"}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
 }
 
 // ---- home -----------------------------------------------------------------------------------
@@ -487,12 +617,12 @@ function HomeScreen({
   api,
   files,
   onSection,
-  onPunch,
+  onSlidePunch,
 }: {
   api: Api;
   files: Files;
   onSection: (s: Section) => void;
-  onPunch: () => void;
+  onSlidePunch: () => Promise<void>;
 }) {
   const year = new Date().getFullYear();
   const home = useLoad(() => api<HomeData>("/home"));
@@ -501,6 +631,7 @@ function HomeScreen({
   const hol = useLoad(() => api<HolidayRow[]>("/holidays?year=" + year));
   const today = useLoad(() => api<TodayInfo>("/me"));
   const [optional, setOptional] = useState(false);
+  const [allHolidays, setAllHolidays] = useState(false);
   const [code, setCode] = useState(""),
     [name, setName] = useState("");
   const [found, setFound] = useState<Person[] | null>(null);
@@ -528,8 +659,6 @@ function HomeScreen({
     .filter((b) => !b.unlimited)
     .reduce((n, b) => n + Number(b.available ?? 0), 0);
   const holidays = (hol.data ?? []).filter((h) => !!h.optional === optional);
-  const open = today.data?.openShift,
-    done = today.data?.todayShift;
   const node = (p: HomePerson, me?: boolean) => (
     <View key={p.id} style={[s.orgNode, me && s.orgMe]}>
       <Text style={s.strong}>{p.name}</Text>
@@ -538,6 +667,15 @@ function HomeScreen({
   );
   return (
     <>
+      <PunchHero
+        today={today.data}
+        leaves={bal.data ? total : null}
+        onSlidePunch={async () => {
+          await onSlidePunch();
+          void today.reload();
+          void bal.reload();
+        }}
+      />
       <View style={s.card}>
         <Text style={s.heading}>Employee Search</Text>
         <Field label="Code" value={code} onChange={setCode} />
@@ -567,23 +705,6 @@ function HomeScreen({
             )}
           </View>
         ))}
-      </View>
-      <View style={s.card}>
-        <Text style={s.heading}>Today</Text>
-        <Pill
-          text={open ? "Working now" : done ? "Punched out" : "Not punched in"}
-        />
-        <Text style={s.note}>
-          {open
-            ? "Signed in at " + clock(open.in_at) + " · " + open.workplace_name
-            : done
-              ? "Worked " +
-                clock(done.in_at) +
-                " – " +
-                (done.out_at ? clock(done.out_at) : "")
-              : (today.data?.workplace?.name ?? "No workplace assigned")}
-        </Text>
-        <Btn title={open ? "Punch out →" : "Punch in →"} onPress={onPunch} />
       </View>
       <View style={s.card}>
         <Text style={s.heading}>My Leave Balance</Text>
@@ -664,7 +785,7 @@ function HomeScreen({
           ))}
         </View>
         <Status loading={hol.loading} error={hol.error} />
-        {holidays.map((h) => (
+        {holidays.slice(0, allHolidays ? undefined : 3).map((h) => (
           <View key={h.date + h.name} style={s.row}>
             <View style={{ flex: 1 }}>
               <Text style={s.strong}>{h.name}</Text>
@@ -673,6 +794,13 @@ function HomeScreen({
             <Text style={s.note}>{h.branch ?? ""}</Text>
           </View>
         ))}
+        {holidays.length > 3 && (
+          <Btn
+            title={allHolidays ? "Show less" : "Expand (" + holidays.length + ")"}
+            secondary
+            onPress={() => setAllHolidays(!allHolidays)}
+          />
+        )}
         {!hol.loading && holidays.length === 0 && (
           <Text style={s.note}>
             No {optional ? "optional " : ""}holidays added for {year}.
@@ -2426,6 +2554,34 @@ function RequestsScreen({ api }: { api: Api }) {
   );
 }
 
+// ---- on-duty log: the days marked on duty and how each was decided ------------------------
+function OdLogScreen({ api }: { api: Api }) {
+  const list = useLoad(() => api<Correction[]>("/regularizations"));
+  const rows = (list.data ?? []).filter((r) => r.kind === "on_duty");
+  return (
+    <View style={s.card}>
+      <Text style={s.heading}>OD Log History</Text>
+      <Text style={s.note}>
+        Days you were on duty away from your workplace. Ask for one under
+        Regularization.
+      </Text>
+      <Status loading={list.loading} error={list.error} />
+      {!list.loading && rows.length === 0 && (
+        <Text style={s.note}>No on-duty days yet.</Text>
+      )}
+      {rows.map((r) => (
+        <View key={r.id} style={s.row}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.strong}>{dateText(r.date)}</Text>
+            <Text style={s.note}>{r.reason}</Text>
+          </View>
+          <Pill text={r.status} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 // ---- directory and referrals ----------------------------------------------------------------------
 function DirectoryScreen({ api }: { api: Api }) {
   const [q, setQ] = useState("");
@@ -2831,6 +2987,79 @@ const s = StyleSheet.create({
   netLabel: { color: "#fde7ea", fontWeight: "600" },
   netValue: { color: "#fff", fontSize: 22, fontWeight: "700" },
   bubble: { backgroundColor: "#f3f2f7", borderRadius: 12, padding: 12, gap: 4 },
+  hero: {
+    backgroundColor: "#ac051b",
+    borderRadius: 24,
+    padding: 18,
+    gap: 16,
+    overflow: "hidden",
+  },
+  heroBlob: {
+    position: "absolute",
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    backgroundColor: "#4e5aa8",
+    opacity: 0.55,
+    right: -70,
+    top: -90,
+  },
+  heroBlob2: {
+    position: "absolute",
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: "#ff6b81",
+    opacity: 0.25,
+    left: -50,
+    bottom: -60,
+  },
+  timeBox: {
+    alignSelf: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderRadius: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 22,
+  },
+  timeLabel: { color: "#fde7ea", fontSize: 13, letterSpacing: 1 },
+  timeValue: { color: "#fff", fontSize: 34, fontWeight: "800" },
+  slider: {
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    justifyContent: "center",
+    padding: 4,
+  },
+  sliderFill: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: 30,
+    backgroundColor: "rgba(255,255,255,0.25)",
+  },
+  sliderText: {
+    color: "#fff",
+    textAlign: "center",
+    fontWeight: "700",
+    fontSize: 15,
+  },
+  sliderKnob: {
+    position: "absolute",
+    left: 4,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sliderArrow: { color: "#ac051b", fontSize: 30, fontWeight: "800", marginTop: -3 },
+  tiles: { flexDirection: "row", gap: 12 },
+  tile: { flex: 1, borderRadius: 14, padding: 14, gap: 2 },
+  tileLabel: { color: "#fff", fontWeight: "700", fontSize: 12 },
+  tileValue: { color: "#fff", fontWeight: "800", fontSize: 22 },
   galleryCard: { backgroundColor: "#171a28", borderColor: "#2b2f45" },
   galleryKicker: {
     color: "#ff6b81",

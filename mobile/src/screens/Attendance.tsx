@@ -35,6 +35,7 @@ type User = {
   name: string;
   role: string;
   must_change_password: boolean;
+  email?: string | null;
   employee_code?: string | null;
   designation?: string | null;
 };
@@ -116,6 +117,45 @@ export default function Attendance() {
   const selfieResolver = useRef<((photo: string | null) => void) | null>(null);
   const cameraRef = useRef<CameraView | null>(null);
   const [selfieOpen, setSelfieOpen] = useState(false);
+  // "Mark IN / OUT": the person sees where the phone says they are and confirms.
+  const [fix, setFix] = useState<{
+    action: "in" | "out";
+    address: string;
+    accuracy: number;
+  } | null>(null);
+  const fixResolver = useRef<((ok: boolean) => void) | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  async function confirmPlace(
+    position: Location.LocationObject,
+    action: "in" | "out",
+  ): Promise<boolean> {
+    let address = "";
+    try {
+      const [a] = await Promise.race([
+        Location.reverseGeocodeAsync(position.coords),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("slow")), 5000)),
+      ]);
+      address = [a?.name, a?.street, a?.district, a?.city, a?.postalCode]
+        .filter(Boolean)
+        .join(", ");
+    } catch {
+      /* the coordinates are shown instead */
+    }
+    setFix({
+      action,
+      address:
+        address ||
+        position.coords.latitude.toFixed(5) + ", " + position.coords.longitude.toFixed(5),
+      accuracy: Math.round(position.coords.accuracy ?? 0),
+    });
+    return new Promise((resolve) => {
+      fixResolver.current = resolve;
+    });
+  }
+  const answerFix = (ok: boolean) => {
+    setFix(null);
+    fixResolver.current?.(ok);
+  };
   // Resolves with a small JPEG (base64) or null if the person cancels.
   async function takeSelfie(): Promise<string | null> {
     if (!cameraPermission?.granted && !(await requestCamera()).granted)
@@ -251,7 +291,9 @@ export default function Attendance() {
       }
     }
   }
-  async function run(fn: () => Promise<void>) {
+  // popup: also show a failure as a pop-up, for actions started away from the
+  // message area (the Home slider sits far above it).
+  async function run(fn: () => Promise<void>, popup = false) {
     if (locked.current) return;
     locked.current = true;
     setBusy(true);
@@ -259,9 +301,10 @@ export default function Attendance() {
     try {
       await fn();
     } catch (e) {
-      setMessage(
-        e instanceof Error ? e.message : "Unable to connect. Please retry.",
-      );
+      const text =
+        e instanceof Error ? e.message : "Unable to connect. Please retry.";
+      setMessage(text);
+      if (popup) Alert.alert("Attendance not recorded", text);
     } finally {
       locked.current = false;
       setBusy(false);
@@ -360,7 +403,7 @@ export default function Attendance() {
       await refresh();
       setMessage("Password updated.");
     });
-  const punch = () =>
+  const punch = (popup = false) =>
     run(async () => {
       const current = await api<Profile>("/me");
       setProfile(current);
@@ -438,6 +481,12 @@ export default function Attendance() {
       if (AppState.currentState !== "active")
         throw new Error("Keep the app open while recording attendance.");
       const action = ending ? "out" : "in";
+      if (!(await confirmPlace(position, action))) return;
+      // The server takes readings up to a minute old; take a new one after a long pause.
+      if (Date.now() - position.timestamp > 40000)
+        position = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Highest,
+        });
       try {
         await api("/punch", {
           action,
@@ -468,7 +517,7 @@ export default function Attendance() {
           ? "You are punched in. Have a good workday."
           : "You are punched out. Your working hours are saved.",
       );
-    });
+    }, popup);
   const onCounts = useCallback(
     (alerts: number, messages: number) => setCounts({ alerts, messages }),
     [],
@@ -574,15 +623,28 @@ export default function Attendance() {
         <View style={s.menuWrap}>
           <View style={s.menu}>
             <ScrollView>
-              <View style={s.menuBrand}>
-                <View style={s.logo}>
-                  <Text style={s.logoText}>L</Text>
+              {profile && (
+                <View style={s.menuUser}>
+                  <Text style={s.menuCompany}>LAXMI INDIA FINANCE</Text>
+                  <View style={s.menuAvatar}>
+                    <Text style={s.menuAvatarText}>
+                      {profile.user.name
+                        .split(" ")
+                        .filter(Boolean)
+                        .slice(0, 2)
+                        .map((w) => w[0].toUpperCase())
+                        .join("")}
+                    </Text>
+                  </View>
+                  <Text style={s.menuName}>{profile.user.name}</Text>
+                  {!!profile.user.email && (
+                    <Text style={s.menuSub}>{profile.user.email}</Text>
+                  )}
+                  {!!profile.user.designation && (
+                    <Text style={s.menuSub}>{profile.user.designation}</Text>
+                  )}
                 </View>
-                <View>
-                  <Text style={s.menuBrandName}>LAXMI INDIA</Text>
-                  <Text style={s.menuBrandSub}>FINANCE</Text>
-                </View>
-              </View>
+              )}
               {MENU.map(([group, items]) => (
                 <View key={group} style={{ marginBottom: 6 }}>
                   <Text style={s.menuGroup}>{group}</Text>
@@ -627,6 +689,9 @@ export default function Attendance() {
               >
                 <Text style={s.menuText}>Log Out</Text>
               </Pressable>
+              <Text style={s.menuVersion}>
+                Version {Constants.expoConfig?.version ?? ""}
+              </Text>
             </ScrollView>
           </View>
           <Pressable
@@ -684,14 +749,25 @@ export default function Attendance() {
                   onChangeText={setEmail}
                 />
                 <Text style={s.label}>Password</Text>
-                <TextInput
-                  accessibilityLabel="Password"
-                  style={s.input}
-                  secureTextEntry
-                  autoComplete="current-password"
-                  value={password}
-                  onChangeText={setPassword}
-                />
+                <View>
+                  <TextInput
+                    accessibilityLabel="Password"
+                    style={[s.input, { paddingRight: 56 }]}
+                    secureTextEntry={!showPassword}
+                    autoComplete="current-password"
+                    value={password}
+                    onChangeText={setPassword}
+                  />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+                    onPress={() => setShowPassword(!showPassword)}
+                    style={s.eye}
+                    hitSlop={10}
+                  >
+                    <Text style={{ fontSize: 18 }}>{showPassword ? "🙈" : "👁"}</Text>
+                  </Pressable>
+                </View>
                 <Button
                   title={busy ? "Signing in…" : "Sign in →"}
                   onPress={login}
@@ -803,6 +879,7 @@ export default function Attendance() {
                   section={view}
                   onSection={setView}
                   onPunch={() => setView("Punch")}
+                  onSlidePunch={() => punch(true)}
                   onCounts={onCounts}
                   files={files}
                   onSignOut={() => void logout()}
@@ -876,7 +953,7 @@ export default function Attendance() {
                             ? "Update punch-out →"
                             : "Punch in →"
                     }
-                    onPress={punch}
+                    onPress={() => void punch()}
                     disabled={
                       busy ||
                       profile.device?.status !== "approved" ||
@@ -905,6 +982,58 @@ export default function Attendance() {
           <Text style={s.footer}>LAXMI INDIA FINANCE LTD.</Text>
         </ScrollView>
       </KeyboardAvoidingView>
+      {employeeView && (
+        <View style={s.tabBar}>
+          {(
+            [
+              ["Home", "⌂", "Home"],
+              ["Leave", "☼", "Leave"],
+              ["My Attendance", "▤", "Attendance"],
+              ["Profile", "☺", "Profile"],
+            ] as const
+          ).map(([id, icon, label]) => (
+            <Pressable
+              key={id}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: view === id }}
+              onPress={() => setView(id)}
+              style={[s.tabItem, view === id && s.tabItemOn]}
+            >
+              <Text style={[s.tabIcon, view === id && { color: "#ac051b" }]}>{icon}</Text>
+              <Text style={[s.tabLabel, view === id && { color: "#ac051b" }]}>{label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+      <Modal
+        visible={!!fix}
+        transparent
+        animationType="slide"
+        onRequestClose={() => answerFix(false)}
+      >
+        <View style={s.sheetWrap}>
+          <View style={s.sheet}>
+            <Text style={s.sheetTitle}>
+              {fix?.action === "out" ? "Mark OUT" : "Mark IN"}
+            </Text>
+            <View style={s.pinRow}>
+              <Text style={s.pin}>📍</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={s.sheetAddress}>{fix?.address}</Text>
+                <Text style={s.note}>
+                  Accurate to about {fix?.accuracy} m ·{" "}
+                  {profile?.workplace?.name ?? "your workplace"}
+                </Text>
+              </View>
+            </View>
+            <Button
+              title="Confirm"
+              onPress={() => answerFix(true)}
+            />
+            <Button title="Cancel" secondary onPress={() => answerFix(false)} />
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1017,23 +1146,64 @@ const s = StyleSheet.create({
   avatarText: { color: "#4e5aa8", fontWeight: "700" },
   barCode: { color: "#fff", fontWeight: "700", fontSize: 16 },
   barSub: { color: "#d7d8df", fontSize: 11 },
+  eye: { position: "absolute", right: 14, top: 0, bottom: 0, justifyContent: "center" },
+  menuUser: {
+    backgroundColor: "#8c0416",
+    paddingTop: 48,
+    paddingHorizontal: 18,
+    paddingBottom: 16,
+    gap: 2,
+  },
+  menuAvatar: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  menuAvatarText: { color: "#ac051b", fontWeight: "800", fontSize: 18 },
+  menuName: { color: "#fff", fontWeight: "800", fontSize: 17 },
+  menuCompany: {
+    color: "#fff",
+    fontWeight: "800",
+    letterSpacing: 1.5,
+    fontSize: 12,
+    marginBottom: 12,
+  },
+  menuSub: { color: "#fbd5da", fontSize: 12 },
+  menuVersion: { color: "#fbd5da", fontSize: 11, textAlign: "center", marginTop: 18 },
+  tabBar: {
+    flexDirection: "row",
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderColor: "#eceaf1",
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  tabItem: { flex: 1, alignItems: "center", paddingVertical: 6, borderRadius: 14 },
+  tabItemOn: { backgroundColor: "#fde7ea" },
+  tabIcon: { fontSize: 18, color: "#7a7d8c" },
+  tabLabel: { fontSize: 11, color: "#7a7d8c", fontWeight: "600" },
+  sheetWrap: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.35)" },
+  sheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 22,
+    gap: 12,
+  },
+  sheetTitle: { fontSize: 22, fontWeight: "800", color: "#2a2c3a" },
+  pinRow: { flexDirection: "row", gap: 12, alignItems: "center" },
+  pin: { fontSize: 34 },
+  sheetAddress: { fontSize: 15, fontWeight: "700", color: "#2a2c3a" },
   menuWrap: {
     flex: 1,
     flexDirection: "row",
     backgroundColor: "rgba(0,0,0,0.35)",
   },
   menu: { width: 280, backgroundColor: "#ac051b", paddingBottom: 30 },
-  menuBrand: {
-    backgroundColor: "#fff",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    padding: 16,
-    paddingTop: 48,
-    marginBottom: 10,
-  },
-  menuBrandName: { color: "#ac051b", fontWeight: "800", fontSize: 17 },
-  menuBrandSub: { color: "#ac051b", fontWeight: "700", letterSpacing: 2 },
   menuGroup: {
     color: "#fbd5da",
     fontSize: 11,
