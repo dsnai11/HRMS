@@ -86,7 +86,7 @@ Done: the HR Command Centre (live headcount by department and branch, joiners an
 
 ## Configuration and customisation scope
 
-Done: renamed terms, custom fields, shift and leave rules, salary components and statutory settings, multi-level leave approval (up to three steps: manager, manager's manager, HR) with reminders and escalation to HR, custom roles with chosen rights, optionally limited to branches (region- or entity-wise permission sets), and SMS alerts through Twilio or any HTTP gateway (**needs you:** an SMS account with DLT-registered templates). Attendance corrections still use a single approval step.
+Done: renamed terms, custom fields, shift and leave rules, salary components and statutory settings, multi-level leave approval (up to three steps: manager, manager's manager, HR) with reminders and escalation to HR, custom roles with chosen rights, optionally limited to branches (region- or entity-wise permission sets), and SMS alerts through Twilio or any HTTP gateway (**needs you:** an SMS account with DLT-registered templates). Attendance corrections have their own approval chain with the same rules. Standard HR roles (HR Manager, HR Executive, Branch HR, Recruiter, Payroll Executive and others) can be added in one step.
 
 ## Things the proposal assumes that are not software
 
