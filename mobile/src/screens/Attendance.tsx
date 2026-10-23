@@ -473,6 +473,24 @@ export default function Attendance() {
     (alerts: number, messages: number) => setCounts({ alerts, messages }),
     [],
   );
+  // For images and file links: the server address and the same headers api() sends.
+  const files = useMemo(
+    () => ({
+      base: API,
+      headers: (): Record<string, string> => ({
+        ...(sessionRef.current
+          ? { Authorization: "Bearer " + sessionRef.current }
+          : {}),
+        ...(identity.current?.secret
+          ? {
+              "X-Device-Id": identity.current.id,
+              "X-Device-Secret": identity.current.secret,
+            }
+          : {}),
+      }),
+    }),
+    [],
+  );
   const moreApi = useMemo(
     () =>
       <T,>(path: string, body?: object, method?: string) =>
@@ -786,6 +804,7 @@ export default function Attendance() {
                   onSection={setView}
                   onPunch={() => setView("Punch")}
                   onCounts={onCounts}
+                  files={files}
                   onSignOut={() => void logout()}
                   onPassword={() => setChanging(true)}
                 />

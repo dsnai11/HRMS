@@ -38,6 +38,7 @@ import { registerFeedbackRounds } from "./routes/feedback-rounds.js";
 import { registerForm16 } from "./routes/form16.js";
 import { registerEmployeeDetails } from "./routes/employee-details.js";
 import { registerGallery } from "./routes/gallery.js";
+import { registerDownloadLinks } from "./routes/download-links.js";
 import {
   registerScheduledReports,
   scheduleReports,
@@ -216,6 +217,7 @@ export function createApp({
     registerForm16,
     registerEmployeeDetails,
     registerGallery,
+    registerDownloadLinks,
   ])
     register(router, app);
 

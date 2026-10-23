@@ -2,13 +2,18 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Linking,
+  Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import * as DocumentPicker from "expo-document-picker";
+import { File } from "expo-file-system";
 
 // Self-service screens for the phone: leave, messages, the Laxmi assistant,
 // payslips, attendance requests, directory, helpdesk, alerts and profile. Everything talks to the same API as
@@ -25,6 +30,7 @@ type Props = {
   onSection: (s: Section) => void;
   onPunch: () => void;
   onCounts: (alerts: number, messages: number) => void;
+  files: Files;
   onSignOut: () => void;
   onPassword: () => void;
 };
@@ -129,6 +135,7 @@ type ChatMessage = {
   author: string;
   body: string;
   created_at: string;
+  file_id?: number | null;
   file_name?: string | null;
 };
 type RoomInfo = {
@@ -303,6 +310,7 @@ export default function More({
   onSection,
   onPunch,
   onCounts,
+  files,
   onSignOut,
   onPassword,
 }: Props) {
@@ -328,21 +336,31 @@ export default function More({
         {section === "Home" ? "" : " / " + section}
       </Text>
       {section === "Home" && (
-        <HomeScreen api={api} onSection={onSection} onPunch={onPunch} />
+        <HomeScreen
+          api={api}
+          files={files}
+          onSection={onSection}
+          onPunch={onPunch}
+        />
       )}
       {section === "My Attendance" && <MyAttendanceScreen api={api} />}
       {section === "Leave" && <LeaveScreen api={api} />}
       {section === "Messages" && (
-        <MessagesScreen api={api} userId={userId} onUnread={setChatUnread} />
+        <MessagesScreen
+          api={api}
+          files={files}
+          userId={userId}
+          onUnread={setChatUnread}
+        />
       )}
       {section === "Ask Laxmi" && <LaxmiScreen api={api} onGoto={onSection} />}
-      {section === "Payslips" && <PayslipsScreen api={api} />}
+      {section === "Payslips" && <PayslipsScreen api={api} files={files} />}
       {section === "Requests" && <RequestsScreen api={api} />}
       {section === "Directory" && <DirectoryScreen api={api} />}
       {section === "Helpdesk" && <HelpdeskScreen api={api} />}
       {section === "Alerts" && <AlertsScreen api={api} onChange={setUnread} />}
       {section === "Profile" && (
-        <ProfileScreen
+        <ProfileWithDetails
           api={api}
           onSignOut={onSignOut}
           onPassword={onPassword}
@@ -467,10 +485,12 @@ const clock = (iso: string) =>
 
 function HomeScreen({
   api,
+  files,
   onSection,
   onPunch,
 }: {
   api: Api;
+  files: Files;
   onSection: (s: Section) => void;
   onPunch: () => void;
 }) {
@@ -698,6 +718,7 @@ function HomeScreen({
           </View>
         )}
       </View>
+      <GalleryBunches api={api} files={files} />
     </>
   );
 }
@@ -850,6 +871,7 @@ function LeaveScreen({ api }: { api: Api }) {
     null,
   );
   const [picking, setPicking] = useState(false);
+  const [medical, setMedical] = useState<Picked | null>(null);
   const [working, setWorking] = useState(false);
   const options =
     bal.data?.map((b) => ({ id: b.leave_type_id, name: b.name })) ?? [];
@@ -954,14 +976,40 @@ function LeaveScreen({ api }: { api: Api }) {
                 }}
               />
             )}
+            <Text style={s.label}>Upload Medical Document (optional)</Text>
+            <Pressable
+              style={s.input}
+              onPress={async () => {
+                try {
+                  const f = await pickFile();
+                  if (f) setMedical(f);
+                } catch (e) {
+                  Alert.alert("Could not attach", errorText(e));
+                }
+              }}
+            >
+              <Text style={{ color: medical ? "#2a2c3a" : "#9a9cab" }}>
+                {medical ? "📎 " + medical.name : "Choose a PDF or photo (up to 2 MB)"}
+              </Text>
+            </Pressable>
             <Btn
               title={working ? "Sending…" : "Send request"}
               disabled={working || !typeId || !from}
               onPress={async () => {
                 setWorking(true);
                 const ok = await attempt(
-                  () =>
+                  async () =>
                     api("/leave/requests", {
+                      document_id: medical
+                        ? (
+                            await api<{ id: number }>("/documents", {
+                              kind: "medical",
+                              name: "Medical, leave from " + from,
+                              mime: medical.mime,
+                              data: medical.data,
+                            })
+                          ).id
+                        : undefined,
                       leave_type_id: typeId,
                       from_date: from,
                       to_date: half ? from : to || from,
@@ -983,6 +1031,7 @@ function LeaveScreen({ api }: { api: Api }) {
                   setAddress("");
                   setContact("");
                   setCover(null);
+                  setMedical(null);
                   void reqs.reload();
                   void bal.reload();
                 }
@@ -1085,10 +1134,12 @@ const merge = (list: ChatMessage[], more: ChatMessage[]) =>
 
 function MessagesScreen({
   api,
+  files,
   userId,
   onUnread,
 }: {
   api: Api;
+  files: Files;
   userId: number;
   onUnread: (n: number) => void;
 }) {
@@ -1329,9 +1380,14 @@ function MessagesScreen({
                 )}
               </Text>
               {!!m.body && <Text style={s.body}>{m.body}</Text>}
-              {!!m.file_name && (
-                <Text style={s.note}>
-                  📎 {m.file_name} (open it on the web portal)
+              {!!m.file_id && (
+                <Text
+                  style={s.link}
+                  onPress={() =>
+                    void openFile(api, files, "chat_file", m.file_id as number)
+                  }
+                >
+                  📎 {m.file_name}
                 </Text>
               )}
             </View>
@@ -1352,6 +1408,29 @@ function MessagesScreen({
               title={sending ? "Sending…" : "Send"}
               disabled={sending || !draft.trim()}
               onPress={() => void send()}
+            />
+            <Btn
+              title="📎 Send a file"
+              secondary
+              disabled={sending}
+              onPress={async () => {
+                if (room === null) return;
+                try {
+                  const f = await pickFile();
+                  if (!f) return;
+                  setSending(true);
+                  await api("/chat/rooms/" + room + "/messages", {
+                    body: draft.trim(),
+                    file: f,
+                  });
+                  setDraft("");
+                  void openRoom(room);
+                } catch (e) {
+                  Alert.alert("Could not send", errorText(e));
+                } finally {
+                  setSending(false);
+                }
+              }}
             />
           </>
         )}
@@ -1781,8 +1860,381 @@ function LeaveCard({ api, action }: { api: Api; action: LeaveAction }) {
   );
 }
 
+// ---- files: open through a short-lived link, pick from the phone --------------------------------
+// The system viewer cannot send the sign-in token, so the app asks the server for a link
+// that works for five minutes and opens that.
+export type Files = { base: string; headers: () => Record<string, string> };
+async function openFile(api: Api, files: Files, kind: "document" | "chat_file", id: number) {
+  try {
+    const link = await api<{ url: string }>("/download-links", { kind, id });
+    await Linking.openURL(files.base + link.url);
+  } catch (e) {
+    Alert.alert("Could not open", errorText(e));
+  }
+}
+type Picked = { name: string; mime: string; data: string };
+const PICK_TYPES: Record<string, string> = {
+  "application/pdf": "PDF",
+  "image/jpeg": "JPG",
+  "image/png": "PNG",
+};
+// A PDF or photo up to 2 MB from the phone, as base64; null if the person cancels.
+async function pickFile(): Promise<Picked | null> {
+  const r = await DocumentPicker.getDocumentAsync({
+    type: Object.keys(PICK_TYPES),
+    copyToCacheDirectory: true,
+  });
+  if (r.canceled || !r.assets?.length) return null;
+  const a = r.assets[0];
+  const mime = a.mimeType ?? "";
+  if (!PICK_TYPES[mime]) throw new Error("Choose a PDF, JPG or PNG.");
+  if ((a.size ?? 0) > 2 * 1024 * 1024) throw new Error("Files can be up to 2 MB.");
+  return { name: a.name, mime, data: await new File(a.uri).base64() };
+}
+
+// ---- Form 16 ----------------------------------------------------------------------------------
+function Form16Card({ api, files }: { api: Api; files: Files }) {
+  const list = useLoad(() =>
+    api<{ id: number; name: string }[]>("/form16"),
+  );
+  return (
+    <View style={s.card}>
+      <Text style={s.heading}>Form 16</Text>
+      <Status loading={list.loading} error={list.error} />
+      {(list.data ?? []).length === 0 && !list.loading && (
+        <Text style={s.note}>
+          Your Form 16 appears here once payroll uploads it, usually by
+          mid-June.
+        </Text>
+      )}
+      {(list.data ?? []).map((d) => (
+        <Pressable
+          key={d.id}
+          style={s.row}
+          onPress={() => void openFile(api, files, "document", d.id)}
+        >
+          <Text style={s.strong}>{d.name}</Text>
+          <Text style={s.link}>Download</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+// ---- engagement gallery: still photos, one bunch per event -------------------------------------
+type GalleryPhoto = {
+  id: number;
+  title: string;
+  category: string;
+  event_date: string;
+  branch_name: string | null;
+};
+function GalleryBunches({ api, files }: { api: Api; files: Files }) {
+  const g = useLoad(() =>
+    api<{ items: GalleryPhoto[] }>("/gallery?limit=100"),
+  );
+  const [album, setAlbum] = useState<GalleryPhoto[] | null>(null);
+  const [big, setBig] = useState<number | null>(null);
+  const albums: GalleryPhoto[][] = [];
+  const byKey = new Map<string, GalleryPhoto[]>();
+  for (const p of g.data?.items ?? []) {
+    const key = p.title.toLowerCase() + "|" + p.event_date;
+    if (!byKey.has(key)) {
+      byKey.set(key, []);
+      albums.push(byKey.get(key)!);
+    }
+    byKey.get(key)!.push(p);
+  }
+  const src = (id: number) => ({
+    uri: files.base + "/api/gallery/" + id + "/image",
+    headers: files.headers(),
+  });
+  const tilt = (id: number) => ((Math.sin(id * 9301) + 1) / 2) * 10 - 5;
+  return (
+    <View style={[s.card, s.galleryCard]}>
+      <Text style={s.galleryKicker}>MOMENTS</Text>
+      <Text style={[s.heading, { color: "#fff" }]}>Engagement Gallery</Text>
+      <Status loading={g.loading} error={g.error} />
+      {!g.loading && albums.length === 0 && (
+        <Text style={{ color: "#b9bdd6" }}>
+          Photos from HR days, celebrations and awards appear here.
+        </Text>
+      )}
+      <View style={s.stacks}>
+        {albums.map((a) => (
+          <Pressable
+            key={a[0].id}
+            onPress={() => {
+              setAlbum(a);
+              setBig(null);
+            }}
+            style={[s.stack, { transform: [{ rotate: tilt(a[0].id) + "deg" }] }]}
+            accessibilityLabel={a[0].title + ", " + a.length + " photos"}
+          >
+            {a
+              .slice(0, 3)
+              .reverse()
+              .map((p, k, shown) => (
+                <Image
+                  key={p.id}
+                  source={src(p.id)}
+                  style={[
+                    s.stackPhoto,
+                    k < shown.length - 1 && {
+                      transform: [{ rotate: (k % 2 ? 8 : -8) + "deg" }],
+                    },
+                  ]}
+                />
+              ))}
+            <Text style={s.stackCount}>
+              {a.length} {a.length === 1 ? "photo" : "photos"}
+            </Text>
+            <Text style={s.stackTitle} numberOfLines={1}>
+              {a[0].title}
+            </Text>
+            <Text style={s.stackSub}>{dateText(a[0].event_date)}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Modal
+        visible={!!album}
+        animationType="slide"
+        onRequestClose={() => (big !== null ? setBig(null) : setAlbum(null))}
+      >
+        {album && (
+          <View style={s.albumWrap}>
+            <View style={s.row}>
+              <Text style={[s.heading, { flex: 1 }]}>
+                {album[0].title}
+                {big !== null ? " · " + (big + 1) + " of " + album.length : ""}
+              </Text>
+              <Pressable
+                onPress={() => (big !== null ? setBig(null) : setAlbum(null))}
+              >
+                <Text style={s.link}>{big !== null ? "All photos" : "Close"}</Text>
+              </Pressable>
+            </View>
+            {big === null ? (
+              <ScrollView contentContainerStyle={s.albumGrid}>
+                {album.map((p, k) => (
+                  <Pressable key={p.id} onPress={() => setBig(k)}>
+                    <Image source={src(p.id)} style={s.albumThumb} />
+                  </Pressable>
+                ))}
+              </ScrollView>
+            ) : (
+              <View style={{ flex: 1, gap: 12 }}>
+                <Image
+                  source={src(album[big].id)}
+                  style={{ flex: 1 }}
+                  resizeMode="contain"
+                />
+                {album.length > 1 && (
+                  <View style={s.tabsRow}>
+                    <Btn
+                      title="← Previous"
+                      secondary
+                      onPress={() => setBig((big + album.length - 1) % album.length)}
+                    />
+                    <Btn
+                      title="Next →"
+                      secondary
+                      onPress={() => setBig((big + 1) % album.length)}
+                    />
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+        )}
+      </Modal>
+    </View>
+  );
+}
+
+// ---- profile sections: personal, medical, nominees, insurance ------------------------------------
+type Details = {
+  personal: Record<string, string | number | null>;
+  medical: Record<string, string | null>;
+  nominees: { name: string; relation: string | null; share: number }[];
+  insurance: {
+    type: string;
+    provider: string | null;
+    policy_no: string | null;
+    sum_insured: number | null;
+    valid_till: string | null;
+  }[];
+};
+const MARITAL: Record<string, string> = {
+  single: "Single",
+  married: "Married",
+  divorced: "Divorced",
+  widowed: "Widowed",
+};
+function DetailsCards({ api }: { api: Api }) {
+  const d = useLoad(() => api<Details>("/profile/details"));
+  const [edit, setEdit] = useState<"personal" | "medical" | "nominees" | null>(null);
+  const [form, setForm] = useState<Record<string, string>>({});
+  const set = (k: string) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const start = (which: "personal" | "medical" | "nominees") => {
+    const x = d.data!;
+    setForm(
+      which === "nominees"
+        ? {
+            list: x.nominees
+              .map((n) => [n.name, n.relation ?? "", n.share].join(", "))
+              .join("\n"),
+          }
+        : Object.fromEntries(
+            Object.entries(x[which]).map(([k, v]) => [k, v == null ? "" : String(v)]),
+          ),
+    );
+    setEdit(which);
+  };
+  const save = async () => {
+    const body =
+      edit === "nominees"
+        ? {
+            nominees: (form.list ?? "")
+              .split("\n")
+              .map((l) => l.split(",").map((x) => x.trim()))
+              .filter((x) => x[0])
+              .map(([name, relation, share]) => ({
+                name,
+                relation: relation || null,
+                share: Number(share || 100),
+              })),
+          }
+        : edit === "personal"
+          ? {
+              personal: {
+                ...form,
+                children: form.children ? Number(form.children) : null,
+              },
+            }
+          : { medical: form };
+    if (await attempt(() => api("/profile/details", body, "PUT"), "Saved.")) {
+      setEdit(null);
+      void d.reload();
+    }
+  };
+  const row = (label: string, value: unknown) => (
+    <View key={label} style={s.row}>
+      <Text style={s.note}>{label}</Text>
+      <Text style={s.strong}>{value == null || value === "" ? "—" : String(value)}</Text>
+    </View>
+  );
+  if (!d.data) return <Status loading={d.loading} error={d.error} />;
+  const x = d.data;
+  if (edit)
+    return (
+      <View style={s.card}>
+        <Text style={s.heading}>
+          {edit === "personal"
+            ? "Personal information"
+            : edit === "medical"
+              ? "Medical information"
+              : "Nominees"}
+        </Text>
+        {edit === "personal" && (
+          <>
+            <Field label="Father's name" value={form.father_name ?? ""} onChange={set("father_name")} />
+            <Text style={s.label}>Blood group</Text>
+            <View style={s.wrap}>
+              {["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map((b) => (
+                <Pressable
+                  key={b}
+                  onPress={() => set("blood_group")(b)}
+                  style={[s.chip, form.blood_group === b && s.chipOn]}
+                >
+                  <Text style={[s.chipText, form.blood_group === b && { color: "#fff" }]}>{b}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={s.label}>Marital status</Text>
+            <View style={s.wrap}>
+              {Object.entries(MARITAL).map(([k, v]) => (
+                <Pressable
+                  key={k}
+                  onPress={() => set("marital_status")(k)}
+                  style={[s.chip, form.marital_status === k && s.chipOn]}
+                >
+                  <Text style={[s.chipText, form.marital_status === k && { color: "#fff" }]}>{v}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Field label="Number of children" value={form.children ?? ""} onChange={set("children")} keyboardType="numeric" />
+            <Field label="Nationality" value={form.nationality ?? ""} onChange={set("nationality")} />
+            <Field label="Personal email" value={form.personal_email ?? ""} onChange={set("personal_email")} keyboardType="email-address" />
+          </>
+        )}
+        {edit === "medical" && (
+          <>
+            <Field label="Allergies" value={form.allergies ?? ""} onChange={set("allergies")} />
+            <Field label="Medical conditions" value={form.conditions ?? ""} onChange={set("conditions")} />
+            <Field label="Family doctor and phone" value={form.doctor ?? ""} onChange={set("doctor")} />
+          </>
+        )}
+        {edit === "nominees" && (
+          <Field
+            label="One per line: name, relation, share % (shares add up to 100)"
+            value={form.list ?? ""}
+            onChange={set("list")}
+            multiline
+            placeholder="Sunita Devi, Mother, 100"
+          />
+        )}
+        <Btn title="Save" onPress={() => void save()} />
+        <Btn title="Cancel" secondary onPress={() => setEdit(null)} />
+      </View>
+    );
+  return (
+    <>
+      <View style={s.card}>
+        <Text style={s.heading}>Personal information</Text>
+        {row("Father's name", x.personal.father_name)}
+        {row("Blood group", x.personal.blood_group)}
+        {row("Marital status", MARITAL[String(x.personal.marital_status)] ?? null)}
+        {row("Children", x.personal.children)}
+        {row("Nationality", x.personal.nationality)}
+        {row("Personal email", x.personal.personal_email)}
+        <Btn title="Edit" secondary onPress={() => start("personal")} />
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>Medical information</Text>
+        {row("Allergies", x.medical.allergies)}
+        {row("Medical conditions", x.medical.conditions)}
+        {row("Family doctor", x.medical.doctor)}
+        <Btn title="Edit" secondary onPress={() => start("medical")} />
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>Nominees</Text>
+        {x.nominees.length === 0 && (
+          <Text style={s.note}>No nominees recorded.</Text>
+        )}
+        {x.nominees.map((n, i) => row(n.name + (n.relation ? " · " + n.relation : ""), n.share + "%"))}
+        <Btn title="Edit" secondary onPress={() => start("nominees")} />
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>Insurance</Text>
+        {x.insurance.length === 0 && (
+          <Text style={s.note}>HR records the insurance cover provided to you.</Text>
+        )}
+        {x.insurance.map((p, i) =>
+          row(
+            (p.provider ?? "Policy") + " · " + p.type,
+            [p.sum_insured ? inr(p.sum_insured) : null, p.valid_till ? "till " + dateText(p.valid_till) : null]
+              .filter(Boolean)
+              .join(" · "),
+          ),
+        )}
+      </View>
+    </>
+  );
+}
+
 // ---- payslips -------------------------------------------------------------------------------
-function PayslipsScreen({ api }: { api: Api }) {
+function PayslipsScreen({ api, files }: { api: Api; files: Files }) {
   const list = useLoad(() => api<Payslip[]>("/payslips"));
   const [open, setOpen] = useState<PayslipDetail | null>(null);
   if (open)
@@ -1820,6 +2272,7 @@ function PayslipsScreen({ api }: { api: Api }) {
       </View>
     );
   return (
+    <>
     <View style={s.card}>
       <Text style={s.heading}>Payslips</Text>
       <Status loading={list.loading} error={list.error} />
@@ -1851,6 +2304,8 @@ function PayslipsScreen({ api }: { api: Api }) {
         </Pressable>
       ))}
     </View>
+    <Form16Card api={api} files={files} />
+    </>
   );
 }
 
@@ -2278,6 +2733,19 @@ function ProfileScreen({
     </View>
   );
 }
+// My profile with its extra sections underneath.
+function ProfileWithDetails(props: {
+  api: Api;
+  onSignOut: () => void;
+  onPassword: () => void;
+}) {
+  return (
+    <>
+      <ProfileScreen {...props} />
+      <DetailsCards api={props.api} />
+    </>
+  );
+}
 
 const s = StyleSheet.create({
   card: {
@@ -2363,6 +2831,48 @@ const s = StyleSheet.create({
   netLabel: { color: "#fde7ea", fontWeight: "600" },
   netValue: { color: "#fff", fontSize: 22, fontWeight: "700" },
   bubble: { backgroundColor: "#f3f2f7", borderRadius: 12, padding: 12, gap: 4 },
+  galleryCard: { backgroundColor: "#171a28", borderColor: "#2b2f45" },
+  galleryKicker: {
+    color: "#ff6b81",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 3,
+  },
+  stacks: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 22,
+    paddingVertical: 10,
+  },
+  stack: { width: 140, alignItems: "center" },
+  stackPhoto: {
+    position: "absolute",
+    top: 0,
+    width: 120,
+    height: 120,
+    borderRadius: 4,
+    borderWidth: 6,
+    borderColor: "#f4f4f8",
+    backgroundColor: "#f4f4f8",
+  },
+  stackCount: {
+    marginTop: 128,
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
+    backgroundColor: "#4e5aa8",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  stackTitle: { color: "#eef0ff", fontWeight: "700", fontSize: 13, marginTop: 4 },
+  stackSub: { color: "#b9bdd6", fontSize: 11 },
+  albumWrap: { flex: 1, padding: 18, paddingTop: 48, gap: 12, backgroundColor: "#fff" },
+  albumGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  albumThumb: { width: 104, height: 104, borderRadius: 8, backgroundColor: "#eee" },
+  tabsRow: { flexDirection: "row", gap: 10, justifyContent: "center" },
   crumb: {
     backgroundColor: "#fff",
     borderRadius: 10,

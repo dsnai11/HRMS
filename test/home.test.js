@@ -206,3 +206,20 @@ test("chat shares files with the conversation only, and shows who has read", asy
   const after = (await call(`/chat/rooms/${room}`, undefined, a.token)).data.members.find((m) => m.id === b.id);
   assert.equal(after.last_read_id, sent.data.id);
 });
+
+test("short-lived download links open a file without sign-in, only for those allowed", async (t) => {
+  const { call, owner, add, base } = await world(t);
+  const emp = await add("emp", { employee_code: "LIF7" });
+  const other = await add("other");
+  const pdf = Buffer.from("%PDF-1.4\nform16\n").toString("base64");
+  await call("/admin/form16", { fy: "2025-26", employee_code: "LIF7", mime: "application/pdf", data: pdf }, owner);
+  const doc = (await call("/form16", undefined, emp.token)).data[0];
+  assert.equal((await call("/download-links", { kind: "document", id: doc.id }, other.token)).status, 404);
+  const link = await call("/download-links", { kind: "document", id: doc.id }, emp.token);
+  assert.equal(link.status, 201, JSON.stringify(link.data));
+  const res = await fetch(base.replace(/\/api$/, "") + link.data.url);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "application/pdf");
+  assert.match(await res.text(), /form16/);
+  assert.equal((await fetch(`${base}/dl/not-a-real-token`)).status, 404);
+});
