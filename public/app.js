@@ -297,6 +297,7 @@ function navGroups() {
       "Administration",
       "⚙",
       [
+        has("insights.read") && ["commandcentre", "HR Command Centre"],
         has("insights.read") && ["insights", "Insights"],
         has("employees.read") && ["employees", "Employees"],
         has("org.read") && ["organization", "Organization"],
@@ -458,6 +459,7 @@ async function render() {
     if (page === "refer") return await referPage(id);
     if (page === "documents") return await documentsPage(id);
     if (page === "roles") return await rolesPage(id);
+    if (page === "commandcentre") return await commandCentrePage(id);
     if (page === "helpdesk") return await helpdeskPage(id);
     if (page === "policies") return await policiesPage(id);
     if (page === "chat") return await chatPage(id);

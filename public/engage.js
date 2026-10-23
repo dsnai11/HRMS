@@ -559,3 +559,96 @@ async function insightsPage(id) {
     document.querySelector("dialog .form-actions").prepend(reset);
   };
 }
+
+// ---- HR Command Centre -------------------------------------------------------------------------------
+// One live page for leadership: headcount, movement, attendance, approvals and the
+// workforce mix, refreshed every minute, plus reports emailed on a schedule.
+const barList = (rows, total) =>
+  rows.length
+    ? rows
+        .slice()
+        .sort((a, b) => b.n - a.n)
+        .map(
+          (r) =>
+            `<div class="bar-row"><span>${esc(r.name || "Not set")}</span><div class="bar"><i style="width:${total ? Math.max(2, Math.round((r.n / total) * 100)) : 0}%"></i></div><strong>${r.n}</strong></div>`,
+        )
+        .join("")
+    : '<p class="muted">No data yet.</p>';
+async function commandCentrePage(id) {
+  const [d, sched, people] = await Promise.all([
+    api("/admin/insights"),
+    api("/admin/report-schedules"),
+    api("/directory"),
+  ]);
+  if (id !== renderId) return;
+  const total = d.headcount.total;
+  const tiles = [
+    ["Headcount", total, "Active employees"],
+    ["Joined this month", d.this_month.joined, d.this_month.month],
+    ["Left this month", d.this_month.left, d.this_month.month],
+    ["Monthly attrition", `${d.this_month.attrition_percent}%`, "Leavers ÷ headcount"],
+    ["12-month attrition", `${d.movement.attrition_percent}%`, `${d.movement.leavers_12m} left in 12 months`],
+    ["Open positions", d.recruitment.open_positions, "Across open requisitions"],
+    ["Present today", d.attendance.today_present, `of ${total}`],
+    ["On leave today", d.attendance.on_leave_today, "Approved leave"],
+    ["Leave awaiting approval", d.leave.pending, "All steps"],
+    ["Open helpdesk tickets", d.helpdesk.open, "Open or in progress"],
+  ];
+  const name = new Map(people.map((p) => [p.id, p.name]));
+  document.querySelector("#content").innerHTML =
+    heading(
+      "HR Command Centre",
+      `Live view of the organisation as of ${fmtDate(d.as_of)}. Refreshes every minute.`,
+      '<button class="secondary" id="cc-refresh">↻ Refresh</button>',
+    ) +
+    `<div class="stats">${tiles.map(([l, v, s]) => `<div class="stat"><div class="stat-label">${esc(l)}</div><div class="stat-value">${v}</div><small>${esc(s)}</small></div>`).join("")}</div>` +
+    `<div class="grid-two"><div class="card"><h2>Headcount by department</h2>${barList(d.headcount.by_department, total)}</div><div class="card"><h2>Headcount by branch</h2>${barList(d.headcount.by_branch, total)}</div></div>` +
+    `<div class="home-grid"><div class="card"><h2>Gender</h2>${barList(d.demographics.gender, total)}</div><div class="card"><h2>Age</h2>${barList(d.demographics.age, total)}</div><div class="card"><h2>Length of service</h2>${barList(d.demographics.tenure, total)}</div></div>` +
+    `<div class="card"><h2>Joiners and leavers, last 12 months</h2><div class="table-wrap"><table><thead><tr><th>Month</th>${d.movement.months.map((m) => `<th>${esc(m.month.slice(5))}/${esc(m.month.slice(2, 4))}</th>`).join("")}</tr></thead><tbody><tr><td>Joined</td>${d.movement.months.map((m) => `<td>${m.joined}</td>`).join("")}</tr><tr><td>Left</td>${d.movement.months.map((m) => `<td>${m.left}</td>`).join("")}</tr></tbody></table></div></div>` +
+    `<div class="card"><div class="card-head"><div><h2>Scheduled reports</h2><p class="muted">Emailed after 8 am on the chosen day. Recipients also see them under alerts.</p></div><button id="cc-add">Schedule a report</button></div>${
+      sched.items.length
+        ? `<div class="table-wrap"><table><thead><tr><th>Report</th><th>When</th><th>Sent to</th><th>Last sent</th><th></th></tr></thead><tbody>${sched.items
+            .map(
+              (s) =>
+                `<tr><td>${esc(sched.reports[s.report] || s.report)}</td><td>${s.frequency === "daily" ? "Every day" : s.frequency === "weekly" ? `Every ${sched.weekdays[s.day]}` : `Monthly, day ${s.day}`}</td><td>${s.recipients.map((r) => esc(name.get(r) || "—")).join(", ")}</td><td>${s.last_sent_on ? fmtDate(s.last_sent_on) : "Not yet"}</td><td><button class="ghost" data-unsched="${s.id}">Remove</button></td></tr>`,
+            )
+            .join("")}</tbody></table></div>`
+        : empty("No scheduled reports", "Send the Command Centre summary to leadership every week, for example.")
+    }</div>`;
+  document.querySelector("#cc-refresh").onclick = render;
+  // Live: redraw every minute while this page stays open.
+  const timer = setInterval(() => {
+    if (page !== "commandcentre" || id !== renderId || document.querySelector("dialog"))
+      return page !== "commandcentre" || id !== renderId ? clearInterval(timer) : null;
+    render();
+  }, 60000);
+  document.querySelectorAll("[data-unsched]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        busy(b, async () => {
+          await api(`/admin/report-schedules/${b.dataset.unsched}`, undefined, "DELETE");
+          await render();
+        })),
+  );
+  document.querySelector("#cc-add").onclick = () =>
+    dialog(
+      "Schedule a report",
+      `${sel("report", "Report", Object.entries(sched.reports))}${sel("frequency", "How often", [["weekly", "Weekly"], ["daily", "Daily"], ["monthly", "Monthly"]])}${sel("weekday", "Weekday (weekly)", sched.weekdays.map((w, i) => [i, w]), 1)}${input("monthday", "Day of the month (monthly)", 1, 'type="number" min="1" max="31"')}<div class="full"><strong>Send to</strong><div class="check-grid">${people
+        .map(
+          (p) =>
+            `<label class="check"><input type="checkbox" name="to:${p.id}" ${p.id === me.id ? "checked" : ""}> ${esc(p.name)}</label>`,
+        )
+        .join("")}</div></div>`,
+      async (f) => {
+        await api("/admin/report-schedules", {
+          report: f.report,
+          frequency: f.frequency,
+          day: f.frequency === "weekly" ? Number(f.weekday) : Number(f.monthday),
+          recipients: Object.keys(f)
+            .filter((k) => k.startsWith("to:"))
+            .map((k) => Number(k.slice(3))),
+        });
+        notice("Report scheduled.");
+      },
+    );
+}

@@ -60,6 +60,7 @@ async function world(t) {
 }
 
 import { sendApprovalReminders } from "../server/approval-chain.js";
+import { sendScheduledReports } from "../server/scheduled-reports.js";
 
 test("leave passes through a multi-level chain, with reminders and escalation", async (t) => {
   const { db, call, owner, add, app, tick } = await world(t);
@@ -117,4 +118,31 @@ test("leave passes through a multi-level chain, with reminders and escalation", 
   const r3 = await call("/leave/requests", { leave_type_id: lwp.leave_type_id, from_date: "2026-11-24", to_date: "2026-11-24" }, emp.token);
   assert.equal((await call(`/leave/requests/${r3.data.id}/decision`, { decision: "rejected" }, mgr.token)).status, 200);
   assert.equal((await call("/leave/requests", undefined, emp.token)).data.find((r) => r.id === r3.data.id).status, "rejected");
+});
+
+test("command centre figures and scheduled report emails", async (t) => {
+  const { db, call, owner, add, app, tick } = await world(t);
+  const hr = await add("hr", { role: "hr", gender: "female", date_of_birth: "1990-05-01", date_of_joining: "2020-01-01" });
+  await add("new", { gender: "male", date_of_joining: "2026-11-01" });
+
+  const d = (await call("/admin/insights", undefined, owner)).data;
+  assert.equal(d.this_month.month, "2026-11");
+  assert.equal(d.this_month.joined, 1);
+  assert.ok(d.demographics.gender.some((g) => g.name === "Female" && g.n === 1));
+  assert.ok(d.demographics.age.some((g) => g.name === "35–44"));
+  assert.ok(d.demographics.tenure.some((g) => g.name === "5–9 years"));
+
+  // Weekly on Monday (2 Nov 2026 is a Monday), to HR.
+  assert.equal((await call("/admin/report-schedules", { report: "nope", frequency: "weekly" }, owner)).status, 400);
+  const s = await call("/admin/report-schedules", { report: "command_centre", frequency: "weekly", day: 1, recipients: [hr.id] }, owner);
+  assert.equal(s.status, 201, JSON.stringify(s.data));
+  assert.equal((await call("/admin/report-schedules", undefined, hr.token)).data.items.length, 1);
+  assert.equal(await sendScheduledReports(app), 1);
+  assert.equal(await sendScheduledReports(app), 0, "once a day");
+  const note = await db.prepare("SELECT title,body FROM notifications WHERE user_id=? AND kind='report'").get(hr.id);
+  assert.match(note.title, /^HR Command Centre, 2026-11-02/);
+  assert.match(note.body, /Headcount: 2/); // hr and new; the owner is not staff
+  tick(24); // Tuesday: not due
+  assert.equal(await sendScheduledReports(app), 0);
+  assert.equal((await call(`/admin/report-schedules/${s.data.id}`, undefined, owner, "DELETE")).status, 200);
 });

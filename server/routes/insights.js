@@ -267,6 +267,60 @@ export function registerInsights(router, app) {
           ).n,
         },
       };
+      // This month's movement and the workforce mix, for the HR Command Centre.
+      const month = today.slice(0, 7);
+      out.this_month = {
+        month,
+        joined: joined.get(month) ?? 0,
+        left: left.get(month) ?? 0,
+        attrition_percent:
+          total > 0
+            ? Math.round(((left.get(month) ?? 0) / total) * 1000) / 10
+            : 0,
+      };
+      const mix = await db
+        .prepare(
+          `SELECT gender,date_of_birth,date_of_joining FROM users WHERE ${active}`,
+        )
+        .all(companyId);
+      const years = (d) =>
+        d
+          ? Math.floor(
+              (Date.parse(`${today}T00:00:00Z`) -
+                Date.parse(`${d}T00:00:00Z`)) /
+                (365.25 * 86400000),
+            )
+          : null;
+      const band = (n, bands) =>
+        n === null ? "Not recorded" : (bands.find(([max]) => n < max)?.[1] ?? bands.at(-1)[1]);
+      const tally = (f) => {
+        const m = new Map();
+        for (const p of mix) m.set(f(p), (m.get(f(p)) ?? 0) + 1);
+        return [...m].map(([name, n]) => ({ name, n }));
+      };
+      out.demographics = {
+        gender: tally((p) =>
+          p.gender ? p.gender[0].toUpperCase() + p.gender.slice(1) : "Not recorded",
+        ),
+        age: tally((p) =>
+          band(years(p.date_of_birth), [
+            [25, "Under 25"],
+            [35, "25–34"],
+            [45, "35–44"],
+            [55, "45–54"],
+            [Infinity, "55 and over"],
+          ]),
+        ),
+        tenure: tally((p) =>
+          band(years(p.date_of_joining), [
+            [1, "Under 1 year"],
+            [3, "1–2 years"],
+            [5, "3–4 years"],
+            [10, "5–9 years"],
+            [Infinity, "10 years or more"],
+          ]),
+        ),
+      };
       if (can(user, "payroll.read"))
         out.payroll = (
           await db

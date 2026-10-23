@@ -34,6 +34,10 @@ import { registerInsights } from "./routes/insights.js";
 import { registerRoles } from "./routes/roles.js";
 import { registerHome } from "./routes/home.js";
 import { scheduleApprovalReminders } from "./approval-chain.js";
+import {
+  registerScheduledReports,
+  scheduleReports,
+} from "./scheduled-reports.js";
 import { scheduleRetention } from "./retention.js";
 import {
   registerLearning,
@@ -203,6 +207,7 @@ export function createApp({
     registerInsights,
     registerRoles,
     registerHome,
+    registerScheduledReports,
   ])
     register(router, app);
 
@@ -396,6 +401,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   scheduleRetention(db);
   scheduleProbationReminders(app);
   scheduleApprovalReminders(app);
+  scheduleReports(app);
   scheduleLearningReminders(app);
   scheduleCompOffExpiry(app);
   server.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () =>
