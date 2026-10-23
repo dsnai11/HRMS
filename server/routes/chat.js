@@ -1,4 +1,5 @@
 import { HttpError, integer, string } from "../http.js";
+import { checkFile } from "./documents.js";
 import { can } from "../rbac.js";
 
 const MAX_GROUP = 100;
@@ -48,7 +49,7 @@ export function registerChat(router, app) {
         `SELECT r.id,r.kind,r.name,r.last_message_at,m.last_read_id,
            (SELECT COUNT(*) FROM chat_members x WHERE x.room_id=r.id) members,
            (SELECT COUNT(*) FROM chat_messages c WHERE c.room_id=r.id AND c.id>m.last_read_id AND c.user_id<>? AND c.deleted_at IS NULL) unread,
-           (SELECT c.body FROM chat_messages c WHERE c.room_id=r.id AND c.deleted_at IS NULL ORDER BY c.id DESC LIMIT 1) last_body,
+           (SELECT COALESCE(NULLIF(c.body,''),'📎 File') FROM chat_messages c WHERE c.room_id=r.id AND c.deleted_at IS NULL ORDER BY c.id DESC LIMIT 1) last_body,
            (SELECT u.name FROM chat_messages c JOIN users u ON u.id=c.user_id WHERE c.room_id=r.id AND c.deleted_at IS NULL ORDER BY c.id DESC LIMIT 1) last_from,
            (SELECT MAX(c.id) FROM chat_messages c WHERE c.room_id=r.id) last_id,
            (SELECT u.name FROM chat_members x JOIN users u ON u.id=x.user_id WHERE x.room_id=r.id AND x.user_id<>? LIMIT 1) other_name
@@ -149,7 +150,7 @@ export function registerChat(router, app) {
       is_admin: Boolean(m.is_admin),
       members: await db
         .prepare(
-          "SELECT u.id,u.name,x.is_admin FROM chat_members x JOIN users u ON u.id=x.user_id WHERE x.room_id=? ORDER BY u.name",
+          "SELECT u.id,u.name,x.is_admin,x.last_read_id FROM chat_members x JOIN users u ON u.id=x.user_id WHERE x.room_id=? ORDER BY u.name",
         )
         .all(m.room_id),
     });
@@ -212,7 +213,7 @@ export function registerChat(router, app) {
         : null;
       const rows = await db
         .prepare(
-          `SELECT c.id,c.user_id,u.name author,c.body,c.created_at FROM chat_messages c JOIN users u ON u.id=c.user_id
+          `SELECT c.id,c.user_id,u.name author,c.body,c.created_at,f.id file_id,f.name file_name,f.mime file_mime FROM chat_messages c JOIN users u ON u.id=c.user_id LEFT JOIN chat_files f ON f.message_id=c.id
          WHERE c.room_id=? AND c.deleted_at IS NULL ${before ? "AND c.id<?" : ""} ORDER BY c.id DESC LIMIT 50`,
         )
         .all(m.room_id, ...(before ? [before] : []));
@@ -227,18 +228,36 @@ export function registerChat(router, app) {
     async ({ user, params, body, send }) => {
       const m = await membership(user, params.id);
       rateLimit(`chat:${user.id}`, 300);
-      const text = string((await body()).body, "Message", 2000).trim();
-      if (!text) throw new HttpError(400, "Write a message.");
+      const b = await body(3_000_000);
+      // A message is text, a file (PDF, JPG or PNG up to 2 MB), or both.
+      const file = b.file ? { ...checkFile(b.file), name: string(b.file.name, "File name", 120) } : null;
+      const text =
+        typeof b.body === "string" && b.body.trim()
+          ? string(b.body, "Message", 2000).trim()
+          : file
+            ? ""
+            : (() => {
+                throw new HttpError(400, "Write a message.");
+              })();
       const at = nowIso();
-      const id = Number(
-        (
+      const id = await transaction(async () => {
+        const id = Number(
+          (
+            await db
+              .prepare(
+                "INSERT INTO chat_messages(room_id,user_id,body,created_at) VALUES(?,?,?,?)",
+              )
+              .run(m.room_id, user.id, text, at)
+          ).lastInsertRowid,
+        );
+        if (file)
           await db
             .prepare(
-              "INSERT INTO chat_messages(room_id,user_id,body,created_at) VALUES(?,?,?,?)",
+              "INSERT INTO chat_files(message_id,room_id,name,mime,size,data) VALUES(?,?,?,?,?,?)",
             )
-            .run(m.room_id, user.id, text, at)
-        ).lastInsertRowid,
-      );
+            .run(id, m.room_id, file.name, file.mime, file.bytes.length, file.data);
+        return id;
+      });
       await db
         .prepare("UPDATE chat_rooms SET last_message_at=? WHERE id=?")
         .run(at, m.room_id);
@@ -250,6 +269,23 @@ export function registerChat(router, app) {
       return send(201, { id, created_at: at });
     },
   );
+  // Files are for the people in the conversation only.
+  router.get("/api/chat/files/:id", async ({ user, params, res, headers }) => {
+    const f = await db
+      .prepare(
+        "SELECT f.*,c.deleted_at FROM chat_files f JOIN chat_messages c ON c.id=f.message_id WHERE f.id=?",
+      )
+      .get(integer(Number(params.id)));
+    if (!f || f.deleted_at) throw new HttpError(404, "File not found.");
+    await membership(user, f.room_id);
+    res.writeHead(200, {
+      ...headers,
+      "Content-Type": f.mime,
+      "Content-Disposition": `inline; filename="${f.name.replace(/[^A-Za-z0-9._ -]/g, "_")}"`,
+      "Cache-Control": "private, no-store",
+    });
+    res.end(Buffer.from(f.data, "base64"));
+  });
   router.delete("/api/chat/messages/:id", async ({ user, params, send }) => {
     const c = await db
       .prepare(
@@ -284,9 +320,10 @@ export function registerChat(router, app) {
       throw new HttpError(400, "Invalid identifier.");
     const messages = since === null ? [] : await db
       .prepare(
-        `SELECT c.id,c.room_id,c.user_id,u.name author,c.body,c.created_at,r.kind,r.name room_name
+        `SELECT c.id,c.room_id,c.user_id,u.name author,c.body,c.created_at,r.kind,r.name room_name,f.id file_id,f.name file_name,f.mime file_mime
          FROM chat_messages c JOIN chat_members m ON m.room_id=c.room_id AND m.user_id=? JOIN chat_rooms r ON r.id=c.room_id
-         JOIN users u ON u.id=c.user_id WHERE c.id>? AND c.deleted_at IS NULL AND r.company_id=? ORDER BY c.id LIMIT 200`,
+         JOIN users u ON u.id=c.user_id LEFT JOIN chat_files f ON f.message_id=c.id
+         WHERE c.id>? AND c.deleted_at IS NULL AND r.company_id=? ORDER BY c.id LIMIT 200`,
       )
       .all(user.id, since, user.company_id);
     const latest =

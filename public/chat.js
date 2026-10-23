@@ -2,7 +2,7 @@
 // Messages arrive by polling /chat/updates every few seconds while the portal is
 // open. Desktop alerts use the browser Notification API once the person allows it.
 const CHAT_POLL_MS = 5000;
-const chat = { latest: null, unread: 0, timer: null, room: null, oldest: null };
+const chat = { latest: null, unread: 0, timer: null, room: null, oldest: null, readers: [] };
 
 function chatBadge() {
   const b = document.querySelector("#chat-n");
@@ -43,6 +43,13 @@ async function chatPoll() {
       chatAlert(m);
   chatBadge();
   if (fresh.length && page === "chat") chatRooms();
+  if (open && document.querySelector("[data-seen]")) {
+    const info = await api(`/chat/rooms/${open}`).catch(() => null);
+    if (info && chat.room === open) {
+      chat.readers = info.members.filter((x) => x.id !== me.id);
+      chatTicks();
+    }
+  }
 }
 function chatStop() {
   clearInterval(chat.timer);
@@ -85,8 +92,30 @@ const chatTime = (iso) =>
       ? {}
       : { day: "numeric", month: "short" }),
   }).format(new Date(iso));
+const chatFile = (m) =>
+  !m.file_id
+    ? ""
+    : m.file_mime?.startsWith("image/")
+      ? `<a href="/api/chat/files/${m.file_id}" target="_blank" rel="noopener"><img class="chat-img" src="/api/chat/files/${m.file_id}" alt="${esc(m.file_name)}" loading="lazy"></a>`
+      : `<a class="chat-file" href="/api/chat/files/${m.file_id}" target="_blank" rel="noopener">📎 ${esc(m.file_name)}</a>`;
 const chatBubble = (m) =>
-  `<div class="chat-msg ${m.user_id === me.id ? "mine" : ""}" data-msg="${m.id}"><small>${m.user_id === me.id ? "You" : esc(m.author)} · ${chatTime(m.created_at)}${m.user_id === me.id ? ` <button class="link" data-unsend="${m.id}" aria-label="Delete message">delete</button>` : ""}</small><div>${esc(m.body).replaceAll("\n", "<br>")}</div></div>`;
+  `<div class="chat-msg ${m.user_id === me.id ? "mine" : ""}" data-msg="${m.id}"><small>${m.user_id === me.id ? "You" : esc(m.author)} · ${chatTime(m.created_at)}${m.user_id === me.id ? ` <button class="link" data-unsend="${m.id}" aria-label="Delete message">delete</button>` : ""}</small>${m.body ? `<div>${esc(m.body).replaceAll("\n", "<br>")}</div>` : ""}${chatFile(m)}${m.user_id === me.id ? `<small class="seen" data-seen="${m.id}"></small>` : ""}</div>`;
+// Ticks on my messages: seen by the other person, or by how many in a group.
+function chatTicks() {
+  document.querySelectorAll("[data-seen]").forEach((el) => {
+    const id = Number(el.dataset.seen);
+    const seen = chat.readers.filter((r) => r.last_read_id >= id).length;
+    el.textContent =
+      chat.readers.length <= 1
+        ? seen
+          ? "✓✓ Seen"
+          : "✓ Sent"
+        : seen
+          ? `✓✓ Seen by ${seen} of ${chat.readers.length}`
+          : "✓ Sent";
+    el.classList.toggle("on", seen > 0);
+  });
+}
 function chatAppend(messages) {
   const list = document.querySelector("#chat-msgs");
   if (!list) return;
@@ -96,6 +125,7 @@ function chatAppend(messages) {
       list.insertAdjacentHTML("beforeend", chatBubble(m));
   list.querySelector(".empty")?.remove();
   chatWireBubbles();
+  chatTicks();
   if (stick) list.scrollTop = list.scrollHeight;
 }
 function chatWireBubbles() {
@@ -141,14 +171,16 @@ async function chatOpen(roomId) {
   ]);
   if (chat.room !== roomId || !pane) return;
   chat.oldest = messages[0]?.id ?? null;
+  chat.readers = info.members.filter((x) => x.id !== me.id);
   const title =
     info.kind === "group"
       ? info.name
       : (info.members.find((m) => m.id !== me.id)?.name ?? "Former colleague");
-  pane.innerHTML = `<div class="chat-head"><div><h2>${esc(title)}</h2><small class="muted">${info.kind === "group" ? `${info.members.length} people` : "Direct message"}</small></div>${info.kind === "group" ? '<button class="secondary" id="chat-members">People</button>' : ""}</div><div class="chat-msgs" id="chat-msgs">${messages.length === 50 ? '<button class="ghost" id="chat-older">Show earlier messages</button>' : ""}${messages.length ? messages.map(chatBubble).join("") : empty("Say hello", "Messages are visible only to the people in this conversation.")}</div><form class="chat-send" id="chat-send"><textarea name="body" rows="2" maxlength="2000" placeholder="Write a message. Enter sends, Shift+Enter adds a line." required></textarea><button>Send</button></form>`;
+  pane.innerHTML = `<div class="chat-head"><div><h2>${esc(title)}</h2><small class="muted">${info.kind === "group" ? `${info.members.length} people` : "Direct message"}</small></div>${info.kind === "group" ? '<button class="secondary" id="chat-members">People</button>' : ""}</div><div class="chat-msgs" id="chat-msgs">${messages.length === 50 ? '<button class="ghost" id="chat-older">Show earlier messages</button>' : ""}${messages.length ? messages.map(chatBubble).join("") : empty("Say hello", "Messages are visible only to the people in this conversation.")}</div><form class="chat-send" id="chat-send"><label class="chat-attach" title="Attach a PDF or photo (up to 2 MB)">📎<input type="file" name="file" accept="application/pdf,image/jpeg,image/png" hidden></label><textarea name="body" rows="2" maxlength="2000" placeholder="Write a message. Enter sends, Shift+Enter adds a line."></textarea><button>Send</button></form><small class="muted" id="chat-picked"></small>`;
   const list = pane.querySelector("#chat-msgs");
   list.scrollTop = list.scrollHeight;
   chatWireBubbles();
+  chatTicks();
   pane.querySelector("#chat-older")?.addEventListener("click", (e) =>
     busy(e.target, async () => {
       const older = (
@@ -181,11 +213,28 @@ async function chatOpen(roomId) {
       form.requestSubmit();
     }
   });
+  const picker = form.querySelector("input[type=file]");
+  picker.onchange = () =>
+    (pane.querySelector("#chat-picked").textContent = picker.files[0]
+      ? `Attached: ${picker.files[0].name}`
+      : "");
   form.onsubmit = (e) => {
     e.preventDefault();
     const text = box.value.trim();
-    if (!text) return;
-    busy(e.submitter || form.querySelector("button"), async () => {
+    const file = picker.files[0];
+    if (!text && !file) return;
+    busy(e.submitter || form.querySelector("button:not([type])"), async () => {
+      if (file) {
+        if (file.size > 2 * 1024 * 1024)
+          throw new Error("Files can be up to 2 MB.");
+        if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type))
+          throw new Error("Share a PDF, JPG or PNG.");
+        await api(`/chat/rooms/${roomId}/messages`, {
+          body: text,
+          file: { name: file.name, mime: file.type, data: await toB64(file) },
+        });
+        return chatOpen(roomId);
+      }
       const r = await api(`/chat/rooms/${roomId}/messages`, { body: text });
       box.value = "";
       chatAppend([

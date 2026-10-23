@@ -2110,3 +2110,31 @@ a {
   max-width: 100%;
   border-radius: 10px;
 }
+.chat-img {
+  display: block;
+  max-width: 240px;
+  max-height: 240px;
+  border-radius: 8px;
+  margin-top: 6px;
+}
+.chat-file {
+  display: inline-block;
+  margin-top: 6px;
+  font-weight: 600;
+}
+.chat-attach {
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  font-size: 20px;
+  padding: 0 6px;
+}
+.seen {
+  display: block;
+  text-align: right;
+  font-size: 11px;
+  color: var(--muted);
+}
+.seen.on {
+  color: #1d6fd6;
+}

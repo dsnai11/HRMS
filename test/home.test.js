@@ -182,3 +182,27 @@ test("engagement gallery: HR posts photos, branch photos stay in their branch", 
   assert.equal((await call(`/admin/gallery/${all.data.id}`, undefined, owner, "DELETE")).status, 200);
   assert.deepEqual(await titles(elsewhere), []);
 });
+
+test("chat shares files with the conversation only, and shows who has read", async (t) => {
+  const { call, add, base } = await world(t);
+  const a = await add("ana");
+  const b = await add("ben");
+  const c = await add("cara");
+  const room = (await call("/chat/direct", { user_id: b.id }, a.token)).data.id;
+  const pdf = Buffer.from("%PDF-1.4\nnotes\n").toString("base64");
+  assert.equal((await call(`/chat/rooms/${room}/messages`, {}, a.token)).status, 400);
+  const sent = await call(`/chat/rooms/${room}/messages`, { file: { name: "notes.pdf", mime: "application/pdf", data: pdf } }, a.token);
+  assert.equal(sent.status, 201, JSON.stringify(sent.data));
+  const msgs = (await call(`/chat/rooms/${room}/messages`, undefined, b.token)).data.messages;
+  assert.equal(msgs[0].file_name, "notes.pdf");
+  const get = (who) => fetch(`${base}/chat/files/${msgs[0].file_id}`, { headers: { Authorization: `Bearer ${who.token}` } }).then((r) => r.status);
+  assert.equal(await get(b), 200);
+  assert.equal(await get(c), 404);
+  assert.equal((await call("/chat/rooms", undefined, b.token)).data[0].last_body, "📎 File");
+  // Ben reads it; Ana sees how far Ben has read.
+  const before = (await call(`/chat/rooms/${room}`, undefined, a.token)).data.members.find((m) => m.id === b.id);
+  assert.ok(before.last_read_id < sent.data.id);
+  await call(`/chat/rooms/${room}/read`, { message_id: sent.data.id }, b.token);
+  const after = (await call(`/chat/rooms/${room}`, undefined, a.token)).data.members.find((m) => m.id === b.id);
+  assert.equal(after.last_read_id, sent.data.id);
+});
