@@ -1,4 +1,20 @@
 const app = document.querySelector("#app");
+// The security policy blocks style="" in markup, so per-element values (a bar's width,
+// a photo's tilt) travel as data-css and are applied through the style API here.
+function applyStyles(root = document) {
+  root.querySelectorAll("[data-css]").forEach((el) => {
+    for (const decl of el.dataset.css.split(";")) {
+      const i = decl.indexOf(":");
+      if (i > 0)
+        el.style.setProperty(decl.slice(0, i).trim(), decl.slice(i + 1).trim());
+    }
+    el.removeAttribute("data-css");
+  });
+}
+new MutationObserver(() => applyStyles()).observe(document.documentElement, {
+  childList: true,
+  subtree: true,
+});
 let config = { company: "Company", timezone: "Asia/Kolkata" },
   me,
   page = "overview",
@@ -1084,7 +1100,7 @@ async function employeeView(id) {
       ? bal
           .map(
             (b, i) =>
-              `<div class="lb-row"><div style="color:${LEAVE_DOTS[i % LEAVE_DOTS.length]}"><span class="dot" style="background:currentColor"></span><span style="color:#2a2c3a">${esc(b.code ? `${b.code} (${b.name})` : b.name)}</span><small>${b.unlimited ? "No limit" : `${b.available} Leaves`}</small></div><span class="applied">${b.pending || 0} Applied</span></div>`,
+              `<div class="lb-row"><div data-css="color:${LEAVE_DOTS[i % LEAVE_DOTS.length]}"><span class="dot dot-current"></span><span class="lb-name">${esc(b.code ? `${b.code} (${b.name})` : b.name)}</span><small>${b.unlimited ? "No limit" : `${b.available} Leaves`}</small></div><span class="applied">${b.pending || 0} Applied</span></div>`,
           )
           .join("")
       : '<p class="muted">HR has not set up leave for you yet.</p>'
@@ -1122,7 +1138,7 @@ async function employeeView(id) {
   }</div></div>`;
   const node = (p, cls = "") =>
     `<div class="org-node ${cls}"><strong>${esc(p.name)}</strong><small>${esc(p.designation || p.employee_code || "")}</small></div>`;
-  const orgCard = `<div class="card"><h2>Organisation Structure</h2><div class="card-body"><div class="org-box">${home.org.manager ? `${node(home.org.manager)}<div class="org-line"></div>` : ""}${home.me ? node(home.me, "me") : ""}${home.org.reports.length ? `<div class="org-line"></div><div class="org-reports">${home.org.reports.map((p) => node(p)).join("")}</div>` : ""}</div><p class="muted" style="text-align:center"><a href="#" id="see-org">Open the full org chart →</a></p></div></div>`;
+  const orgCard = `<div class="card"><h2>Organisation Structure</h2><div class="card-body"><div class="org-box">${home.org.manager ? `${node(home.org.manager)}<div class="org-line"></div>` : ""}${home.me ? node(home.me, "me") : ""}${home.org.reports.length ? `<div class="org-line"></div><div class="org-reports">${home.org.reports.map((p) => node(p)).join("")}</div>` : ""}</div><p class="muted center"><a href="#" id="see-org">Open the full org chart →</a></p></div></div>`;
   const todayCard = `<div class="card"><h2>Today</h2><div class="card-body"><span class="pill ${open ? "" : "neutral"}">${open ? "Working now" : done ? "Punched out" : "Not punched in"}</span><h3>${esc(open?.workplace_name || profile.workplace?.name || "No workplace assigned")}</h3><p class="muted">${open ? `Signed in at ${time(open.in_at)}.` : done ? `Worked ${time(done.in_at)} – ${time(done.out_at)}.` : "Attendance is marked from the company mobile app at your workplace."}</p><button class="secondary" data-page-go="myattendance">My Attendance →</button></div></div>`;
   document.querySelector("#content").innerHTML =
     crumb("Home") +

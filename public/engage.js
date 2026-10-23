@@ -570,7 +570,7 @@ const barList = (rows, total) =>
         .sort((a, b) => b.n - a.n)
         .map(
           (r) =>
-            `<div class="bar-row"><span>${esc(r.name || "Not set")}</span><div class="bar"><i style="width:${total ? Math.max(2, Math.round((r.n / total) * 100)) : 0}%"></i></div><strong>${r.n}</strong></div>`,
+            `<div class="bar-row"><span>${esc(r.name || "Not set")}</span><div class="bar"><i data-css="width:${total ? Math.max(2, Math.round((r.n / total) * 100)) : 0}%"></i></div><strong>${r.n}</strong></div>`,
         )
         .join("")
     : '<p class="muted">No data yet.</p>';
@@ -676,19 +676,66 @@ async function galleryCard(id) {
   const g = await api("/gallery?limit=12").catch(() => ({ items: [], categories: [] }));
   if (id !== renderId) return;
   const manage = has("announcements.manage");
+  // Each photo gets a steady scatter (tilt, offset, where it flies in from) worked out
+  // from its id, so the layout stays the same between visits.
+  const scatter = (id, i) => {
+    const r = (n) => ((Math.sin(id * 9301 + n * 49297) + 1) / 2) % 1;
+    return [
+      `--tilt:${(r(1) * 14 - 7).toFixed(1)}deg`,
+      `--dx:${(r(2) * 24 - 12).toFixed(0)}px`,
+      `--dy:${(r(3) * 24 - 12).toFixed(0)}px`,
+      `--fx:${(r(4) * 600 - 300).toFixed(0)}px`,
+      `--fy:${(r(5) * 300 - 150).toFixed(0)}px`,
+      `--fr:${(r(6) * 90 - 45).toFixed(0)}deg`,
+      `--delay:${i * 90}ms`,
+      `--float:${(5 + r(7) * 4).toFixed(1)}s`,
+    ].join(";");
+  };
   const card = document.createElement("div");
-  card.className = "card";
-  card.innerHTML = `<div class="card-head"><h2>Engagement Gallery</h2>${manage ? '<button class="secondary" id="photo-add">Post a photo</button>' : ""}</div>${
+  card.className = "card gallery-card";
+  // Floating light particles, each with its own place, size and speed.
+  const particles = Array.from({ length: 22 }, (_, i) => {
+    const r = (n) => (Math.sin((i + 1) * 7919 + n * 104729) + 1) / 2;
+    return `<span data-css="left:${(r(1) * 100).toFixed(1)}%;top:${(r(2) * 100).toFixed(1)}%;--size:${(2 + r(3) * 5).toFixed(1)}px;--speed:${(6 + r(4) * 10).toFixed(1)}s;--wait:${(-r(5) * 10).toFixed(1)}s"></span>`;
+  }).join("");
+  card.innerHTML = `<div class="gallery-aurora" aria-hidden="true"></div><div class="gallery-particles" aria-hidden="true">${particles}</div><div class="card-head"><div><span class="gallery-kicker">Moments</span><h2>Engagement Gallery</h2></div>${manage ? '<button class="gallery-post" id="photo-add">+ Post a photo</button>' : ""}</div>${
     g.items.length
-      ? `<div class="gallery">${g.items
+      ? `<div class="gallery scatter">${g.items
           .map(
-            (p) =>
-              `<button type="button" class="gallery-item" data-photo="${p.id}"><img src="/api/gallery/${p.id}/image" alt="${esc(p.title)}" loading="lazy"><span><strong>${esc(p.title)}</strong><small>${esc(p.category)} · ${fmtDate(p.event_date)}${p.branch_name ? ` · ${esc(p.branch_name)}` : ""}</small></span></button>`,
+            (p, i) =>
+              `<button type="button" class="gallery-item" data-css="${scatter(p.id, i)}" data-photo="${p.id}"><span class="gallery-frame"><img src="/api/gallery/${p.id}/image" alt="${esc(p.title)}" loading="lazy"><span class="gallery-cap"><strong>${esc(p.title)}</strong><small>${esc(p.category)} · ${fmtDate(p.event_date)}${p.branch_name ? ` · ${esc(p.branch_name)}` : ""}</small></span></span></button>`,
           )
           .join("")}</div>`
-      : '<p class="muted">Photos from HR days, celebrations and awards appear here.</p>'
+      : '<p class="gallery-empty">Photos from HR days, celebrations and awards appear here.</p>'
   }`;
   document.querySelector("#content").append(card);
+  // Photos tilt towards the pointer, in 3D.
+  card.querySelectorAll(".gallery-item").forEach((b) => {
+    b.onpointermove = (e) => {
+      const r = b.getBoundingClientRect();
+      const x = (e.clientX - r.left) / r.width - 0.5;
+      const y = (e.clientY - r.top) / r.height - 0.5;
+      b.style.setProperty("--ry", `${(x * 24).toFixed(1)}deg`);
+      b.style.setProperty("--rx", `${(-y * 24).toFixed(1)}deg`);
+      b.style.setProperty("--gx", `${((x + 0.5) * 100).toFixed(0)}%`);
+      b.style.setProperty("--gy", `${((y + 0.5) * 100).toFixed(0)}%`);
+    };
+    b.onpointerleave = () => {
+      b.style.setProperty("--rx", "0deg");
+      b.style.setProperty("--ry", "0deg");
+    };
+  });
+  // A spotlight wanders from photo to photo while the page is open.
+  const photos = [...card.querySelectorAll(".gallery-item")];
+  if (photos.length > 1 && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    let lit = 0;
+    const spot = setInterval(() => {
+      if (!card.isConnected) return clearInterval(spot);
+      photos[lit].classList.remove("lit");
+      lit = (lit + 1 + Math.floor(Math.random() * (photos.length - 1))) % photos.length;
+      photos[lit].classList.add("lit");
+    }, 2600);
+  }
   card.querySelectorAll("[data-photo]").forEach(
     (b) =>
       (b.onclick = () => {

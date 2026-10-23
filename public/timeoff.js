@@ -108,7 +108,7 @@ async function timeOffPage(id) {
     }</div><div class="card"><h2>Leave Balance</h2><div class="lb-row"><span>Leave Summary For Year</span><strong>${month.slice(0, 4)}</strong></div>${bal
       .map(
         (b, i) =>
-          `<div class="lb-row"><div style="color:${LEAVE_DOTS[i % LEAVE_DOTS.length]}"><span class="dot" style="background:currentColor"></span><span style="color:#2a2c3a">${esc(b.code ? `${b.code} (${b.name})` : b.name)}</span><small>${b.unlimited ? "No limit" : `${b.available} Leaves`}</small></div><span class="applied">${b.pending || 0} Applied</span></div>`,
+          `<div class="lb-row"><div data-css="color:${LEAVE_DOTS[i % LEAVE_DOTS.length]}"><span class="dot dot-current"></span><span class="lb-name">${esc(b.code ? `${b.code} (${b.name})` : b.name)}</span><small>${b.unlimited ? "No limit" : `${b.available} Leaves`}</small></div><span class="applied">${b.pending || 0} Applied</span></div>`,
       )
       .join(
         "",

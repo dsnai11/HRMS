@@ -2138,3 +2138,286 @@ a {
 .seen.on {
   color: #1d6fd6;
 }
+
+/* Engagement gallery: a dark, glowing stage with photos scattered like snapshots. */
+.gallery-card {
+  position: relative;
+  overflow: hidden;
+  color: #eef0ff;
+  background:
+    radial-gradient(600px 300px at 10% 0%, rgba(172, 5, 27, 0.45), transparent 60%),
+    radial-gradient(500px 300px at 90% 100%, rgba(78, 90, 168, 0.55), transparent 60%),
+    radial-gradient(400px 260px at 60% 40%, rgba(0, 200, 255, 0.18), transparent 70%),
+    linear-gradient(135deg, #10121c, #1b1e2e 55%, #12131d);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 60px rgba(10, 12, 30, 0.35);
+}
+.gallery-card::before {
+  /* a faint moving grid for depth */
+  content: "";
+  position: absolute;
+  inset: -50%;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+  transform: perspective(600px) rotateX(55deg);
+  animation: grid-drift 18s linear infinite;
+  pointer-events: none;
+}
+@keyframes grid-drift {
+  to {
+    background-position: 0 40px, 40px 0;
+  }
+}
+.gallery-card > * {
+  position: relative;
+}
+.gallery-card h2 {
+  color: #fff;
+  font-size: 22px;
+  letter-spacing: 0.3px;
+}
+.gallery-kicker {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  background: linear-gradient(90deg, #ff6b81, #7aa2ff, #46e0ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 700;
+}
+.gallery-post {
+  background: linear-gradient(135deg, #ac051b, #4e5aa8);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15), 0 8px 24px rgba(172, 5, 27, 0.35);
+}
+.gallery-empty {
+  color: #b9bdd6;
+}
+.gallery.scatter {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0;
+  padding: 18px 6px 26px;
+}
+.gallery.scatter .gallery-item {
+  position: relative;
+  width: 210px;
+  margin: 10px -14px;
+  padding: 0;
+  background: none;
+  border: 0;
+  transform: translate(var(--dx), var(--dy)) rotate(var(--tilt));
+  animation:
+    scatter-in 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) var(--delay) both,
+    drift var(--float) ease-in-out calc(var(--delay) + 0.9s) infinite alternate;
+}
+.gallery-frame {
+  display: block;
+  padding: 10px 10px 0;
+  background: rgba(255, 255, 255, 0.94);
+  border-radius: 6px;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45);
+  transition:
+    transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1.2),
+    box-shadow 0.35s;
+}
+.gallery.scatter .gallery-item img {
+  border-radius: 3px;
+  aspect-ratio: 1;
+  filter: saturate(1.05) contrast(1.03);
+}
+.gallery.scatter .gallery-cap {
+  display: block;
+  padding: 8px 2px 10px;
+  color: #23253a;
+  font-size: 12px;
+}
+.gallery.scatter .gallery-cap small {
+  color: #6c6f86;
+}
+/* On hover the photo straightens (cancelling its tilt), lifts and glows. */
+.gallery.scatter .gallery-item:hover,
+.gallery.scatter .gallery-item:focus-visible {
+  z-index: 5;
+  outline: none;
+}
+.gallery.scatter .gallery-item:hover .gallery-frame,
+.gallery.scatter .gallery-item:focus-visible .gallery-frame {
+  transform: rotate(calc(var(--tilt) * -1)) translateY(-10px) scale(1.12);
+  box-shadow:
+    0 0 0 2px rgba(122, 162, 255, 0.9),
+    0 0 30px rgba(70, 224, 255, 0.55),
+    0 30px 60px rgba(0, 0, 0, 0.55);
+}
+@keyframes scatter-in {
+  from {
+    opacity: 0;
+    transform: translate(var(--fx), var(--fy)) rotate(var(--fr)) scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: translate(var(--dx), var(--dy)) rotate(var(--tilt));
+  }
+}
+@keyframes drift {
+  from {
+    transform: translate(var(--dx), var(--dy)) rotate(var(--tilt));
+  }
+  to {
+    transform: translate(var(--dx), calc(var(--dy) - 6px)) rotate(calc(var(--tilt) * 0.6));
+  }
+}
+dialog .gallery-full {
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+@media (max-width: 750px) {
+  .gallery.scatter .gallery-item {
+    width: 150px;
+    margin: 8px -10px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gallery-card::before,
+  .gallery.scatter .gallery-item {
+    animation: none;
+  }
+}
+.dot-current {
+  background: currentColor;
+}
+.lb-name {
+  color: #2a2c3a;
+}
+.center {
+  text-align: center;
+}
+
+/* Gallery motion: aurora, particles, holographic sheen, 3D tilt and a wandering spotlight. */
+.gallery-aurora {
+  position: absolute;
+  inset: -40%;
+  background: conic-gradient(
+    from 0deg,
+    rgba(172, 5, 27, 0.35),
+    rgba(78, 90, 168, 0.4),
+    rgba(0, 210, 255, 0.28),
+    rgba(190, 70, 255, 0.3),
+    rgba(172, 5, 27, 0.35)
+  );
+  filter: blur(70px);
+  animation: aurora-spin 22s linear infinite;
+  pointer-events: none;
+}
+@keyframes aurora-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+.gallery-particles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.gallery-particles span {
+  position: absolute;
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  background: #bfe9ff;
+  box-shadow: 0 0 10px 2px rgba(120, 220, 255, 0.8);
+  opacity: 0;
+  animation: particle var(--speed) linear var(--wait) infinite;
+}
+@keyframes particle {
+  0% {
+    opacity: 0;
+    transform: translateY(20px) scale(0.6);
+  }
+  20% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-140px) scale(1.2);
+  }
+}
+.gallery-frame {
+  position: relative;
+  overflow: hidden;
+  transform: perspective(700px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+}
+/* the holographic sheen that sweeps across each photo */
+.gallery-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 35%,
+    rgba(255, 255, 255, 0.55) 48%,
+    rgba(120, 220, 255, 0.35) 52%,
+    transparent 65%
+  );
+  transform: translateX(-120%);
+  animation: sheen 5.5s ease-in-out calc(var(--delay) + 1.2s) infinite;
+  pointer-events: none;
+}
+@keyframes sheen {
+  0%,
+  60% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(120%);
+  }
+}
+/* a soft light that follows the pointer */
+.gallery.scatter .gallery-item:hover .gallery-frame::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    180px circle at var(--gx, 50%) var(--gy, 50%),
+    rgba(120, 220, 255, 0.35),
+    transparent 60%
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+.gallery.scatter .gallery-item:hover .gallery-frame,
+.gallery.scatter .gallery-item:focus-visible .gallery-frame {
+  transform: perspective(700px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg))
+    rotate(calc(var(--tilt) * -1)) translateY(-10px) scale(1.12);
+}
+/* the wandering spotlight */
+.gallery.scatter .gallery-item.lit {
+  z-index: 4;
+}
+.gallery.scatter .gallery-item.lit .gallery-frame {
+  animation: spotlight 2.6s ease-in-out;
+}
+@keyframes spotlight {
+  0%,
+  100% {
+    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45);
+  }
+  45% {
+    box-shadow:
+      0 0 0 2px rgba(255, 107, 129, 0.9),
+      0 0 34px rgba(255, 107, 129, 0.6),
+      0 0 70px rgba(122, 162, 255, 0.45),
+      0 24px 50px rgba(0, 0, 0, 0.5);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gallery-aurora,
+  .gallery-particles span,
+  .gallery-frame::after,
+  .gallery.scatter .gallery-item.lit .gallery-frame {
+    animation: none;
+  }
+}
