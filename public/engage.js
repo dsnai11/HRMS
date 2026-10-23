@@ -673,103 +673,106 @@ const shrinkPhoto = (file) =>
     img.src = url;
   });
 async function galleryCard(id) {
-  const g = await api("/gallery?limit=12").catch(() => ({ items: [], categories: [] }));
+  const g = await api("/gallery?limit=100").catch(() => ({ items: [], categories: [] }));
   if (id !== renderId) return;
   const manage = has("announcements.manage");
-  // Each photo gets a steady scatter (tilt, offset, where it flies in from) worked out
-  // from its id, so the layout stays the same between visits.
-  const scatter = (id, i) => {
-    const r = (n) => ((Math.sin(id * 9301 + n * 49297) + 1) / 2) % 1;
-    return [
-      `--tilt:${(r(1) * 14 - 7).toFixed(1)}deg`,
-      `--dx:${(r(2) * 24 - 12).toFixed(0)}px`,
-      `--dy:${(r(3) * 24 - 12).toFixed(0)}px`,
-      `--fx:${(r(4) * 600 - 300).toFixed(0)}px`,
-      `--fy:${(r(5) * 300 - 150).toFixed(0)}px`,
-      `--fr:${(r(6) * 90 - 45).toFixed(0)}deg`,
-      `--delay:${i * 90}ms`,
-      `--float:${(5 + r(7) * 4).toFixed(1)}s`,
-    ].join(";");
+  // Photos of one event (same title and date) form a bunch: a stack on the table that
+  // opens to show them all. The photos themselves stay still.
+  const albums = [];
+  const byKey = new Map();
+  for (const p of g.items) {
+    const key = `${p.title.toLowerCase()}|${p.event_date}`;
+    if (!byKey.has(key)) {
+      const a = { key, title: p.title, category: p.category, event_date: p.event_date, branch_name: p.branch_name, photos: [] };
+      byKey.set(key, a);
+      albums.push(a);
+    }
+    byKey.get(key).photos.push(p);
+  }
+  // A steady scatter for each stack, worked out from its first photo's id.
+  const scatter = (n) => {
+    const r = (k) => (Math.sin(n * 9301 + k * 49297) + 1) / 2;
+    return `--tilt:${(r(1) * 12 - 6).toFixed(1)}deg;--dx:${(r(2) * 20 - 10).toFixed(0)}px;--dy:${(r(3) * 20 - 10).toFixed(0)}px`;
   };
-  const card = document.createElement("div");
-  card.className = "card gallery-card";
-  // Floating light particles, each with its own place, size and speed.
   const particles = Array.from({ length: 22 }, (_, i) => {
     const r = (n) => (Math.sin((i + 1) * 7919 + n * 104729) + 1) / 2;
     return `<span data-css="left:${(r(1) * 100).toFixed(1)}%;top:${(r(2) * 100).toFixed(1)}%;--size:${(2 + r(3) * 5).toFixed(1)}px;--speed:${(6 + r(4) * 10).toFixed(1)}s;--wait:${(-r(5) * 10).toFixed(1)}s"></span>`;
   }).join("");
-  card.innerHTML = `<div class="gallery-aurora" aria-hidden="true"></div><div class="gallery-particles" aria-hidden="true">${particles}</div><div class="card-head"><div><span class="gallery-kicker">Moments</span><h2>Engagement Gallery</h2></div>${manage ? '<button class="gallery-post" id="photo-add">+ Post a photo</button>' : ""}</div>${
-    g.items.length
-      ? `<div class="gallery scatter">${g.items
+  const card = document.createElement("div");
+  card.className = "card gallery-card";
+  card.innerHTML = `<div class="gallery-aurora" aria-hidden="true"></div><div class="gallery-particles" aria-hidden="true">${particles}</div><div class="card-head"><div><span class="gallery-kicker">Moments</span><h2>Engagement Gallery</h2></div>${manage ? '<button class="gallery-post" id="photo-add">+ Post photos</button>' : ""}</div>${
+    albums.length
+      ? `<div class="gallery stacks">${albums
           .map(
-            (p, i) =>
-              `<button type="button" class="gallery-item" data-css="${scatter(p.id, i)}" data-photo="${p.id}"><span class="gallery-frame"><img src="/api/gallery/${p.id}/image" alt="${esc(p.title)}" loading="lazy"><span class="gallery-cap"><strong>${esc(p.title)}</strong><small>${esc(p.category)} · ${fmtDate(p.event_date)}${p.branch_name ? ` · ${esc(p.branch_name)}` : ""}</small></span></span></button>`,
+            (a, i) =>
+              `<button type="button" class="stack" data-css="${scatter(a.photos[0].id)}" data-album="${i}" aria-label="${esc(a.title)}, ${a.photos.length} photo(s)">${a.photos
+                .slice(0, 3)
+                .map((p, k) => `<img class="stack-photo s${k}" src="/api/gallery/${p.id}/image" alt="" loading="lazy">`)
+                .join("")}<span class="stack-count">${a.photos.length} ${a.photos.length === 1 ? "photo" : "photos"}</span><span class="stack-cap"><strong>${esc(a.title)}</strong><small>${esc(a.category)} · ${fmtDate(a.event_date)}${a.branch_name ? ` · ${esc(a.branch_name)}` : ""}</small></span></button>`,
           )
           .join("")}</div>`
       : '<p class="gallery-empty">Photos from HR days, celebrations and awards appear here.</p>'
   }`;
   document.querySelector("#content").append(card);
-  // Photos tilt towards the pointer, in 3D.
-  card.querySelectorAll(".gallery-item").forEach((b) => {
-    b.onpointermove = (e) => {
-      const r = b.getBoundingClientRect();
-      const x = (e.clientX - r.left) / r.width - 0.5;
-      const y = (e.clientY - r.top) / r.height - 0.5;
-      b.style.setProperty("--ry", `${(x * 24).toFixed(1)}deg`);
-      b.style.setProperty("--rx", `${(-y * 24).toFixed(1)}deg`);
-      b.style.setProperty("--gx", `${((x + 0.5) * 100).toFixed(0)}%`);
-      b.style.setProperty("--gy", `${((y + 0.5) * 100).toFixed(0)}%`);
-    };
-    b.onpointerleave = () => {
-      b.style.setProperty("--rx", "0deg");
-      b.style.setProperty("--ry", "0deg");
-    };
-  });
-  // A spotlight wanders from photo to photo while the page is open.
-  const photos = [...card.querySelectorAll(".gallery-item")];
-  if (photos.length > 1 && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    let lit = 0;
-    const spot = setInterval(() => {
-      if (!card.isConnected) return clearInterval(spot);
-      photos[lit].classList.remove("lit");
-      lit = (lit + 1 + Math.floor(Math.random() * (photos.length - 1))) % photos.length;
-      photos[lit].classList.add("lit");
-    }, 2600);
-  }
-  card.querySelectorAll("[data-photo]").forEach(
-    (b) =>
-      (b.onclick = () => {
-        const p = g.items.find((x) => x.id === Number(b.dataset.photo));
-        viewDialog(
-          p.title,
-          `<img class="gallery-full" src="/api/gallery/${p.id}/image" alt="${esc(p.title)}"><p class="muted">${esc(p.category)} · ${fmtDate(p.event_date)}${p.posted_by_name ? ` · posted by ${esc(p.posted_by_name)}` : ""}</p>${manage ? `<button class="ghost" id="photo-del">Remove photo</button>` : ""}`,
-        );
-        document.querySelector("#photo-del")?.addEventListener("click", (e) =>
-          busy(e.target, async () => {
-            await api(`/admin/gallery/${p.id}`, undefined, "DELETE");
-            document.querySelector("dialog")?.remove();
-            await render();
-          }),
-        );
+
+  // Opening a bunch shows all its photos; one can then be viewed large, with arrows.
+  const openAlbum = (a) => {
+    viewDialog(
+      `${a.title} · ${a.photos.length} ${a.photos.length === 1 ? "photo" : "photos"}`,
+      `<p class="muted">${esc(a.category)} · ${fmtDate(a.event_date)}${a.branch_name ? ` · ${esc(a.branch_name)}` : ""}</p><div class="album-grid">${a.photos
+        .map(
+          (p, k) =>
+            `<button type="button" class="album-photo" data-k="${k}"><img src="/api/gallery/${p.id}/image" alt="${esc(p.title)} ${k + 1}" loading="lazy"></button>`,
+        )
+        .join("")}</div>`,
+    );
+    document.querySelectorAll("dialog [data-k]").forEach(
+      (b) => (b.onclick = () => openPhoto(a, Number(b.dataset.k))),
+    );
+  };
+  const openPhoto = (a, k) => {
+    const p = a.photos[k];
+    viewDialog(
+      `${a.title} · ${k + 1} of ${a.photos.length}`,
+      `<img class="gallery-full" src="/api/gallery/${p.id}/image" alt="${esc(p.title)}"><div class="actions spaced"><button class="secondary" id="ph-back">All photos</button>${a.photos.length > 1 ? '<button class="secondary" id="ph-prev">← Previous</button><button class="secondary" id="ph-next">Next →</button>' : ""}${manage ? '<button class="ghost" id="photo-del">Remove photo</button>' : ""}</div><p class="muted">${p.posted_by_name ? `Posted by ${esc(p.posted_by_name)}` : ""}</p>`,
+    );
+    const n = a.photos.length;
+    document.querySelector("#ph-back").onclick = () => openAlbum(a);
+    document.querySelector("#ph-prev")?.addEventListener("click", () => openPhoto(a, (k + n - 1) % n));
+    document.querySelector("#ph-next")?.addEventListener("click", () => openPhoto(a, (k + 1) % n));
+    document.querySelector("#photo-del")?.addEventListener("click", (e) =>
+      busy(e.target, async () => {
+        if (!confirm("Remove this photo for everyone?")) return;
+        await api(`/admin/gallery/${p.id}`, undefined, "DELETE");
+        document.querySelector("dialog")?.remove();
+        await render();
       }),
+    );
+  };
+  card.querySelectorAll("[data-album]").forEach(
+    (b) => (b.onclick = () => openAlbum(albums[Number(b.dataset.album)])),
   );
+
+  // Several photos of one event can be posted together; they share the title and date.
   card.querySelector("#photo-add")?.addEventListener("click", async () => {
     const org = await api("/admin/org");
     dialog(
-      "Post a photo",
-      `${input("title", "Title", "", 'required maxlength="120" placeholder="e.g. Diwali celebration, Jaipur HO"')}${sel("category", "Category", g.categories.map((c) => [c, c]))}${input("event_date", "Event date", today(), 'type="date" required')}<label>Branch<select name="branch_id">${options(org.branches, null, "Everyone")}</select></label><label class="full">Photo (JPG or PNG)<input type="file" name="photo" accept="image/jpeg,image/png" required></label>`,
+      "Post photos",
+      `${input("title", "Event", "", 'required maxlength="120" placeholder="e.g. Diwali celebration, Jaipur HO"')}${sel("category", "Category", g.categories.map((c) => [c, c]))}${input("event_date", "Event date", today(), 'type="date" required')}<label>Branch<select name="branch_id">${options(org.branches, null, "Everyone")}</select></label><label class="full">Photos (JPG or PNG; choose several at once)<input type="file" name="photos" accept="image/jpeg,image/png" multiple required></label><p class="full muted">Photos posted with the same event name and date are shown together as one bunch.</p>`,
       async (f) => {
-        const file = document.querySelector("dialog input[name=photo]").files[0];
-        if (!file) throw new Error("Choose a photo.");
-        await api("/admin/gallery", {
-          title: f.title,
-          category: f.category,
-          event_date: f.event_date,
-          branch_id: f.branch_id ? Number(f.branch_id) : null,
-          mime: "image/jpeg",
-          data: await shrinkPhoto(file),
-        });
-        notice("Photo posted.");
+        const files = [...document.querySelector("dialog input[name=photos]").files];
+        if (!files.length) throw new Error("Choose at least one photo.");
+        if (files.length > 30) throw new Error("Post up to 30 photos at a time.");
+        for (const file of files)
+          await api("/admin/gallery", {
+            title: f.title,
+            category: f.category,
+            event_date: f.event_date,
+            branch_id: f.branch_id ? Number(f.branch_id) : null,
+            mime: "image/jpeg",
+            data: await shrinkPhoto(file),
+          });
+        notice(`${files.length} photo(s) posted.`);
       },
     );
   });

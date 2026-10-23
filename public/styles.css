@@ -2076,36 +2076,6 @@ a {
   background: var(--indigo);
   border-radius: 6px;
 }
-.gallery {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 14px;
-}
-.gallery-item {
-  background: #fff;
-  color: inherit;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 0;
-  overflow: hidden;
-  text-align: left;
-  font-weight: 400;
-}
-.gallery-item img {
-  display: block;
-  width: 100%;
-  aspect-ratio: 4 / 3;
-  object-fit: cover;
-  background: #f1f1f4;
-}
-.gallery-item span {
-  display: block;
-  padding: 8px 10px;
-}
-.gallery-item small {
-  display: block;
-  color: var(--muted);
-}
 .gallery-full {
   max-width: 100%;
   border-radius: 10px;
@@ -2196,95 +2166,8 @@ a {
 .gallery-empty {
   color: #b9bdd6;
 }
-.gallery.scatter {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0;
-  padding: 18px 6px 26px;
-}
-.gallery.scatter .gallery-item {
-  position: relative;
-  width: 210px;
-  margin: 10px -14px;
-  padding: 0;
-  background: none;
-  border: 0;
-  transform: translate(var(--dx), var(--dy)) rotate(var(--tilt));
-  animation:
-    scatter-in 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) var(--delay) both,
-    drift var(--float) ease-in-out calc(var(--delay) + 0.9s) infinite alternate;
-}
-.gallery-frame {
-  display: block;
-  padding: 10px 10px 0;
-  background: rgba(255, 255, 255, 0.94);
-  border-radius: 6px;
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45);
-  transition:
-    transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1.2),
-    box-shadow 0.35s;
-}
-.gallery.scatter .gallery-item img {
-  border-radius: 3px;
-  aspect-ratio: 1;
-  filter: saturate(1.05) contrast(1.03);
-}
-.gallery.scatter .gallery-cap {
-  display: block;
-  padding: 8px 2px 10px;
-  color: #23253a;
-  font-size: 12px;
-}
-.gallery.scatter .gallery-cap small {
-  color: #6c6f86;
-}
-/* On hover the photo straightens (cancelling its tilt), lifts and glows. */
-.gallery.scatter .gallery-item:hover,
-.gallery.scatter .gallery-item:focus-visible {
-  z-index: 5;
-  outline: none;
-}
-.gallery.scatter .gallery-item:hover .gallery-frame,
-.gallery.scatter .gallery-item:focus-visible .gallery-frame {
-  transform: rotate(calc(var(--tilt) * -1)) translateY(-10px) scale(1.12);
-  box-shadow:
-    0 0 0 2px rgba(122, 162, 255, 0.9),
-    0 0 30px rgba(70, 224, 255, 0.55),
-    0 30px 60px rgba(0, 0, 0, 0.55);
-}
-@keyframes scatter-in {
-  from {
-    opacity: 0;
-    transform: translate(var(--fx), var(--fy)) rotate(var(--fr)) scale(0.5);
-  }
-  to {
-    opacity: 1;
-    transform: translate(var(--dx), var(--dy)) rotate(var(--tilt));
-  }
-}
-@keyframes drift {
-  from {
-    transform: translate(var(--dx), var(--dy)) rotate(var(--tilt));
-  }
-  to {
-    transform: translate(var(--dx), calc(var(--dy) - 6px)) rotate(calc(var(--tilt) * 0.6));
-  }
-}
 dialog .gallery-full {
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
-}
-@media (max-width: 750px) {
-  .gallery.scatter .gallery-item {
-    width: 150px;
-    margin: 8px -10px;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .gallery-card::before,
-  .gallery.scatter .gallery-item {
-    animation: none;
-  }
 }
 .dot-current {
   background: currentColor;
@@ -2296,7 +2179,7 @@ dialog .gallery-full {
   text-align: center;
 }
 
-/* Gallery motion: aurora, particles, holographic sheen, 3D tilt and a wandering spotlight. */
+/* Gallery background motion: a turning aurora and floating particles behind the photos. */
 .gallery-aurora {
   position: absolute;
   inset: -40%;
@@ -2345,79 +2228,128 @@ dialog .gallery-full {
     transform: translateY(-140px) scale(1.2);
   }
 }
-.gallery-frame {
+
+
+/* Gallery bunches: each event is a still stack of its photos, scattered on the stage. */
+.gallery.stacks {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 34px 26px;
+  padding: 24px 6px 30px;
+}
+.stack {
   position: relative;
-  overflow: hidden;
-  transform: perspective(700px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  width: 210px;
+  height: 250px;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  transform: translate(var(--dx), var(--dy)) rotate(var(--tilt));
 }
-/* the holographic sheen that sweeps across each photo */
-.gallery-frame::after {
-  content: "";
+.stack-photo {
   position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    115deg,
-    transparent 35%,
-    rgba(255, 255, 255, 0.55) 48%,
-    rgba(120, 220, 255, 0.35) 52%,
-    transparent 65%
-  );
-  transform: translateX(-120%);
-  animation: sheen 5.5s ease-in-out calc(var(--delay) + 1.2s) infinite;
-  pointer-events: none;
+  left: 15px;
+  top: 0;
+  width: 180px;
+  height: 180px;
+  object-fit: cover;
+  border: 8px solid #f4f4f8;
+  border-bottom-width: 26px;
+  border-radius: 6px;
+  background: #f4f4f8;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.45);
+  transition: box-shadow 0.25s;
 }
-@keyframes sheen {
-  0%,
-  60% {
-    transform: translateX(-120%);
-  }
-  100% {
-    transform: translateX(120%);
-  }
+.stack-photo.s0 {
+  z-index: 3;
 }
-/* a soft light that follows the pointer */
-.gallery.scatter .gallery-item:hover .gallery-frame::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(
-    180px circle at var(--gx, 50%) var(--gy, 50%),
-    rgba(120, 220, 255, 0.35),
-    transparent 60%
-  );
-  pointer-events: none;
+.stack-photo.s1 {
+  z-index: 2;
+  transform: rotate(-8deg) translate(-10px, 6px);
+}
+.stack-photo.s2 {
   z-index: 1;
+  transform: rotate(9deg) translate(12px, 4px);
 }
-.gallery.scatter .gallery-item:hover .gallery-frame,
-.gallery.scatter .gallery-item:focus-visible .gallery-frame {
-  transform: perspective(700px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg))
-    rotate(calc(var(--tilt) * -1)) translateY(-10px) scale(1.12);
-}
-/* the wandering spotlight */
-.gallery.scatter .gallery-item.lit {
+.stack-count {
+  position: absolute;
   z-index: 4;
+  top: -10px;
+  right: 6px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #ac051b, #4e5aa8);
+  box-shadow: 0 0 14px rgba(122, 162, 255, 0.6);
 }
-.gallery.scatter .gallery-item.lit .gallery-frame {
-  animation: spotlight 2.6s ease-in-out;
+.stack-cap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  text-align: center;
+  font-size: 12px;
+  color: #eef0ff;
 }
-@keyframes spotlight {
-  0%,
-  100% {
-    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45);
+.stack-cap small {
+  display: block;
+  color: #b9bdd6;
+}
+/* Hover and keyboard focus light the stack up; the photos do not move. */
+.stack:hover .stack-photo.s0,
+.stack:focus-visible .stack-photo.s0 {
+  box-shadow:
+    0 0 0 2px rgba(122, 162, 255, 0.9),
+    0 0 28px rgba(70, 224, 255, 0.55),
+    0 12px 26px rgba(0, 0, 0, 0.45);
+}
+.stack:focus-visible {
+  outline: none;
+}
+.album-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  max-height: 65vh;
+  overflow: auto;
+}
+.album-photo {
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.album-photo img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+.album-photo:hover img,
+.album-photo:focus-visible img {
+  outline: 3px solid var(--indigo);
+  outline-offset: -3px;
+}
+@media (max-width: 750px) {
+  .stack {
+    width: 160px;
+    height: 200px;
   }
-  45% {
-    box-shadow:
-      0 0 0 2px rgba(255, 107, 129, 0.9),
-      0 0 34px rgba(255, 107, 129, 0.6),
-      0 0 70px rgba(122, 162, 255, 0.45),
-      0 24px 50px rgba(0, 0, 0, 0.5);
+  .stack-photo {
+    left: 10px;
+    width: 140px;
+    height: 140px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .gallery-card::before,
   .gallery-aurora,
-  .gallery-particles span,
-  .gallery-frame::after,
-  .gallery.scatter .gallery-item.lit .gallery-frame {
+  .gallery-particles span {
     animation: none;
   }
 }
