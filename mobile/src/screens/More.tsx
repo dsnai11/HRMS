@@ -129,6 +129,7 @@ type ChatMessage = {
   author: string;
   body: string;
   created_at: string;
+  file_name?: string | null;
 };
 type RoomInfo = {
   id: number;
@@ -1327,7 +1328,12 @@ function MessagesScreen({
                   </Text>
                 )}
               </Text>
-              <Text style={s.body}>{m.body}</Text>
+              {!!m.body && <Text style={s.body}>{m.body}</Text>}
+              {!!m.file_name && (
+                <Text style={s.note}>
+                  📎 {m.file_name} (open it on the web portal)
+                </Text>
+              )}
             </View>
           );
         })}
