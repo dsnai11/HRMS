@@ -789,3 +789,172 @@ function onboardingPlusWire() {
         })),
   );
 }
+
+// ---- RMS: every resume for a job, from every source ------------------------------------------------
+// Sources (LinkedIn, Naukri, WhatsApp, an agency…) each get a secret link a connector posts
+// to; HR can also import resumes by hand. Each job has one inbox, sorted by source.
+let rmsOpening = null,
+  rmsSource = "";
+const RESUME_MIME = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  doc: "application/msword",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+};
+// "asha_rao-CV (1).pdf" becomes "Asha Rao".
+const nameFromFile = (f) =>
+  f
+    .replace(/\.[^.]+$/, "")
+    .replace(/\(\d+\)|\b(cv|resume|curriculum vitae|final|new|updated)\b/gi, "")
+    .replace(/[_\-.]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase()) || "Unnamed candidate";
+async function rmsPage(id) {
+  const [src, openings] = await Promise.all([
+    api("/admin/rms/sources"),
+    api("/admin/rms/openings"),
+  ]);
+  if (id !== renderId) return;
+  const job = rmsOpening && openings.find((o) => o.id === rmsOpening);
+  const inbox = job ? await api(`/admin/rms/openings/${job.id}/inbox`) : null;
+  if (id !== renderId) return;
+  const chips = (list) =>
+    list.map((s) => `<span class="pill neutral">${esc(s.name)} · ${s.n}</span>`).join(" ");
+  const sourcesCard = `<div class="card"><div class="card-head"><div><h2>Resume sources</h2><p class="muted">Each source has a private link. A LinkedIn, Naukri, WhatsApp or job-board connector posts candidates to it; CVs then arrive here on their own.</p></div><button id="rms-add-source">+ Add source</button></div>${
+    src.items.length
+      ? `<div class="table-wrap"><table><thead><tr><th>Source</th><th>Type</th><th>Key</th><th>Received</th><th>Last used</th><th>Status</th><th></th></tr></thead><tbody>${src.items
+          .map(
+            (s) =>
+              `<tr><td><strong>${esc(s.name)}</strong></td><td>${esc(src.kinds[s.kind] || s.kind)}</td><td><code>rms_…${esc(s.key_hint)}</code></td><td>${s.received}</td><td>${s.last_used_at ? time(s.last_used_at) : "Never"}</td><td><span class="pill ${s.active ? "" : "neutral"}">${s.active ? "Receiving" : "Off"}</span></td><td><button class="ghost" data-src-toggle="${s.id}" data-on="${s.active ? 1 : 0}">${s.active ? "Switch off" : "Switch on"}</button></td></tr>`,
+          )
+          .join("")}</tbody></table></div>`
+      : empty("No sources yet", "Add LinkedIn, Naukri, your WhatsApp number or an agency. Resumes you import by hand need no source.")
+  }</div>`;
+  const openingsCard = `<div class="card"><h2>Job openings</h2>${
+    openings.length
+      ? `<div class="table-wrap"><table><thead><tr><th>Job</th><th>Candidates</th><th>By source</th><th></th></tr></thead><tbody>${openings
+          .map(
+            (o) =>
+              `<tr class="${o.id === rmsOpening ? "selected" : ""}"><td><strong>${esc(o.title)}</strong><small>J${o.id} · ${esc(o.branch_name || "All branches")} · ${esc(o.status)}</small></td><td>${o.candidates}</td><td>${chips(o.sources) || '<span class="muted">—</span>'}</td><td><button class="secondary" data-rms-open="${o.id}">Open inbox</button></td></tr>`,
+          )
+          .join("")}</tbody></table></div>`
+      : empty("No job openings", "Create an opening under Hiring & exits first.")
+  }</div>`;
+  let inboxCard = "";
+  if (inbox) {
+    const all = [...new Set(inbox.people.flatMap((p) => p.sources))].sort();
+    const shown = rmsSource
+      ? inbox.people.filter((p) => p.sources.includes(rmsSource))
+      : inbox.people;
+    inboxCard = `<div class="card"><div class="card-head"><div><h2>${esc(job.title)} · resume inbox</h2><p class="muted">${inbox.people.length} candidate(s). Someone sent from two places appears once, with both sources.</p></div><div class="actions"><button id="rms-import">Import resumes</button><button class="secondary" id="rms-close">Close</button></div></div><div class="tabs-line"><button type="button" class="${rmsSource ? "" : "on"}" data-rms-src="">All (${inbox.people.length})</button>${all
+      .map(
+        (s) =>
+          `<button type="button" class="${rmsSource === s ? "on" : ""}" data-rms-src="${esc(s)}">${esc(s)} (${inbox.people.filter((p) => p.sources.includes(s)).length})</button>`,
+      )
+      .join("")}</div>${
+      shown.length
+        ? `<div class="table-wrap"><table><thead><tr><th>Candidate</th><th>Contact</th><th>Sources</th><th>Received</th><th>Match</th><th>Stage</th><th></th></tr></thead><tbody>${shown
+            .map(
+              (p) =>
+                `<tr><td><strong>${esc(p.name)}</strong></td><td>${esc(p.phone || "")}<small>${esc(p.email || "")}</small></td><td>${p.sources.map((s) => `<span class="pill neutral">${esc(s)}</span>`).join(" ")}</td><td>${time(p.created_at)}</td><td>${p.match_score == null ? "—" : `${p.match_score}%`}</td><td>${stagePill(p.stage)}</td><td>${p.resume_id ? `<a class="button secondary" href="/api/admin/candidate-files/${p.resume_id}" target="_blank" rel="noopener">Resume${p.resumes > 1 ? ` (${p.resumes})` : ""}</a> ` : ""}<button class="ghost" data-cand-open="${p.id}">Open</button></td></tr>`,
+            )
+            .join("")}</tbody></table></div>`
+        : empty("No resumes yet", "Import resumes, or connect a source to receive them.")
+    }</div>`;
+  }
+  document.querySelector("#content").innerHTML =
+    heading(
+      "Recruitment Management (RMS)",
+      "All resumes for each job, from LinkedIn, Naukri, WhatsApp, agencies and your own imports.",
+    ) +
+    inboxCard +
+    openingsCard +
+    sourcesCard;
+
+  document.querySelectorAll("[data-rms-open]").forEach(
+    (b) => (b.onclick = () => ((rmsOpening = Number(b.dataset.rmsOpen)), (rmsSource = ""), render())),
+  );
+  document.querySelector("#rms-close")?.addEventListener("click", () => ((rmsOpening = null), render()));
+  document.querySelectorAll("[data-rms-src]").forEach(
+    (b) => (b.onclick = () => ((rmsSource = b.dataset.rmsSrc), render())),
+  );
+  document.querySelectorAll("[data-cand-open]").forEach(
+    (b) => (b.onclick = () => candidateView(Number(b.dataset.candOpen))),
+  );
+  document.querySelectorAll("[data-src-toggle]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        busy(b, async () => {
+          await api(`/admin/rms/sources/${b.dataset.srcToggle}`, { active: b.dataset.on !== "1" }, "PATCH");
+          await render();
+        })),
+  );
+  document.querySelector("#rms-add-source").onclick = () =>
+    dialog(
+      "Add a resume source",
+      `${sel("kind", "Type", Object.entries(src.kinds))}${input("name", "Name (optional)", "", 'maxlength="60" placeholder="e.g. Naukri Jaipur, WhatsApp 98290 00000, ABC Placements"')}`,
+      async (f) => {
+        const r = await api("/admin/rms/sources", { kind: f.kind, name: f.name || null });
+        const url = `${location.origin}${r.intake_path}`;
+        setTimeout(
+          () =>
+            viewDialog(
+              "Source link (shown once)",
+              `<p>Give this link to whoever connects ${esc(src.kinds[f.kind])} (a developer, the job board or an automation tool such as Zapier). It is shown only now; keep it private.</p><p><input readonly value="${esc(url)}" id="rms-url"></p><p class="muted">The connector sends a POST with JSON for each candidate:</p><pre class="callout">${esc(
+                JSON.stringify(
+                  {
+                    job_code: openings[0] ? `J${openings[0].id}` : "J12",
+                    name: "Asha Rao",
+                    email: "asha@example.com",
+                    phone: "+91 98290 11111",
+                    resume: { name: "asha.pdf", mime: "application/pdf", data: "<base64 of the file>" },
+                    external_ref: "the platform's own id (optional)",
+                  },
+                  null,
+                  2,
+                ),
+              )}</pre>`,
+            ),
+          50,
+        );
+      },
+    );
+  document.querySelector("#rms-import")?.addEventListener("click", () =>
+    dialog(
+      `Import resumes for ${job.title}`,
+      `<label>Where they came from<select name="from">${src.items
+        .filter((s) => s.active)
+        .map((s) => `<option value="s:${s.id}">${esc(s.name)}</option>`)
+        .join("")}${Object.entries(src.kinds)
+        .map(([k, v]) => `<option value="k:${k}">${esc(v)}</option>`)
+        .join("")}</select></label><label class="full">Resume files (PDF, Word or photo; up to 20, each up to 3 MB)<input type="file" name="files" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" multiple required></label><p class="full muted">Each file becomes a candidate named from its file name; you can correct names and add contact details from the candidate's page. Someone already on this job is matched and not added twice.</p><div class="full" id="rms-results"></div>`,
+      async (f) => {
+        const files = [...document.querySelector("dialog input[name=files]").files];
+        if (!files.length) throw new Error("Choose the resume files.");
+        if (files.length > 20) throw new Error("Import up to 20 files at a time.");
+        const items = [];
+        for (const file of files) {
+          const ext = file.name.split(".").pop().toLowerCase();
+          if (!RESUME_MIME[ext]) throw new Error(`${file.name}: use PDF, Word or a photo.`);
+          if (file.size > 3 * 1024 * 1024) throw new Error(`${file.name} is larger than 3 MB.`);
+          items.push({
+            name: nameFromFile(file.name),
+            resume: { name: file.name, mime: RESUME_MIME[ext], data: await toB64(file) },
+          });
+        }
+        const [kind, value] = f.from.split(":");
+        const r = await api(`/admin/rms/openings/${job.id}/resumes`, {
+          ...(kind === "s" ? { source_id: Number(value) } : { kind: value }),
+          items,
+        });
+        const ok = r.results.filter((x) => x.ok);
+        notice(
+          `${ok.filter((x) => !x.duplicate).length} new, ${ok.filter((x) => x.duplicate).length} already on this job${r.results.length - ok.length ? `, ${r.results.length - ok.length} not imported` : ""}.`,
+        );
+      },
+    ),
+  );
+}

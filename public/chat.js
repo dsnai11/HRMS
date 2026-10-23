@@ -71,7 +71,7 @@ function chatAlert(m) {
   if (!("Notification" in window) || Notification.permission !== "granted")
     return;
   const n = new Notification(
-    m.kind === "group" ? `${m.author} in ${m.room_name}` : m.author,
+    m.kind !== "direct" ? `${m.author} in ${m.room_name}` : m.author,
     { body: m.body.slice(0, 140), tag: `chat-${m.room_id}` },
   );
   n.onclick = () => {
@@ -148,7 +148,7 @@ async function chatRooms() {
     ? rooms
         .map(
           (r) =>
-            `<button class="chat-room ${r.id === chat.room ? "selected" : ""}" data-room="${r.id}"><span class="avatar">${r.kind === "group" ? "#" : initials(r.title)}</span><span class="chat-room-text"><strong>${esc(r.title)}</strong><small>${r.last_body ? `${r.kind === "group" && r.last_from ? `${esc(r.last_from.split(" ")[0])}: ` : ""}${esc(r.last_body)}` : r.kind === "group" ? `${r.members} people` : "No messages yet"}</small></span>${Number(r.unread) ? `<span class="pill">${r.unread}</span>` : ""}</button>`,
+            `<button class="chat-room ${r.id === chat.room ? "selected" : ""}" data-room="${r.id}"><span class="avatar ${r.kind === "team" ? "team" : ""}">${r.kind === "team" ? "🛡" : r.kind === "group" ? "#" : initials(r.title)}</span><span class="chat-room-text"><strong>${esc(r.title)}</strong><small>${r.last_body ? `${r.kind !== "direct" && r.last_from ? `${esc(r.last_from.split(" ")[0])}: ` : ""}${esc(r.last_body)}` : r.kind === "team" ? "HR team only" : r.kind === "group" ? `${r.members} people` : "No messages yet"}</small></span>${Number(r.unread) ? `<span class="pill">${r.unread}</span>` : ""}</button>`,
         )
         .join("")
     : empty("No conversations yet", "Start one with New message.");
@@ -173,10 +173,10 @@ async function chatOpen(roomId) {
   chat.oldest = messages[0]?.id ?? null;
   chat.readers = info.members.filter((x) => x.id !== me.id);
   const title =
-    info.kind === "group"
+    info.kind !== "direct"
       ? info.name
       : (info.members.find((m) => m.id !== me.id)?.name ?? "Former colleague");
-  pane.innerHTML = `<div class="chat-head"><div><h2>${esc(title)}</h2><small class="muted">${info.kind === "group" ? `${info.members.length} people` : "Direct message"}</small></div>${info.kind === "group" ? '<button class="secondary" id="chat-members">People</button>' : ""}</div><div class="chat-msgs" id="chat-msgs">${messages.length === 50 ? '<button class="ghost" id="chat-older">Show earlier messages</button>' : ""}${messages.length ? messages.map(chatBubble).join("") : empty("Say hello", "Messages are visible only to the people in this conversation.")}</div><form class="chat-send" id="chat-send"><label class="chat-attach" title="Attach a PDF or photo (up to 2 MB)">📎<input type="file" name="file" accept="application/pdf,image/jpeg,image/png" hidden></label><textarea name="body" rows="2" maxlength="2000" placeholder="Write a message. Enter sends, Shift+Enter adds a line."></textarea><button>Send</button></form><small class="muted" id="chat-picked"></small>`;
+  pane.innerHTML = `<div class="chat-head"><div><h2>${esc(title)}</h2><small class="muted">${info.kind === "team" ? `HR team only · ${info.members.length} people · membership follows the HR team chat right` : info.kind === "group" ? `${info.members.length} people` : "Direct message"}</small></div>${info.kind === "group" ? '<button class="secondary" id="chat-members">People</button>' : ""}</div><div class="chat-msgs" id="chat-msgs">${messages.length === 50 ? '<button class="ghost" id="chat-older">Show earlier messages</button>' : ""}${messages.length ? messages.map(chatBubble).join("") : empty("Say hello", "Messages are visible only to the people in this conversation.")}</div><form class="chat-send" id="chat-send"><label class="chat-attach" title="Attach a PDF or photo (up to 2 MB)">📎<input type="file" name="file" accept="application/pdf,image/jpeg,image/png" hidden></label><textarea name="body" rows="2" maxlength="2000" placeholder="Write a message. Enter sends, Shift+Enter adds a line."></textarea><button>Send</button></form><small class="muted" id="chat-picked"></small>`;
   const list = pane.querySelector("#chat-msgs");
   list.scrollTop = list.scrollHeight;
   chatWireBubbles();

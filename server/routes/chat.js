@@ -25,7 +25,48 @@ export function registerChat(router, app) {
       .get(integer(Number(roomId)), user.id);
     if (!m || m.company_id !== user.company_id)
       throw new HttpError(404, "Conversation not found.");
+    // The HR Team room follows the right: lose it and the room is gone at once.
+    if (m.kind === "team" && !can(user, "hrchat.use")) {
+      await db
+        .prepare("DELETE FROM chat_members WHERE room_id=? AND user_id=?")
+        .run(m.room_id, user.id);
+      throw new HttpError(404, "Conversation not found.");
+    }
     return m;
+  }
+
+  // Everyone with the hrchat.use right is in the company's HR Team room; nobody else.
+  async function syncTeamRoom(user) {
+    if (user.role === "super_admin") return;
+    let room = await db
+      .prepare("SELECT id FROM chat_rooms WHERE company_id=? AND kind='team'")
+      .get(user.company_id);
+    if (!can(user, "hrchat.use")) {
+      if (room)
+        await db
+          .prepare("DELETE FROM chat_members WHERE room_id=? AND user_id=?")
+          .run(room.id, user.id);
+      return;
+    }
+    if (!room) {
+      await db
+        .prepare(
+          "INSERT INTO chat_rooms(company_id,kind,name,created_by,created_at) VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING",
+        )
+        .run(user.company_id, "team", "HR Team", user.id, nowIso());
+      room = await db
+        .prepare("SELECT id FROM chat_rooms WHERE company_id=? AND kind='team'")
+        .get(user.company_id);
+    }
+    // A new member starts with the history already read.
+    const last = await db
+      .prepare("SELECT COALESCE(MAX(id),0) n FROM chat_messages WHERE room_id=?")
+      .get(room.id);
+    await db
+      .prepare(
+        "INSERT INTO chat_members(room_id,user_id,last_read_id,joined_at) VALUES(?,?,?,?) ON CONFLICT DO NOTHING",
+      )
+      .run(room.id, user.id, Number(last.n), nowIso());
   }
 
   // Colleagues to start a conversation with: names and roles only.
@@ -44,6 +85,7 @@ export function registerChat(router, app) {
   });
 
   router.get("/api/chat/rooms", async ({ user, send }) => {
+    await syncTeamRoom(user);
     const rooms = await db
       .prepare(
         `SELECT r.id,r.kind,r.name,r.last_message_at,m.last_read_id,
@@ -159,6 +201,8 @@ export function registerChat(router, app) {
     "/api/chat/rooms/:id/members",
     async ({ user, params, body, send, audit }) => {
       const m = await membership(user, params.id);
+      if (m.kind === "team")
+        throw new HttpError(409, "HR Team members come from the HR team chat right. Change it under Roles & rights.");
       if (m.kind !== "group" || !m.is_admin)
         throw new HttpError(403, "Only the group's admin can add people.");
       const wanted = (await body()).user_ids;
@@ -191,6 +235,8 @@ export function registerChat(router, app) {
     "/api/chat/rooms/:id/members/:userId",
     async ({ user, params, send, audit }) => {
       const m = await membership(user, params.id);
+      if (m.kind === "team")
+        throw new HttpError(409, "HR Team members come from the HR team chat right. Change it under Roles & rights.");
       const target = integer(Number(params.userId));
       if (m.kind !== "group")
         throw new HttpError(409, "You cannot leave a direct conversation.");
@@ -314,6 +360,7 @@ export function registerChat(router, app) {
   );
   // Polled every few seconds while the portal is open: anything new in my conversations.
   router.get("/api/chat/updates", async ({ user, query, send }) => {
+    if (!query.get("since")) await syncTeamRoom(user);
     // The first poll (no "since") only learns where the conversation stands.
     const since = query.get("since") ? Number(query.get("since")) : null;
     if (since !== null && (!Number.isSafeInteger(since) || since < 0))
