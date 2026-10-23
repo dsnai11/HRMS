@@ -11,7 +11,10 @@ export const TEAM_SQL = `WITH RECURSIVE team(id) AS (
   UNION SELECT u.id FROM users u JOIN team t ON u.manager_id=t.id
 ) SELECT id FROM team`;
 
-export async function loadAttendance(app, { companyId, query, teamOf }) {
+export async function loadAttendance(
+  app,
+  { companyId, query, teamOf, scope },
+) {
   const from =
     query.get("from") || app.dayOf(new Date(app.clock()).toISOString());
   const to = query.get("to") || from;
@@ -38,6 +41,11 @@ export async function loadAttendance(app, { companyId, query, teamOf }) {
   if (teamOf) {
     where.push(`u.id IN (${TEAM_SQL})`);
     params.push(teamOf);
+  }
+  // Branch-limited HR roles (see scope.js branchScope).
+  if (scope?.sql) {
+    where.push(scope.sql.replace(/^ AND /, ""));
+    params.push(...scope.params);
   }
   return (
     await app.db

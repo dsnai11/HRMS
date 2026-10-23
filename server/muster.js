@@ -166,6 +166,7 @@ export async function computeMuster(
       user_id: p.id,
       employee_code: p.employee_code,
       name: p.name,
+      branch_id: p.branch_id,
       department_name: p.department_name,
       ...Object.fromEntries(Object.entries(t).map(([k, v]) => [k, round2(v)])),
       payable_days: round2(

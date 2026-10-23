@@ -121,3 +121,39 @@ test("administrators define roles with chosen rights and give them to people", a
   // Administrators can create HR team and payroll accounts directly.
   assert.ok((await add("pay", { role: "payroll" })).token);
 });
+
+test("a role limited to branches sees and decides only for those branches", async (t) => {
+  const { db, call, owner, add } = await world(t);
+  const now = new Date().toISOString();
+  const branch = async (name) =>
+    Number((await db.prepare("INSERT INTO branches(company_id,name,created_at) VALUES(1,?,?)").run(name, now)).lastInsertRowid);
+  const jaipur = await branch("Jaipur");
+  const indore = await branch("Indore");
+  const role = await call("/admin/roles", { name: "Jaipur HR", permissions: ["employees.read", "employees.write", "attendance.read", "leave.approve"], branch_ids: [jaipur] }, owner);
+  assert.equal(role.status, 201, JSON.stringify(role.data));
+  assert.equal((await call("/admin/roles", { name: "Bad", permissions: ["leave.read"], branch_ids: [9999] }, owner)).status, 400);
+  assert.deepEqual((await call("/admin/roles", undefined, owner)).data.custom[0].branch_ids, [jaipur]);
+
+  const hr = await add("jhr", { role: "custom", custom_role_id: role.data.id, branch_id: jaipur });
+  const a = await add("ajay", { branch_id: jaipur });
+  const b = await add("bina", { branch_id: indore });
+
+  const names = (await call("/admin/employees", undefined, hr.token)).data.items.map((p) => p.name);
+  assert.ok(names.includes("AJAY") && !names.includes("BINA"), names.join());
+  assert.equal((await call(`/admin/employees/${b.id}`, undefined, hr.token)).status, 404);
+  assert.equal((await call(`/admin/employees/${b.id}`, { name: "X" }, hr.token, "PATCH")).status, 404);
+  assert.equal((await call(`/admin/employees/${a.id}`, { branch_id: indore }, hr.token, "PATCH")).status, 403);
+  assert.equal((await call("/admin/overview", undefined, hr.token)).data.employees, 2); // jhr and ajay
+  assert.equal((await call("/admin/overview", undefined, owner)).data.employees > 2, true);
+
+  // Leave: the Indore request is not in the inbox and cannot be decided.
+  await call("/admin/leave-types/seed-defaults", {}, owner);
+  const lwp = (await call("/leave/balances", undefined, b.token)).data.find((x) => x.unlimited);
+  const y = now.slice(0, 4);
+  const reqB = await call("/leave/requests", { leave_type_id: lwp.leave_type_id, from_date: `${y}-12-29`, to_date: `${y}-12-29` }, b.token);
+  const reqA = await call("/leave/requests", { leave_type_id: lwp.leave_type_id, from_date: `${y}-12-29`, to_date: `${y}-12-29` }, a.token);
+  const inbox = (await call("/approvals", undefined, hr.token)).data.leave.map((r) => r.id);
+  assert.deepEqual(inbox, [reqA.data.id]);
+  const decide = (id) => call(`/leave/requests/${id}/decision`, { decision: "approved" }, hr.token);
+  assert.equal((await decide(reqB.data.id)).status, 403);
+});

@@ -9,7 +9,7 @@ import {
   optionalId,
 } from "../http.js";
 import { can } from "../rbac.js";
-import { requireOwned } from "../scope.js";
+import { branchScope, requireOwned } from "../scope.js";
 import { mayDecide } from "../approval.js";
 import { eachDay, daysBetween, leaveYearOf } from "../calendar.js";
 import {
@@ -680,9 +680,14 @@ export function registerLeave(router, app) {
   router.get(
     "/api/admin/leave/requests",
     { perm: "leave.read" },
-    async ({ companyId, query, send }) => {
+    async ({ user, companyId, query, send }) => {
       const where = ["r.company_id=?"],
         params = [companyId];
+      const scope = branchScope(user, "r.user_id");
+      if (scope.sql) {
+        where.push(scope.sql.replace(/^ AND /, ""));
+        params.push(...scope.params);
+      }
       if (query.get("status")) {
         where.push("r.status=?");
         params.push(

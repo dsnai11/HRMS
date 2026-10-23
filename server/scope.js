@@ -10,3 +10,16 @@ export async function requireOwned(db, table, id, companyId, label) {
   if (!row) throw new HttpError(400, `Select an existing ${label}.`);
   return row;
 }
+
+// A custom role can be limited to some branches. HR lists then show only people in
+// those branches: append `sql` to a WHERE clause and `params` to its values.
+export function branchScope(user, userIdColumn = "u.id") {
+  const ids = user.branch_scope;
+  if (!ids?.length) return { sql: "", params: [] };
+  return {
+    sql: ` AND ${userIdColumn} IN (SELECT id FROM users WHERE branch_id IN (${ids.map(() => "?").join(",")}))`,
+    params: [...ids],
+  };
+}
+export const inBranchScope = (user, branchId) =>
+  !user.branch_scope?.length || user.branch_scope.includes(branchId);

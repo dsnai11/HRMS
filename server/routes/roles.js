@@ -42,6 +42,24 @@ export function registerRoles(router, app) {
       permissions: JSON.stringify(withImplied(permissions)),
     };
   };
+  // Branches the role is limited to; none means the whole company.
+  const branches = async (b, companyId) => {
+    const ids = [
+      ...new Set(
+        (Array.isArray(b.branch_ids) ? b.branch_ids : []).map((x) =>
+          integer(Number(x)),
+        ),
+      ),
+    ];
+    for (const id of ids)
+      if (
+        !(await db
+          .prepare("SELECT id FROM branches WHERE id=? AND company_id=?")
+          .get(id, companyId))
+      )
+        throw new HttpError(400, "Choose your company's branches.");
+    return JSON.stringify(ids);
+  };
   const owned = async (id, companyId) => {
     const r = await db
       .prepare("SELECT * FROM custom_roles WHERE id=? AND company_id=?")
@@ -74,7 +92,7 @@ export function registerRoles(router, app) {
           .reduce((n, c) => n + Number(c.n), 0);
       const custom = await db
         .prepare(
-          "SELECT id,name,description,permissions,updated_at FROM custom_roles WHERE company_id=? ORDER BY lower(name)",
+          "SELECT id,name,description,permissions,branch_ids,updated_at FROM custom_roles WHERE company_id=? ORDER BY lower(name)",
         )
         .all(companyId);
       return send(200, {
@@ -91,6 +109,7 @@ export function registerRoles(router, app) {
         custom: custom.map((r) => ({
           ...r,
           permissions: JSON.parse(r.permissions),
+          branch_ids: JSON.parse(r.branch_ids),
           members: members("custom", r.id),
         })),
       });
@@ -100,20 +119,23 @@ export function registerRoles(router, app) {
     "/api/admin/roles",
     { perm: "roles.assign" },
     async ({ user, companyId, body, send, audit }) => {
-      const r = clean(await body());
+      const b = await body();
+      const r = clean(b);
+      const scope = await branches(b, companyId);
       if (await nameTaken(companyId, r.name))
         throw new HttpError(409, "A role with that name already exists.");
       const id = Number(
         (
           await db
             .prepare(
-              "INSERT INTO custom_roles(company_id,name,description,permissions,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+              "INSERT INTO custom_roles(company_id,name,description,permissions,branch_ids,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
             )
             .run(
               companyId,
               r.name,
               r.description,
               r.permissions,
+              scope,
               user.id,
               nowIso(),
               nowIso(),
@@ -130,14 +152,16 @@ export function registerRoles(router, app) {
     { perm: "roles.assign" },
     async ({ params, companyId, body, send, audit }) => {
       const role = await owned(params.id, companyId);
-      const r = clean(await body());
+      const b = await body();
+      const r = clean(b);
+      const scope = await branches(b, companyId);
       if (await nameTaken(companyId, r.name, role.id))
         throw new HttpError(409, "A role with that name already exists.");
       await db
         .prepare(
-          "UPDATE custom_roles SET name=?,description=?,permissions=?,updated_at=? WHERE id=?",
+          "UPDATE custom_roles SET name=?,description=?,permissions=?,branch_ids=?,updated_at=? WHERE id=?",
         )
-        .run(r.name, r.description, r.permissions, nowIso(), role.id);
+        .run(r.name, r.description, r.permissions, scope, nowIso(), role.id);
       await audit("role_updated", { id: role.id, name: r.name });
       return send(200, { ok: true });
     },

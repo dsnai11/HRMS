@@ -35,8 +35,13 @@ async function directoryPage(id) {
 // ---- roles and rights (administrators) -------------------------------------------------------------
 // Built-in roles are shown for reference; custom roles get exactly the rights ticked.
 async function rolesPage(id) {
-  const data = await api("/admin/roles");
+  const [data, org] = await Promise.all([api("/admin/roles"), api("/admin/org")]);
   if (id !== renderId) return;
+  const branchName = new Map(org.branches.map((b) => [b.id, b.name]));
+  const where = (ids) =>
+    ids?.length
+      ? ids.map((x) => esc(branchName.get(x) || "?")).join(", ")
+      : "All branches";
   const label = new Map(data.permissions.map((p) => [p.key, p.label]));
   const rights = (list) =>
     list.length
@@ -53,10 +58,10 @@ async function rolesPage(id) {
     ) +
     `<div class="card"><div class="card-head"><div><h2>Your roles</h2><p class="muted">Roles you made, with the rights you chose. A change applies straight away.</p></div></div>${
       data.custom.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Role</th><th>People</th><th>Rights</th><th></th></tr></thead><tbody>${data.custom
+        ? `<div class="table-wrap"><table><thead><tr><th>Role</th><th>People</th><th>Branches</th><th>Rights</th><th></th></tr></thead><tbody>${data.custom
             .map(
               (r) =>
-                `<tr><td><strong>${esc(r.name)}</strong>${r.description ? `<small>${esc(r.description)}</small>` : ""}</td><td>${r.members}</td><td><small>${rights(r.permissions)}</small></td><td><button class="secondary" data-role-edit="${r.id}">Edit</button> <button class="ghost" data-role-del="${r.id}">Delete</button></td></tr>`,
+                `<tr><td><strong>${esc(r.name)}</strong>${r.description ? `<small>${esc(r.description)}</small>` : ""}</td><td>${r.members}</td><td><small>${where(r.branch_ids)}</small></td><td><small>${rights(r.permissions)}</small></td><td><button class="secondary" data-role-edit="${r.id}">Edit</button> <button class="ghost" data-role-del="${r.id}">Delete</button></td></tr>`,
             )
             .join("")}</tbody></table></div>`
         : empty(
@@ -70,10 +75,21 @@ async function rolesPage(id) {
       )
       .join("")}</tbody></table></div></div>`;
   const groups = [...new Set(data.permissions.map((p) => p.group))];
-  const roleDialog = (r = { name: "", description: "", permissions: [] }) =>
+  const roleDialog = (
+    r = { name: "", description: "", permissions: [], branch_ids: [] },
+  ) =>
     dialog(
       r.id ? `Edit ${r.name}` : "New role",
-      `${input("name", "Role name", r.name, 'required maxlength="60" placeholder="e.g. HR Executive"')}${input("description", "What is it for? (optional)", r.description, 'maxlength="300"')}<p class="full muted">Every role can see the organisation lists (departments, branches, workplaces), and a right to change something includes seeing it.</p>${groups
+      `${input("name", "Role name", r.name, 'required maxlength="60" placeholder="e.g. HR Executive"')}${input("description", "What is it for? (optional)", r.description, 'maxlength="300"')}<p class="full muted">Every role can see the organisation lists (departments, branches, workplaces), and a right to change something includes seeing it.</p>${
+        org.branches.length
+          ? `<div class="full"><strong>Limit to branches</strong><p class="muted">Tick branches to show people in the role only those branches' employees, attendance, leave and approvals. Leave all unticked for the whole company.</p><div class="check-grid">${org.branches
+              .map(
+                (b) =>
+                  `<label class="check"><input type="checkbox" name="branch:${b.id}" ${r.branch_ids?.includes(b.id) ? "checked" : ""}> ${esc(b.name)}</label>`,
+              )
+              .join("")}</div></div>`
+          : ""
+      }${groups
         .map(
           (g) =>
             `<div class="full"><strong>${esc(g)}</strong><div class="check-grid">${data.permissions
@@ -92,6 +108,9 @@ async function rolesPage(id) {
           permissions: Object.keys(f)
             .filter((k) => k.startsWith("perm:"))
             .map((k) => k.slice(5)),
+          branch_ids: Object.keys(f)
+            .filter((k) => k.startsWith("branch:"))
+            .map((k) => Number(k.slice(7))),
         };
         if (r.id) await api(`/admin/roles/${r.id}`, body, "PATCH");
         else await api("/admin/roles", body);

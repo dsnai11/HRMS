@@ -220,11 +220,12 @@ export function createApp({
     if (user.role === "custom") {
       const role = await db
         .prepare(
-          "SELECT name,permissions FROM custom_roles WHERE id=? AND company_id=?",
+          "SELECT name,permissions,branch_ids FROM custom_roles WHERE id=? AND company_id=?",
         )
         .get(user.custom_role_id, user.company_id);
       user.custom_role_name = role?.name ?? null;
       user.custom_permissions = role ? JSON.parse(role.permissions) : [];
+      user.branch_scope = role ? JSON.parse(role.branch_ids) : [];
     }
     return { user, token };
   }

@@ -1,5 +1,6 @@
 import { HttpError, csvCell, integer } from "../http.js";
 import { computeMuster } from "../muster.js";
+import { inBranchScope } from "../scope.js";
 
 const COLUMNS = [
   ["employee_code", "Employee code"],
@@ -35,7 +36,7 @@ export function registerSummary(router, app) {
   router.get(
     "/api/admin/attendance-summary",
     { perm: "attendance.read" },
-    async ({ companyId, query, send }) => {
+    async ({ user, companyId, query, send }) => {
       const r = await computeMuster(app, {
         companyId,
         month: monthOf(query),
@@ -43,7 +44,9 @@ export function registerSummary(router, app) {
       });
       return send(200, {
         ...r,
-        people: r.people.map(({ days, ...row }) => row),
+        people: r.people
+          .filter((p) => inBranchScope(user, p.branch_id))
+          .map(({ days, ...row }) => row),
       });
     },
   );
@@ -51,12 +54,13 @@ export function registerSummary(router, app) {
   router.get(
     "/api/admin/attendance-summary/export",
     { perm: "attendance.read" },
-    async ({ res, headers, companyId, query, audit }) => {
+    async ({ res, headers, user, companyId, query, audit }) => {
       const r = await computeMuster(app, {
         companyId,
         month: monthOf(query),
         filters: filters(query),
       });
+      r.people = r.people.filter((p) => inBranchScope(user, p.branch_id));
       await audit("muster_exported", { month: r.month, rows: r.people.length });
       res.writeHead(200, {
         ...headers,

@@ -1,11 +1,19 @@
 import { can } from "./rbac.js";
 import { TEAM_SQL } from "./attendance-report.js";
+import { branchScope } from "./scope.js";
 
 // Who may decide a person's request: HR/admin, or anyone above them in the
 // reporting line. Nobody decides their own.
 export async function mayDecide(app, approver, requesterId) {
   if (approver.id === requesterId) return false;
-  if (can(approver, "leave.approve")) return true;
+  if (can(approver, "leave.approve")) {
+    if (!approver.branch_scope?.length) return true;
+    // A branch-limited HR role decides only for its branches (or its own team).
+    const r = await app.db
+      .prepare("SELECT branch_id FROM users WHERE id=?")
+      .get(requesterId);
+    if (r && approver.branch_scope.includes(r.branch_id)) return true;
+  }
   return Boolean(
     await app.db
       .prepare(`SELECT id FROM (${TEAM_SQL}) team WHERE id=?`)
@@ -16,7 +24,7 @@ export async function mayDecide(app, approver, requesterId) {
 // "AND r.user_id IN (…)" scoping for an approver's inbox: HR sees the company,
 // managers see their team, everyone else sees nothing.
 export async function inboxScope(app, user) {
-  if (can(user, "leave.approve")) return { sql: "", params: [] };
+  if (can(user, "leave.approve")) return branchScope(user, "r.user_id");
   if (
     await app.db
       .prepare("SELECT id FROM users WHERE manager_id=? AND active=1 LIMIT 1")

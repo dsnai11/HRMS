@@ -12,7 +12,7 @@ import {
   oneOf,
 } from "../http.js";
 import { ROLES, assignableRoles, can } from "../rbac.js";
-import { requireOwned } from "../scope.js";
+import { branchScope, inBranchScope, requireOwned } from "../scope.js";
 
 const GENDERS = ["male", "female", "other"];
 const EMPLOYMENT = [
@@ -181,7 +181,9 @@ export function registerEmployees(router, app) {
         where.push("u.active=?");
         params.push(Number(query.get("active")));
       }
-      const clause = where.join(" AND ") + visible(user);
+      const scope = branchScope(user);
+      const clause = where.join(" AND ") + visible(user) + scope.sql;
+      params.push(...scope.params);
       const limit = Math.min(
         Math.max(Number(query.get("limit")) || 50, 1),
         200,
@@ -210,7 +212,8 @@ export function registerEmployees(router, app) {
           `SELECT ${FULL} ${JOINS} WHERE u.id=? AND u.company_id=?${visible(user)}`,
         )
         .get(integer(Number(params.id)), companyId);
-      if (!row) throw new HttpError(404, "Employee not found.");
+      if (!row || !inBranchScope(user, row.branch_id))
+        throw new HttpError(404, "Employee not found.");
       return send(200, row);
     },
   );
@@ -226,6 +229,8 @@ export function registerEmployees(router, app) {
     const roleId = await customRoleId(role, b, companyId);
     const profile = profileValues(b);
     const refs = await references(b, companyId);
+    if (user.branch_scope?.length && !inBranchScope(user, refs.branch_id ?? null))
+      throw new HttpError(403, "Choose one of the branches you look after.");
     const custom =
       b.custom === undefined
         ? null
@@ -302,7 +307,8 @@ export function registerEmployees(router, app) {
         .get(id, companyId);
       if (
         !target ||
-        (target.role === "super_admin" && user.role !== "super_admin")
+        (target.role === "super_admin" && user.role !== "super_admin") ||
+        !inBranchScope(user, target.branch_id)
       )
         throw new HttpError(404, "Employee not found.");
       if (!canManage(user, target))
@@ -336,6 +342,8 @@ export function registerEmployees(router, app) {
           "You cannot change your own role or deactivate yourself.",
         );
       Object.assign(set, profileValues(b), await references(b, companyId));
+      if (set.branch_id !== undefined && !inBranchScope(user, set.branch_id))
+        throw new HttpError(403, "Choose one of the branches you look after.");
       if (b.custom !== undefined)
         set.custom = JSON.stringify(
           await cleanCustom(
