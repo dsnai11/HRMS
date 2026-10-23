@@ -2353,3 +2353,115 @@ dialog .gallery-full {
     animation: none;
   }
 }
+
+/* An opened bunch: a full-screen stage over the page. */
+.album-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(8, 10, 20, 0.72);
+  backdrop-filter: blur(14px);
+  overflow: hidden;
+}
+.album-burst {
+  position: fixed;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  background: radial-gradient(circle, rgba(70, 224, 255, 0.55), rgba(172, 5, 27, 0.35) 45%, transparent 70%);
+  pointer-events: none;
+}
+.album-panel {
+  position: relative;
+  width: min(1100px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: #eef0ff;
+}
+.album-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.album-head h2 {
+  margin: 4px 0;
+  color: #fff;
+  font-size: 26px;
+}
+.album-head small {
+  color: #b9bdd6;
+}
+.album-close {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2);
+  font-size: 18px;
+}
+.album-overlay .album-grid {
+  max-height: none;
+  overflow: auto;
+  perspective: 1200px;
+  padding: 18px 6px;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 16px;
+}
+.album-overlay .album-photo {
+  border-radius: 10px;
+  background: #f4f4f8;
+  padding: 6px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  transform-origin: center;
+}
+.album-overlay .album-photo img {
+  border-radius: 6px;
+}
+.album-overlay .album-photo:hover,
+.album-overlay .album-photo:focus-visible {
+  box-shadow: 0 0 0 2px rgba(122, 162, 255, 0.9), 0 0 26px rgba(70, 224, 255, 0.55);
+  outline: none;
+}
+.album-big {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  perspective: 1200px;
+}
+.album-big img {
+  max-width: 100%;
+  max-height: 70vh;
+  border-radius: 14px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+.album-big[hidden],
+.album-overlay .album-grid[hidden] {
+  display: none;
+}
+.album-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+}
+.album-nav .secondary {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.album-nav .ghost {
+  color: #ffb3bf;
+}
+.album-count {
+  color: #b9bdd6;
+  font-size: 13px;
+}

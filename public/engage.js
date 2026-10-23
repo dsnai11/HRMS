@@ -715,42 +715,144 @@ async function galleryCard(id) {
   }`;
   document.querySelector("#content").append(card);
 
-  // Opening a bunch shows all its photos; one can then be viewed large, with arrows.
-  const openAlbum = (a) => {
-    viewDialog(
-      `${a.title} · ${a.photos.length} ${a.photos.length === 1 ? "photo" : "photos"}`,
-      `<p class="muted">${esc(a.category)} · ${fmtDate(a.event_date)}${a.branch_name ? ` · ${esc(a.branch_name)}` : ""}</p><div class="album-grid">${a.photos
-        .map(
-          (p, k) =>
-            `<button type="button" class="album-photo" data-k="${k}"><img src="/api/gallery/${p.id}/image" alt="${esc(p.title)} ${k + 1}" loading="lazy"></button>`,
-        )
-        .join("")}</div>`,
+  // Opening a bunch: the screen blurs, a ring of light bursts from the stack, and its
+  // photos are dealt out of it, flipping in 3D into place. One photo zooms out of its
+  // thumbnail; closing gathers the photos back into the stack. Plain fades for people
+  // who ask for less motion.
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const centre = (r) => [r.left + r.width / 2, r.top + r.height / 2];
+  const openAlbum = (a, fromEl) => {
+    document.querySelector(".album-overlay")?.remove();
+    const from = fromEl.getBoundingClientRect();
+    const [fx, fy] = centre(from);
+    const o = document.createElement("div");
+    o.className = "album-overlay";
+    o.setAttribute("role", "dialog");
+    o.setAttribute("aria-modal", "true");
+    o.setAttribute("aria-label", a.title);
+    o.innerHTML = `<div class="album-burst" aria-hidden="true"></div><div class="album-panel"><div class="album-head"><div><span class="gallery-kicker">${esc(a.category)} · ${fmtDate(a.event_date)}${a.branch_name ? ` · ${esc(a.branch_name)}` : ""}</span><h2>${esc(a.title)}</h2><small>${a.photos.length} ${a.photos.length === 1 ? "photo" : "photos"}</small></div><button type="button" class="album-close" aria-label="Close">✕</button></div><div class="album-grid">${a.photos
+      .map(
+        (p, k) =>
+          `<button type="button" class="album-photo" data-k="${k}" aria-label="Photo ${k + 1} of ${a.photos.length}"><img src="/api/gallery/${p.id}/image" alt=""></button>`,
+      )
+      .join("")}</div><div class="album-big" hidden><img alt=""><div class="album-nav"><button type="button" class="secondary" data-nav="back">All photos</button>${a.photos.length > 1 ? '<button type="button" class="secondary" data-nav="prev">← Previous</button><button type="button" class="secondary" data-nav="next">Next →</button>' : ""}${manage ? '<button type="button" class="ghost" data-nav="remove">Remove photo</button>' : ""}<span class="album-count"></span></div></div></div>`;
+    document.body.append(o);
+    const burst = o.querySelector(".album-burst");
+    burst.style.setProperty("left", `${fx}px`);
+    burst.style.setProperty("top", `${fy}px`);
+    const thumbs = [...o.querySelectorAll(".album-photo")];
+    if (!still) {
+      o.animate(
+        [{ backgroundColor: "rgba(8,10,20,0)", backdropFilter: "blur(0px)" }, { backgroundColor: "rgba(8,10,20,0.72)", backdropFilter: "blur(14px)" }],
+        { duration: 420, easing: "ease-out", fill: "backwards" },
+      );
+      burst.animate(
+        [{ transform: "translate(-50%,-50%) scale(0)", opacity: 0.9 }, { transform: "translate(-50%,-50%) scale(9)", opacity: 0 }],
+        { duration: 1000, easing: "cubic-bezier(.1,.7,.2,1)", fill: "forwards" },
+      );
+      thumbs.forEach((t, i) => {
+        const [tx, ty] = centre(t.getBoundingClientRect());
+        const spin = (i % 2 ? 1 : -1) * (14 + (i * 7) % 18);
+        t.animate(
+          [
+            { transform: `translate(${fx - tx}px,${fy - ty}px) rotate(${spin}deg) scale(.35) rotateY(90deg)`, opacity: 0, filter: "blur(6px) brightness(1.8)" },
+            { offset: 0.62, transform: `translate(0,-14px) rotate(${-spin / 4}deg) scale(1.06) rotateY(-10deg)`, opacity: 1, filter: "blur(0) brightness(1.15)" },
+            { transform: "none", opacity: 1, filter: "none" },
+          ],
+          { duration: 780, delay: 140 + i * 75, easing: "cubic-bezier(.2,.8,.2,1)", fill: "backwards" },
+        );
+        t.animate(
+          [{ boxShadow: "0 0 0 0 rgba(70,224,255,0)" }, { boxShadow: "0 0 0 3px rgba(70,224,255,.9), 0 0 36px rgba(70,224,255,.7)" }, { boxShadow: "0 0 0 0 rgba(70,224,255,0)" }],
+          { duration: 700, delay: 140 + i * 75 + 520, easing: "ease-out" },
+        );
+      });
+    }
+    const big = o.querySelector(".album-big");
+    const bigImg = big.querySelector("img");
+    const grid = o.querySelector(".album-grid");
+    let current = 0;
+    const show = (k, dir = 0) => {
+      current = (k + a.photos.length) % a.photos.length;
+      const p = a.photos[current];
+      bigImg.src = `/api/gallery/${p.id}/image`;
+      bigImg.alt = `${a.title}, photo ${current + 1}`;
+      big.querySelector(".album-count").textContent = `${current + 1} of ${a.photos.length}`;
+      if (!still && dir)
+        bigImg.animate(
+          [{ transform: `translateX(${dir * 120}px) rotateY(${dir * -35}deg) scale(.9)`, opacity: 0 }, { transform: "none", opacity: 1 }],
+          { duration: 460, easing: "cubic-bezier(.2,.8,.2,1)" },
+        );
+    };
+    const openPhoto = (k) => {
+      const thumb = thumbs[k].getBoundingClientRect();
+      grid.hidden = true;
+      big.hidden = false;
+      show(k);
+      if (!still) {
+        const end = bigImg.getBoundingClientRect();
+        const [ex, ey] = centre(end);
+        const [sx, sy] = centre(thumb);
+        bigImg.animate(
+          [
+            { transform: `translate(${sx - ex}px,${sy - ey}px) scale(${thumb.width / Math.max(end.width, 1)})`, borderRadius: "10px" },
+            { transform: "none", borderRadius: "14px" },
+          ],
+          { duration: 520, easing: "cubic-bezier(.2,.8,.2,1)" },
+        );
+      }
+      big.querySelector("button").focus();
+    };
+    const close = () => {
+      const done = () => o.remove();
+      if (still || !fromEl.isConnected) return done();
+      const back = (grid.hidden ? [bigImg] : thumbs).map((t, i, list) => {
+        const [tx, ty] = centre(t.getBoundingClientRect());
+        return t.animate(
+          [{ transform: "none", opacity: 1 }, { transform: `translate(${fx - tx}px,${fy - ty}px) rotate(${i % 2 ? 12 : -12}deg) scale(.3)`, opacity: 0 }],
+          { duration: 380, delay: (list.length - i) * 30, easing: "cubic-bezier(.6,0,.8,.4)", fill: "forwards" },
+        ).finished;
+      });
+      o.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 480, delay: 120, fill: "forwards" });
+      Promise.all(back).then(done, done);
+    };
+    thumbs.forEach((t) => (t.onclick = () => openPhoto(Number(t.dataset.k))));
+    o.querySelector(".album-close").onclick = close;
+    o.onclick = (e) => e.target === o && close();
+    o.onkeydown = (e) => {
+      if (e.key === "Escape") {
+        // Escape steps back: from one photo to all photos, then closes.
+        if (grid.hidden) {
+          big.hidden = true;
+          grid.hidden = false;
+        } else close();
+        return;
+      }
+      if (!grid.hidden) return;
+      if (e.key === "ArrowRight") show(current + 1, 1);
+      if (e.key === "ArrowLeft") show(current - 1, -1);
+    };
+    big.querySelectorAll("[data-nav]").forEach(
+      (b) =>
+        (b.onclick = () => {
+          const nav = b.dataset.nav;
+          if (nav === "back") {
+            big.hidden = true;
+            grid.hidden = false;
+          } else if (nav === "prev") show(current - 1, -1);
+          else if (nav === "next") show(current + 1, 1);
+          else
+            busy(b, async () => {
+              if (!confirm("Remove this photo for everyone?")) return;
+              await api(`/admin/gallery/${a.photos[current].id}`, undefined, "DELETE");
+              o.remove();
+              await render();
+            });
+        }),
     );
-    document.querySelectorAll("dialog [data-k]").forEach(
-      (b) => (b.onclick = () => openPhoto(a, Number(b.dataset.k))),
-    );
-  };
-  const openPhoto = (a, k) => {
-    const p = a.photos[k];
-    viewDialog(
-      `${a.title} · ${k + 1} of ${a.photos.length}`,
-      `<img class="gallery-full" src="/api/gallery/${p.id}/image" alt="${esc(p.title)}"><div class="actions spaced"><button class="secondary" id="ph-back">All photos</button>${a.photos.length > 1 ? '<button class="secondary" id="ph-prev">← Previous</button><button class="secondary" id="ph-next">Next →</button>' : ""}${manage ? '<button class="ghost" id="photo-del">Remove photo</button>' : ""}</div><p class="muted">${p.posted_by_name ? `Posted by ${esc(p.posted_by_name)}` : ""}</p>`,
-    );
-    const n = a.photos.length;
-    document.querySelector("#ph-back").onclick = () => openAlbum(a);
-    document.querySelector("#ph-prev")?.addEventListener("click", () => openPhoto(a, (k + n - 1) % n));
-    document.querySelector("#ph-next")?.addEventListener("click", () => openPhoto(a, (k + 1) % n));
-    document.querySelector("#photo-del")?.addEventListener("click", (e) =>
-      busy(e.target, async () => {
-        if (!confirm("Remove this photo for everyone?")) return;
-        await api(`/admin/gallery/${p.id}`, undefined, "DELETE");
-        document.querySelector("dialog")?.remove();
-        await render();
-      }),
-    );
+    o.querySelector(".album-close").focus();
   };
   card.querySelectorAll("[data-album]").forEach(
-    (b) => (b.onclick = () => openAlbum(albums[Number(b.dataset.album)])),
+    (b) => (b.onclick = () => openAlbum(albums[Number(b.dataset.album)], b)),
   );
 
   // Several photos of one event can be posted together; they share the title and date.
