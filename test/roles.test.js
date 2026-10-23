@@ -176,3 +176,31 @@ test("standard HR roles are added in one step and work like any role", async (t)
   // Everything at once adds the rest.
   assert.equal((await call("/admin/roles/templates", {}, owner)).data.created, list.length - 2);
 });
+
+test("saving an employee does not get stuck: shifts close, teams move, admins may change themselves", async (t) => {
+  const { db, call, owner, add } = await world(t);
+  const boss = await add("boss");
+  const lead = await add("lead", { manager_id: boss.id });
+  const a = await add("a", { manager_id: lead.id });
+  const b = await add("b", { manager_id: lead.id });
+  // lead is punched in right now
+  const now = new Date().toISOString();
+  const site = (await call("/admin/workplaces", { name: "Office", latitude: 26.9, longitude: 75.8, radius: 150, max_accuracy: 50 }, owner)).data.id;
+  await db
+    .prepare("INSERT INTO shifts(user_id,workplace_id,workplace_name,site_latitude,site_longitude,radius,max_accuracy,in_at,in_latitude,in_longitude,in_accuracy) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
+    .run(lead.id, site, "Office", 26.9, 75.8, 150, 50, now, 26.9, 75.8, 10);
+
+  const off = await call(`/admin/employees/${lead.id}`, { active: false }, owner, "PATCH");
+  assert.equal(off.status, 200, JSON.stringify(off.data));
+  const shift = await db.prepare("SELECT out_at FROM shifts WHERE user_id=?").get(lead.id);
+  assert.ok(shift.out_at, "the open shift was closed");
+  const managers = await db.prepare("SELECT manager_id FROM users WHERE id IN (?,?)").all(a.id, b.id);
+  assert.deepEqual(managers.map((m) => m.manager_id), [boss.id, boss.id], "the team moved up to lead's manager");
+
+  // A company's only admin cannot remove themselves; with a second admin they can.
+  const adm = await add("adm", { role: "admin" });
+  const self = (body) => call(`/admin/employees/${adm.id}`, body, adm.token, "PATCH");
+  assert.equal((await self({ role: "hr" })).status, 409);
+  await add("adm2", { role: "admin" });
+  assert.equal((await self({ role: "hr" })).status, 200);
+});

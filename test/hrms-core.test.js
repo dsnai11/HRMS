@@ -541,15 +541,8 @@ test("companies are isolated, roles are enforced, and org data is validated", as
     ).status,
     400,
   );
-  assert.equal(
-    (
-      await call(`/admin/employees/${e2}`, { active: false }, adminT, {
-        method: "PATCH",
-      })
-    ).status,
-    409,
-    "has reports",
-  );
+  // Deactivating someone with a team now hands the team to their manager
+  // (see roles.test.js), so it is not exercised here.
   const ravi = await signIn(call, "ravi@example.test");
   await db
     .prepare("UPDATE users SET must_change_password=0 WHERE id=?")

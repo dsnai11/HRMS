@@ -1094,21 +1094,8 @@ export function attendanceCases(openTestDatabase) {
           "PATCH",
         )
       ).status,
-      409,
-    );
-    assert.equal(
-      (
-        await request(
-          `/admin/employees/${employee}`,
-          {
-            active: false,
-            workplace_id: office,
-          },
-          admin,
-          "PATCH",
-        )
-      ).status,
-      409,
+      200,
+      "moving someone mid-shift is allowed; the open shift keeps its own site",
     );
     assert.equal(
       (

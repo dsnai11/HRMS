@@ -334,16 +334,23 @@ export function registerEmployees(router, app) {
         set.role = b.role;
         set.custom_role_id = await customRoleId(b.role, b, companyId);
       }
+      // Changing your own role or switching yourself off is fine while another
+      // administrator remains to manage the company.
       if (
         id === user.id &&
         (set.active === 0 ||
           (set.role &&
             (set.role !== user.role ||
-              (set.custom_role_id ?? null) !== (user.custom_role_id ?? null))))
+              (set.custom_role_id ?? null) !== (user.custom_role_id ?? null)))) &&
+        !(await db
+          .prepare(
+            "SELECT id FROM users WHERE company_id=? AND active=1 AND role='admin' AND id<>? LIMIT 1",
+          )
+          .get(companyId, id))
       )
         throw new HttpError(
           409,
-          "You cannot change your own role or deactivate yourself.",
+          "You are the only administrator. Make someone else an admin first, then change your own account.",
         );
       Object.assign(set, profileValues(b), await references(b, companyId));
       if (set.branch_id !== undefined && !inBranchScope(user, set.branch_id))
@@ -372,33 +379,48 @@ export function registerEmployees(router, app) {
         await checkManager(set.manager_id, id, companyId);
       }
       if (b.password !== undefined) password(b.password);
+      // Moving someone who is punched in is fine: today's shift keeps the workplace it
+      // started at. Switching someone off closes an open shift now and hands their
+      // team to their own manager, instead of refusing.
       const leaving = set.active === 0 && target.active;
-      const moving =
-        "workplace_id" in set && set.workplace_id !== target.workplace_id;
-      if (
-        (leaving || moving) &&
-        (await db
-          .prepare("SELECT id FROM shifts WHERE user_id=? AND out_at IS NULL")
-          .get(id))
-      )
-        throw new HttpError(
-          409,
-          "Employee must punch out before deactivation or reassignment.",
-        );
-      if (
-        leaving &&
-        (await db
-          .prepare(
-            "SELECT id FROM users WHERE manager_id=? AND active=1 LIMIT 1",
-          )
-          .get(id))
-      )
-        throw new HttpError(
-          409,
-          "Reassign this person's direct reports before deactivating them.",
-        );
+      const openShift = leaving
+        ? await db
+            .prepare("SELECT * FROM shifts WHERE user_id=? AND out_at IS NULL")
+            .get(id)
+        : null;
+      const team = leaving
+        ? await db
+            .prepare("SELECT id FROM users WHERE manager_id=? AND active=1")
+            .all(id)
+        : [];
       const keys = Object.keys(set);
       await transaction(async () => {
+        if (openShift) {
+          const at = new Date(app.clock()).toISOString();
+          const early =
+            openShift.required_out_at && at < openShift.required_out_at;
+          await db
+            .prepare(
+              "UPDATE shifts SET out_at=?,day_type=?,half_day_reasons=? WHERE id=? AND out_at IS NULL",
+            )
+            .run(
+              at,
+              early ? "half_day" : "full_day",
+              early ? JSON.stringify(["left_early"]) : "[]",
+              openShift.id,
+            );
+          await audit("shift_closed_on_deactivation", { id: openShift.id, employeeId: id });
+        }
+        if (team.length) {
+          await db
+            .prepare("UPDATE users SET manager_id=? WHERE manager_id=? AND active=1")
+            .run(target.manager_id ?? null, id);
+          await audit("team_reassigned_on_deactivation", {
+            from: id,
+            to: target.manager_id ?? null,
+            people: team.length,
+          });
+        }
         if (keys.length)
           await db
             .prepare(
