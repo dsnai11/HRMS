@@ -1,4 +1,4 @@
-import { HttpError, integer, oneOf } from "./http.js";
+import { HttpError, csvCell, integer, oneOf } from "./http.js";
 
 // Reports emailed on a schedule: HR picks a report, how often, and who receives it.
 // An hourly job sends each one once on its day, after 8 in the morning.
@@ -60,6 +60,46 @@ async function summary(app, companyId, report, today) {
   ];
 }
 
+// The spreadsheet sent with each report: the summary lines, then the detail behind them.
+export async function reportCsv(app, companyId, report, today, lines) {
+  const { db } = app;
+  const rows = [["Report", lines[0]], ...lines.slice(1).map((l) => ["", l]), []];
+  if (report === "attendance_leave") {
+    rows.push(["Employee code", "Name", "Department", "Today"]);
+    const people = await db
+      .prepare(
+        `SELECT u.employee_code,u.name,d.name department,
+           (SELECT MIN(s.in_at) FROM shifts s WHERE s.user_id=u.id AND substr(s.in_at,1,10)=?) first_in,
+           (SELECT t.name FROM leave_days x JOIN leave_requests r ON r.id=x.request_id JOIN leave_types t ON t.id=r.leave_type_id
+              WHERE x.user_id=u.id AND x.day=? AND r.status='approved' LIMIT 1) leave_type
+         FROM users u LEFT JOIN departments d ON d.id=u.department_id
+         WHERE u.company_id=? AND u.active=1 AND u.role<>'super_admin' ORDER BY d.name,u.name`,
+      )
+      .all(today, today, companyId);
+    for (const p of people)
+      rows.push([
+        p.employee_code,
+        p.name,
+        p.department,
+        p.first_in
+          ? `Present from ${new Intl.DateTimeFormat("en-IN", { timeZone: app.timezone, hour: "2-digit", minute: "2-digit" }).format(new Date(p.first_in))}`
+          : p.leave_type
+            ? `On leave: ${p.leave_type}`
+            : "Not punched in",
+      ]);
+  } else {
+    rows.push(["Department", "Headcount"]);
+    for (const d of await db
+      .prepare(
+        `SELECT COALESCE(d.name,'No department') name,COUNT(*) n FROM users u LEFT JOIN departments d ON d.id=u.department_id
+         WHERE u.company_id=? AND u.active=1 AND u.role<>'super_admin' GROUP BY 1 ORDER BY 2 DESC`,
+      )
+      .all(companyId))
+      rows.push([d.name, d.n]);
+  }
+  return "\ufeff" + rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
+}
+
 const due = (s, today) => {
   if (s.last_sent_on === today) return false;
   const d = new Date(`${today}T00:00:00Z`);
@@ -88,14 +128,34 @@ export async function sendScheduledReports(app) {
   for (const s of rows) {
     if (!due(s, today)) continue;
     const lines = await summary(app, s.company_id, s.report, today);
-    await app.notify(JSON.parse(s.recipients), {
+    const to = JSON.parse(s.recipients);
+    await app.notify(to, {
       companyId: s.company_id,
       kind: "report",
       title: lines[0],
       body: lines.slice(1).join("\n"),
       link: "commandcentre",
-      email: true,
     });
+    // The email carries the same summary and a spreadsheet with the detail.
+    const csv = await reportCsv(app, s.company_id, s.report, today, lines);
+    for (const id of to) {
+      const u = await app.db
+        .prepare("SELECT email FROM users WHERE id=? AND active=1")
+        .get(id);
+      if (u?.email)
+        await app.notify.mail(
+          s.company_id,
+          u.email,
+          lines[0],
+          `${lines.slice(1).join("\n")}\n\nThe attached spreadsheet has the detail.`,
+          [
+            {
+              filename: `${s.report}-${today}.csv`,
+              content: Buffer.from(csv).toString("base64"),
+            },
+          ],
+        );
+    }
     await app.db
       .prepare("UPDATE report_schedules SET last_sent_on=? WHERE id=?")
       .run(today, s.id);

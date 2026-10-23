@@ -60,7 +60,7 @@ async function world(t) {
 }
 
 import { sendApprovalReminders } from "../server/approval-chain.js";
-import { sendScheduledReports } from "../server/scheduled-reports.js";
+import { reportCsv, sendScheduledReports } from "../server/scheduled-reports.js";
 
 test("leave passes through a multi-level chain, with reminders and escalation", async (t) => {
   const { db, call, owner, add, app, tick } = await world(t);
@@ -145,6 +145,11 @@ test("command centre figures and scheduled report emails", async (t) => {
   tick(24); // Tuesday: not due
   assert.equal(await sendScheduledReports(app), 0);
   assert.equal((await call(`/admin/report-schedules/${s.data.id}`, undefined, owner, "DELETE")).status, 200);
+  const csv = await reportCsv(app, 1, "command_centre", "2026-11-02", ["HR Command Centre, 2026-11-02", "Headcount: 2"]);
+  assert.match(csv, /"Department","Headcount"/);
+  assert.match(csv, /"No department","2"/);
+  const att = await reportCsv(app, 1, "attendance_leave", "2026-11-02", ["Attendance and leave, 2026-11-02"]);
+  assert.match(att, /"HR","","Not punched in"/);
 });
 
 test("360 feedback rounds are anonymous and hide small groups", async (t) => {
