@@ -92,7 +92,7 @@ export function registerAttendance(router, app) {
     if (
       typeof value !== "string" ||
       !/^[A-Za-z0-9+/=]+$/.test(value) ||
-      value.length > 240000
+      value.length > 2800000
     )
       throw new HttpError(400, "The selfie is not valid.", "selfie_invalid");
     if (Buffer.from(value.slice(0, 8), "base64")[0] !== 0xff)
@@ -101,7 +101,8 @@ export function registerAttendance(router, app) {
   }
   router.post("/api/punch", async ({ req, user, body, send }) => {
     rateLimit(`punch:${user.id}`, 60);
-    const b = await body(300000);
+    // Phones on app versions before the selfie was shrunk send a full camera photo (2 MB+).
+    const b = await body(3000000);
     if (!["in", "out"].includes(b.action))
       throw new HttpError(400, "Choose punch-in or punch-out.");
     const signals = parseSignals(b.signals);

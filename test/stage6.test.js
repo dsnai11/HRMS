@@ -557,9 +557,10 @@ test("selfie at punch is required when the company asks, stored and viewable by 
     400,
     "must be a JPEG",
   );
+  // A full-size camera photo, as phones on older app versions send it.
   const jpeg = Buffer.concat([
     Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
-    Buffer.alloc(2000, 7),
+    Buffer.alloc(1500000, 7),
   ]).toString("base64");
   const ok = await punch(emp, { selfie: jpeg });
   assert.equal(ok.status, 200, JSON.stringify(ok.data));
@@ -569,7 +570,7 @@ test("selfie at punch is required when the company asks, stored and viewable by 
   );
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("content-type"), "image/jpeg");
-  assert.equal((await res.arrayBuffer()).byteLength, 2004);
+  assert.equal((await res.arrayBuffer()).byteLength, 1500004);
   assert.equal(
     (
       await fetch(`${w.base}/admin/shifts/${ok.data.id}/selfie?kind=out`, {

@@ -28,6 +28,7 @@ import * as Device from "expo-device";
 import * as Crypto from "expo-crypto";
 import Constants from "expo-constants";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import * as Notifications from "expo-notifications";
 import More, { MENU, type Section } from "./More";
 type User = {
@@ -168,14 +169,32 @@ export default function Attendance() {
     });
   }
   async function captureSelfie() {
-    const photo = await cameraRef.current?.takePictureAsync({
-      quality: 0.25,
-      base64: true,
-      skipProcessing: true,
-      shutterSound: false,
-    });
-    setSelfieOpen(false);
-    selfieResolver.current?.(photo?.base64 ?? null);
+    let base64: string | null = null;
+    try {
+      const photo = await cameraRef.current?.takePictureAsync({
+        quality: 0.7,
+        skipProcessing: true,
+        shutterSound: false,
+      });
+      // A full-resolution camera photo is several MB; 480 px wide is plenty to see a face
+      // and keeps the punch small (about 30-60 KB).
+      if (photo?.uri) {
+        const image = await ImageManipulator.manipulate(photo.uri)
+          .resize({ width: 480 })
+          .renderAsync();
+        base64 =
+          (
+            await image.saveAsync({
+              compress: 0.6,
+              format: SaveFormat.JPEG,
+              base64: true,
+            })
+          ).base64 ?? null;
+      }
+    } finally {
+      setSelfieOpen(false);
+      selfieResolver.current?.(base64);
+    }
   }
   function cancelSelfie() {
     setSelfieOpen(false);
