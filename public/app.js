@@ -412,7 +412,11 @@ function shell() {
 function heading(title, subtitle, action = "") {
   return `<div class="heading"><div><div class="eyebrow">People operations</div><h1>${esc(title)}</h1><p class="muted">${esc(subtitle)}</p></div>${action}</div>`;
 }
-const reasonLabels = { late_in: "late in", early_out: "left early" };
+const reasonLabels = {
+  late_in: "late in",
+  early_out: "left early",
+  missed_out: "no punch-out",
+};
 function dayCell(s) {
   const reasons = JSON.parse(s.half_day_reasons || "[]")
     .map((r) => reasonLabels[r] || r)

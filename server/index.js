@@ -7,7 +7,7 @@ import { createRouter } from "./router.js";
 import { can } from "./rbac.js";
 import { loadPolicy } from "./policy.js";
 import { registerAuth } from "./routes/auth.js";
-import { registerAttendance } from "./routes/attendance.js";
+import { registerAttendance, scheduleStaleShiftClose } from "./routes/attendance.js";
 import { registerOrg } from "./routes/org.js";
 import { registerEmployees } from "./routes/employees.js";
 import { registerReports } from "./routes/reports.js";
@@ -413,6 +413,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   scheduleRetention(db);
   scheduleProbationReminders(app);
   scheduleApprovalReminders(app);
+  scheduleStaleShiftClose(app);
   scheduleReports(app);
   scheduleLearningReminders(app);
   scheduleCompOffExpiry(app);

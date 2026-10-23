@@ -17,6 +17,43 @@ export async function finishedToday(app, userId, nowMs) {
     : null;
 }
 
+// A shift nobody punched out of, from an earlier day, would otherwise block every later
+// punch (and keep checking the old workplace). It closes as a missed punch-out with no
+// hours; the employee can ask for a missed-punch correction. 20 hours keeps a night
+// shift that runs past midnight open.
+export async function closeStaleShifts(app, userId = null) {
+  const nowMs = app.clock();
+  const today = app.dayOf(new Date(nowMs).toISOString());
+  const open = await app.db
+    .prepare(
+      `SELECT s.id,s.user_id,s.in_at,u.company_id FROM shifts s JOIN users u ON u.id=s.user_id WHERE s.out_at IS NULL AND s.in_at<?${userId ? " AND s.user_id=?" : ""}`,
+    )
+    .all(new Date(nowMs - 20 * 3600000).toISOString(), ...(userId ? [userId] : []));
+  for (const s of open) {
+    if (app.dayOf(s.in_at) === today) continue;
+    const r = await app.db
+      .prepare(
+        "UPDATE shifts SET out_at=in_at,day_type='half_day',half_day_reasons=? WHERE id=? AND out_at IS NULL",
+      )
+      .run(JSON.stringify(["missed_out"]), s.id);
+    if (r.changes)
+      await app.audit(
+        null,
+        "shift_closed_missed_out",
+        { id: s.id, employeeId: s.user_id },
+        s.company_id,
+      );
+  }
+}
+export function scheduleStaleShiftClose(app) {
+  const run = () =>
+    closeStaleShifts(app).catch((e) =>
+      console.error("Closing missed punch-outs failed:", e.message),
+    );
+  void run();
+  setInterval(run, 3600000).unref();
+}
+
 async function recordPunchEvent(app, user, event) {
   const finite = (n) => (Number.isFinite(n) ? n : null);
   await app.db
@@ -129,6 +166,7 @@ export function registerAttendance(router, app) {
             : "This phone is no longer authorised. Contact your administrator.",
           `device_${device.status}`,
         );
+      await closeStaleShifts(app, user.id);
       const result = await transaction(async () => {
         const nowMs = clock();
         const open = await db

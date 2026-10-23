@@ -851,6 +851,32 @@ export function attendanceCases(openTestDatabase) {
     assert.equal(nextDay.status, 200);
     assert.equal((await me()).data.openShift.id, nextDay.data.id);
     assert.equal((await me()).data.todayShift, null);
+    // Forgot to punch out, then moved to another workplace: the old shift no longer
+    // blocks. Still open late at night (a night shift could run past midnight)...
+    nowMs = Date.parse("2026-10-21T02:00:00+05:30");
+    assert.equal((await me()).data.openShift.id, nextDay.data.id);
+    const ho = (
+      await call(
+        "/admin/workplaces",
+        { name: "HO", latitude: 28, longitude: 77, radius: 150, max_accuracy: 50 },
+        admin,
+      )
+    ).data.id;
+    await call(`/admin/employees/${id}`, { workplace_id: ho }, admin, {}, "PATCH");
+    // ...but the next morning it is closed as a missed punch-out with no hours.
+    nowMs = Date.parse("2026-10-21T09:20:00+05:30");
+    assert.equal((await me()).data.openShift, null);
+    const closed = (await call("/shifts", undefined, reg.data.token, headers)).data.find(
+      (s) => s.id === nextDay.data.id,
+    );
+    assert.equal(closed.out_at, closed.in_at);
+    assert.deepEqual(JSON.parse(closed.half_day_reasons), ["missed_out"]);
+    const atHo = await punch("in", "2026-10-21T09:30:00+05:30", {
+      latitude: 28,
+      longitude: 77,
+    });
+    assert.equal(atHo.status, 200, JSON.stringify(atHo.data));
+    assert.equal(atHo.data.workplace_name, "HO");
   });
   test("attendance API enforces roles, assignment, same-site punch-out, sessions and reports", async (t) => {
     const db = await openTestDatabase();

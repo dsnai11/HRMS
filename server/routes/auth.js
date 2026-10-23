@@ -9,7 +9,7 @@ import {
 import { HttpError, string, password, email, clientIp } from "../http.js";
 import { permissionsOf } from "../rbac.js";
 import { bindDevice, deviceFromHeaders } from "../devices.js";
-import { finishedToday } from "./attendance.js";
+import { closeStaleShifts, finishedToday } from "./attendance.js";
 import { pendingApprovals } from "../approval.js";
 import { checkSecondFactor } from "./security.js";
 
@@ -210,7 +210,8 @@ export function registerAuth(router, app) {
               .get(user.workplace_id)
           : null,
         openShift:
-          (await db
+          (await closeStaleShifts(app, user.id),
+          await db
             .prepare("SELECT * FROM shifts WHERE user_id=? AND out_at IS NULL")
             .get(user.id)) || null,
         todayShift: await finishedToday(app, user.id, clock()),
