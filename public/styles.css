@@ -2473,3 +2473,14 @@ dialog .gallery-full {
 .toolbar { display: flex; gap: 8px; margin: 12px 0 4px; flex-wrap: wrap; }
 .toolbar input[type="search"] { flex: 1 1 260px; min-width: 0; }
 tr.selected td { background: color-mix(in srgb, var(--brand, #ac051b) 7%, transparent); }
+
+/* Custom reports */
+.cr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.cr-cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 4px 12px; }
+.cr-cols label.check { font-weight: 400; }
+.cr-filter { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.2fr) auto; gap: 8px; margin-bottom: 8px; align-items: center; }
+.cr-saved { display: flex; flex-wrap: wrap; gap: 8px; }
+.cr-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 6px 4px 12px; }
+.cr-chip small { color: var(--muted); }
+.actions .spacer { flex: 1; }
+@media (max-width: 640px) { .cr-filter { grid-template-columns: 1fr 1fr; } }

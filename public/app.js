@@ -315,6 +315,10 @@ function navGroups() {
       [
         has("insights.read") && ["commandcentre", "HR Command Centre"],
         has("insights.read") && ["insights", "Insights"],
+        (has("employees.read") || has("attendance.read") || has("leave.read") || has("payroll.read")) && [
+          "customreports",
+          "Custom reports",
+        ],
         has("employees.read") && ["employees", "Employees"],
         has("org.read") && ["organization", "Organization"],
         has("attendance.read") && ["attendance", "Attendance records"],
@@ -471,6 +475,7 @@ async function render() {
     if (page === "myclaims") return await myClaimsPage(id);
     if (page === "myemployment") return await myEmploymentPage(id);
     if (page === "insights") return await insightsPage(id);
+    if (page === "customreports") return await customReportsPage(id);
     if (page === "performance") return await performancePage(id);
     if (page === "learning") return await learningPage(id);
     if (page === "requisitions") return await requisitionsPage(id);

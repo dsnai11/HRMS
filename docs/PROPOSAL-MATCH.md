@@ -83,7 +83,7 @@ Also in the phone app (Messages and Ask Laxmi). Chat is text only (no files, no 
 
 ## Module 12: Reports, analytics and compliance
 
-Done: the HR Command Centre (live headcount by department and branch, joiners and leavers this month, monthly and 12-month attrition, open positions, attendance and leave today, workforce mix by gender, age and service), Insights dashboards, payroll cost report by department, cost centre, business unit, branch, grade and employment type against budget, statutory exports (ECR, ESIC, PF and ESI challans, PT, LWF), tax statements, gratuity liability, activity log, and reports emailed on a schedule (daily, weekly or monthly).
+Done: the HR Command Centre (live headcount by department and branch, joiners and leavers this month, monthly and 12-month attrition, open positions, attendance and leave today, workforce mix by gender, age and service), Insights dashboards, payroll cost report by department, cost centre, business unit, branch, grade and employment type against budget, statutory exports (ECR, ESIC, PF and ESI challans, PT, LWF), tax statements, gratuity liability, activity log, reports emailed on a schedule (daily, weekly or monthly), and **custom reports**: HR picks employee, attendance, leave or payroll data, the columns, filters, sort and an optional summary (count and totals by any column), views or downloads it as CSV, and saves it to run again. Each data set needs its own right, and branch-limited roles see only their branches.
 
 ## Configuration and customisation scope
 

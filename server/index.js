@@ -40,6 +40,7 @@ import { registerEmployeeDetails } from "./routes/employee-details.js";
 import { registerGallery } from "./routes/gallery.js";
 import { registerDownloadLinks } from "./routes/download-links.js";
 import { registerRms } from "./routes/rms.js";
+import { registerReportBuilder } from "./routes/report-builder.js";
 import {
   registerScheduledReports,
   scheduleReports,
@@ -88,6 +89,7 @@ const STATIC = {
   "/timeplus.js": ["timeplus.js", "text/javascript"],
   "/ess-plus.js": ["ess-plus.js", "text/javascript"],
   "/chat.js": ["chat.js", "text/javascript"],
+  "/reports.js": ["reports.js", "text/javascript"],
   "/join.html": ["join.html", "text/html"],
   "/join.js": ["join.js", "text/javascript"],
   "/careers.html": ["careers.html", "text/html"],
@@ -220,6 +222,7 @@ export function createApp({
     registerGallery,
     registerDownloadLinks,
     registerRms,
+    registerReportBuilder,
   ])
     register(router, app);
 
