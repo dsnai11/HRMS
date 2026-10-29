@@ -121,7 +121,8 @@ export async function computeMuster(
         continue;
       }
       const s = shiftOf.get(`${p.id}|${date}`);
-      const present = s ? (s.day_type === "half_day" ? 0.5 : 1) : 0;
+      const present =
+        !s || s.day_type === "absent" ? 0 : s.day_type === "half_day" ? 0.5 : 1;
       const slots = leaveOf.get(`${p.id}|${date}`) ?? [];
       const paidLeave = slots.filter((x) => x).length * 0.5,
         unpaidLeave = slots.filter((x) => !x).length * 0.5;

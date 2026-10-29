@@ -1,8 +1,9 @@
-import { HttpError } from "../http.js";
+import { HttpError, string } from "../http.js";
 import { checkLocation } from "../geo.js";
 import { assessPunch, parseSignals } from "../risk.js";
 import { evaluatePunchIn, halfDayReasons } from "../policy.js";
 import { deviceFromHeaders } from "../devices.js";
+import { submitCorrection } from "./regularization.js";
 
 // One shift per local day: the most recent finished shift that started today.
 export async function finishedToday(app, userId, nowMs) {
@@ -78,6 +79,18 @@ async function recordPunchEvent(app, user, event) {
 
 export function registerAttendance(router, app) {
   const { db, transaction, rateLimit, clock, timezone } = app;
+  const localTime = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: timezone,
+  });
+  const pendingCorrection = (userId, date) =>
+    db
+      .prepare(
+        "SELECT id FROM regularizations WHERE user_id=? AND date=? AND status='pending'",
+      )
+      .get(userId, date);
 
   router.get("/api/shifts", async ({ user, send }) =>
     send(
@@ -184,6 +197,28 @@ export function registerAttendance(router, app) {
         const target = open || (b.action === "out" ? done : null);
         if (b.action === "out" && !target)
           throw new HttpError(409, "There is no active shift to end.");
+        // OD (on duty): punched anywhere, no workplace boundary; the day waits for approval.
+        const od = b.action === "in" ? Boolean(b.od) : target.od_purpose != null;
+        const purpose =
+          b.action === "in" && od ? string(b.od?.purpose, "Purpose of the OD", 200) : null;
+        if (od && b.action === "in") {
+          if (!user.od_punch)
+            throw new HttpError(
+              403,
+              "OD punch is not switched on for you. Ask HR.",
+              "od_not_allowed",
+            );
+          if (await pendingCorrection(user.id, app.dayOf(new Date(nowMs).toISOString())))
+            throw new HttpError(
+              409,
+              "You already have an attendance request waiting for today. Cancel it before an OD punch.",
+            );
+        }
+        if (od && b.action === "out" && !open)
+          throw new HttpError(
+            409,
+            "Your OD punch-out is already sent for approval.",
+          );
         const site = target
           ? {
               id: target.workplace_id,
@@ -202,7 +237,13 @@ export function registerAttendance(router, app) {
             "Ask your administrator to assign a workplace.",
           );
         await checkAppVersion(user.company_id, b.signals?.appVersion);
-        checkLocation(b.location, site, nowMs);
+        try {
+          checkLocation(b.location, od ? { ...site, radius: Infinity } : site, nowMs);
+        } catch (e) {
+          if (e.code === "outside_geofence" && b.action === "in" && user.od_punch)
+            e.message += " Working outside today? Use OD Punch In.";
+          throw e;
+        }
         const selfie = await readSelfie(b.selfie, user.company_id);
         const { latitude, longitude, accuracy } = b.location;
         const risk = assessPunch({
@@ -230,7 +271,7 @@ export function registerAttendance(router, app) {
             (
               await db
                 .prepare(
-                  "INSERT INTO shifts(user_id,workplace_id,workplace_name,site_latitude,site_longitude,radius,max_accuracy,in_at,in_latitude,in_longitude,in_accuracy,required_out_at,day_type,half_day_reasons) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  "INSERT INTO shifts(user_id,workplace_id,workplace_name,site_latitude,site_longitude,radius,max_accuracy,in_at,in_latitude,in_longitude,in_accuracy,required_out_at,day_type,half_day_reasons,source,od_purpose) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 )
                 .run(
                   user.id,
@@ -252,6 +293,8 @@ export function registerAttendance(router, app) {
                       requiredOutAt: rules.requiredOutAt,
                     }),
                   ),
+                  od ? "od_punch" : "punch",
+                  purpose,
                 )
             ).lastInsertRowid,
           );
@@ -276,6 +319,22 @@ export function registerAttendance(router, app) {
               JSON.stringify(reasons),
               id,
             );
+          if (od) {
+            const date = app.dayOf(target.in_at);
+            if (await pendingCorrection(user.id, date))
+              throw new HttpError(
+                409,
+                "You already have an attendance request waiting for that day. Cancel it, then punch out again.",
+              );
+            await submitCorrection(app, user, {
+              kind: "on_duty",
+              date,
+              inTime: localTime.format(new Date(target.in_at)),
+              outTime: localTime.format(new Date(nowMs)),
+              reason: `OD punch: ${target.od_purpose}`,
+              shiftId: id,
+            });
+          }
         }
         if (selfie)
           await db
@@ -299,6 +358,7 @@ export function registerAttendance(router, app) {
           shiftId: id,
           workplaceId: site.id,
           flags: risk.flags,
+          ...(od ? { od: true } : {}),
         });
         return await db.prepare("SELECT * FROM shifts WHERE id=?").get(id);
       });

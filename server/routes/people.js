@@ -12,7 +12,7 @@ import {
   string,
 } from "../http.js";
 import { passwordHash } from "../db.js";
-import { requireOwned, staffWith } from "../scope.js";
+import { branchScope, requireOwned, staffWith } from "../scope.js";
 import { can } from "../rbac.js";
 import { changeLetter } from "../letters.js";
 
@@ -549,6 +549,52 @@ export function registerPeople(router, app) {
         require_selfie: b.require_selfie ?? null,
         min_app_version: min,
       });
+      return send(200, { ok: true });
+    },
+  );
+  // ---- OD punch: who may punch on duty away from their workplace ------------------------------------
+  router.get(
+    "/api/admin/od-punch",
+    { perm: "attendance.read" },
+    async ({ user, companyId, send }) => {
+      const scope = branchScope(user);
+      return send(
+        200,
+        (
+          await db
+            .prepare(
+              `SELECT u.id,u.name,u.employee_code,b.name branch_name,u.od_punch FROM users u LEFT JOIN branches b ON b.id=u.branch_id
+               WHERE u.company_id=? AND u.active=1 AND u.role<>'super_admin'${scope.sql} ORDER BY u.name,u.id`,
+            )
+            .all(companyId, ...scope.params)
+        ).map((p) => ({ ...p, od_punch: Boolean(p.od_punch) })),
+      );
+    },
+  );
+  router.patch(
+    "/api/admin/od-punch",
+    { perm: "employees.write" },
+    async ({ user, companyId, body, send, audit }) => {
+      const b = await body();
+      if (typeof b.allowed !== "boolean")
+        throw new HttpError(400, "Allowed must be true or false.");
+      if (!Array.isArray(b.user_ids) || !b.user_ids.length || b.user_ids.length > 500)
+        throw new HttpError(400, "Choose 1 to 500 people.");
+      const ids = [...new Set(b.user_ids.map((v) => integer(Number(v))))];
+      const scope = branchScope(user);
+      const found = await db
+        .prepare(
+          `SELECT u.id FROM users u WHERE u.company_id=? AND u.id IN (${ids.map(() => "?").join(",")})${scope.sql}`,
+        )
+        .all(companyId, ...ids, ...scope.params);
+      if (found.length !== ids.length)
+        throw new HttpError(404, "Employee not found.");
+      await db
+        .prepare(
+          `UPDATE users SET od_punch=? WHERE company_id=? AND id IN (${ids.map(() => "?").join(",")})`,
+        )
+        .run(b.allowed ? 1 : 0, companyId, ...ids);
+      await audit(b.allowed ? "od_punch_allowed" : "od_punch_removed", { userIds: ids });
       return send(200, { ok: true });
     },
   );

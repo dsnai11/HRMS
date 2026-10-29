@@ -29,13 +29,76 @@ const time = (v, label) => {
   return s;
 };
 
+// Records a correction and sends it to the first step of the company's correction chain.
+// An OD punch-out sends one too (shiftId set), for the shift it already recorded.
+export async function submitCorrection(
+  app,
+  user,
+  { kind, date, inTime, outTime, reason, shiftId = null },
+) {
+  const { db } = app;
+  const nowIso = new Date(app.clock()).toISOString();
+  let id;
+  try {
+    id = Number(
+      (
+        await db
+          .prepare(
+            "INSERT INTO regularizations(company_id,user_id,date,kind,in_time,out_time,reason,created_at,shift_id,from_punch) VALUES(?,?,?,?,?,?,?,?,?,?)",
+          )
+          .run(
+            user.company_id,
+            user.id,
+            date,
+            kind,
+            inTime,
+            outTime,
+            reason,
+            nowIso,
+            shiftId,
+            shiftId ? 1 : 0,
+          )
+      ).lastInsertRowid,
+    );
+  } catch (e) {
+    if (e?.code === "23505")
+      throw new HttpError(
+        409,
+        "You already have a pending correction for that date.",
+      );
+    throw e;
+  }
+  await app.audit(user, "regularization_requested", { id, kind, date, ...(shiftId ? { shiftId } : {}) });
+  const chain = await chainOf(db, user.company_id, "correction");
+  const step = Math.min(
+    await nextStep(db, user.company_id, user.id, chain, 0),
+    chain.length - 1,
+  );
+  await db
+    .prepare("UPDATE regularizations SET step=?,step_at=? WHERE id=?")
+    .run(step, nowIso, id);
+  await app.notify(
+    await stepApprovers(db, user.company_id, user.id, chain[step]),
+    {
+      companyId: user.company_id,
+      kind: "approval",
+      title: shiftId
+        ? `${user.name} punched OD on ${date}`
+        : `${user.name} asked to correct attendance for ${date}`,
+      body: `Waiting for: ${STEPS[chain[step]]}`,
+      link: "approvals",
+    },
+  );
+  return id;
+}
+
 export function registerRegularization(router, app) {
   const { db, transaction, clock, dayOf, timezone } = app;
   const nowIso = () => new Date(clock()).toISOString();
   const today = () => dayOf(nowIso());
   const SELECT = `SELECT r.*,u.name employee_name,u.employee_code FROM regularizations r JOIN users u ON u.id=r.user_id`;
 
-  router.post("/api/regularizations", async ({ user, body, send, audit }) => {
+  router.post("/api/regularizations", async ({ user, body, send }) => {
     const b = await body();
     const kind = oneOf(b.kind, "Type", KINDS);
     const date = isoDate(b.date, "Date");
@@ -60,7 +123,7 @@ export function registerRegularization(router, app) {
       const used = (
         await db
           .prepare(
-            "SELECT COUNT(*) n FROM regularizations WHERE user_id=? AND status IN ('pending','approved') AND substr(date,1,7)=?",
+            "SELECT COUNT(*) n FROM regularizations WHERE user_id=? AND status IN ('pending','approved') AND from_punch=0 AND substr(date,1,7)=?",
           )
           .get(user.id, monthOf(date))
       ).n;
@@ -80,54 +143,13 @@ export function registerRegularization(router, app) {
         409,
         "You have approved or pending leave for that whole day.",
       );
-    let id;
-    try {
-      id = Number(
-        (
-          await db
-            .prepare(
-              "INSERT INTO regularizations(company_id,user_id,date,kind,in_time,out_time,reason,created_at) VALUES(?,?,?,?,?,?,?,?)",
-            )
-            .run(
-              user.company_id,
-              user.id,
-              date,
-              kind,
-              inTime,
-              outTime,
-              reason,
-              nowIso(),
-            )
-        ).lastInsertRowid,
-      );
-    } catch (e) {
-      if (e?.code === "23505")
-        throw new HttpError(
-          409,
-          "You already have a pending correction for that date.",
-        );
-      throw e;
-    }
-    await audit("regularization_requested", { id, kind, date });
-    // Waits on the first step of the company's correction approval chain.
-    const chain = await chainOf(db, user.company_id, "correction");
-    const step = Math.min(
-      await nextStep(db, user.company_id, user.id, chain, 0),
-      chain.length - 1,
-    );
-    await db
-      .prepare("UPDATE regularizations SET step=?,step_at=? WHERE id=?")
-      .run(step, nowIso(), id);
-    await app.notify(
-      await stepApprovers(db, user.company_id, user.id, chain[step]),
-      {
-        companyId: user.company_id,
-        kind: "approval",
-        title: `${user.name} asked to correct attendance for ${date}`,
-        body: `Waiting for: ${STEPS[chain[step]]}`,
-        link: "approvals",
-      },
-    );
+    const id = await submitCorrection(app, user, {
+      kind,
+      date,
+      inTime,
+      outTime,
+      reason,
+    });
     return send(201, { id });
   });
 
@@ -178,6 +200,11 @@ export function registerRegularization(router, app) {
       if (!r) throw new HttpError(404, "Correction not found.");
       if (r.status !== "pending")
         throw new HttpError(409, `This correction is already ${r.status}.`);
+      if (r.from_punch)
+        throw new HttpError(
+          409,
+          "An OD punch cannot be withdrawn. Your manager will approve or reject it.",
+        );
       await db
         .prepare("UPDATE regularizations SET status='cancelled' WHERE id=?")
         .run(r.id);
@@ -188,6 +215,15 @@ export function registerRegularization(router, app) {
 
   // Applies an approved correction: creates or amends that day's shift.
   async function applyCorrection(r) {
+    // An OD punch already has its shift, with the real times and places.
+    if (r.from_punch) {
+      await db
+        .prepare(
+          "UPDATE shifts SET source='on_duty',day_type='full_day',half_day_reasons='[]' WHERE id=?",
+        )
+        .run(r.shift_id);
+      return r.shift_id;
+    }
     const person = await db
       .prepare("SELECT * FROM users WHERE id=?")
       .get(r.user_id);
@@ -346,7 +382,18 @@ export function registerRegularization(router, app) {
             `This correction is already ${fresh.status}.`,
           );
         const shiftId =
-          decision === "approved" ? await applyCorrection(r) : null;
+          decision === "approved"
+            ? await applyCorrection(r)
+            : r.from_punch
+              ? r.shift_id
+              : null;
+        // A rejected OD punch does not count as a day worked.
+        if (decision === "rejected" && r.from_punch)
+          await db
+            .prepare(
+              "UPDATE shifts SET source='od_rejected',day_type='absent' WHERE id=?",
+            )
+            .run(r.shift_id);
         await db
           .prepare(
             "UPDATE regularizations SET status=?,decided_by=?,decided_at=?,decision_note=?,shift_id=? WHERE id=?",

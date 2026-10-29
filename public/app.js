@@ -425,9 +425,13 @@ function dayCell(s) {
   const reasons = JSON.parse(s.half_day_reasons || "[]")
     .map((r) => reasonLabels[r] || r)
     .join(", ");
+  if (s.source === "od_punch")
+    return `<span class="pill">OD</span><small>${esc(s.od_purpose || "")}${s.out_at ? " · waiting for approval" : " · on duty now"}</small>`;
+  if (s.source === "od_rejected")
+    return `<span class="pill">Absent</span><small>OD not approved</small>`;
   const origin = {
     regularized: "corrected",
-    on_duty: "on duty",
+    on_duty: s.od_purpose ? `on duty (OD punch): ${esc(s.od_purpose)}` : "on duty",
     work_from_home: "work from home",
   }[s.source];
   if (origin && s.day_type)
@@ -550,6 +554,7 @@ async function render() {
         .querySelector("#add")
         ?.addEventListener("click", () => workplaceDialog());
       await selfieSettingCard(id);
+      await odPunchCard(id);
       await shiftPolicyCard(id);
       await rosterCard(id);
       await importCard(id);

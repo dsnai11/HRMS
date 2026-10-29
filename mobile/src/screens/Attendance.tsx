@@ -39,6 +39,7 @@ type User = {
   email?: string | null;
   employee_code?: string | null;
   designation?: string | null;
+  od_punch?: boolean;
 };
 type Shift = {
   id: number;
@@ -48,6 +49,8 @@ type Shift = {
   required_out_at?: string | null;
   day_type?: "full_day" | "half_day" | null;
   half_day_reasons?: string;
+  source?: string;
+  od_purpose?: string | null;
 };
 type Profile = {
   user: User;
@@ -126,6 +129,8 @@ export default function Attendance() {
   } | null>(null);
   const fixResolver = useRef<((ok: boolean) => void) | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  // OD (on duty) punch-in: the purpose typed on the punch screen.
+  const [odPurpose, setOdPurpose] = useState("");
   async function confirmPlace(
     position: Location.LocationObject,
     action: "in" | "out",
@@ -422,7 +427,9 @@ export default function Attendance() {
       await refresh();
       setMessage("Password updated.");
     });
-  const punch = (popup = false) =>
+  // od: an OD punch-in with this purpose. An OD shift's punch-out needs nothing extra:
+  // the server knows the shift is OD and skips the workplace boundary.
+  const punch = (popup = false, od?: string) =>
     run(async () => {
       const current = await api<Profile>("/me");
       setProfile(current);
@@ -500,6 +507,8 @@ export default function Attendance() {
       if (AppState.currentState !== "active")
         throw new Error("Keep the app open while recording attendance.");
       const action = ending ? "out" : "in";
+      if (od && action === "out")
+        throw new Error("You are already punched in today.");
       if (!(await confirmPlace(position, action))) return;
       // The server takes readings up to a minute old; take a new one after a long pause.
       if (Date.now() - position.timestamp > 40000)
@@ -509,6 +518,7 @@ export default function Attendance() {
       try {
         await api("/punch", {
           action,
+          ...(od ? { od: { purpose: od } } : {}),
           ...(selfie ? { selfie } : {}),
           location: {
             latitude: position.coords.latitude,
@@ -530,11 +540,17 @@ export default function Attendance() {
         throw e;
       }
       await refresh();
+      const odShift = od || ending?.source === "od_punch";
+      if (od) setOdPurpose("");
       Alert.alert(
         "Attendance recorded",
-        action === "in"
-          ? "You are punched in. Have a good workday."
-          : "You are punched out. Your working hours are saved.",
+        odShift
+          ? action === "in"
+            ? "You are punched in on duty (OD). Punch out from wherever you finish."
+            : "You are punched out. Your OD day is sent to your manager for approval."
+          : action === "in"
+            ? "You are punched in. Have a good workday."
+            : "You are punched out. Your working hours are saved.",
       );
     }, popup);
   const onCounts = useCallback(
@@ -569,6 +585,8 @@ export default function Attendance() {
   );
   const open = profile?.openShift,
     done = profile?.todayShift;
+  const odOpen = open?.source === "od_punch",
+    odDone = !open && done?.od_purpose != null;
   const passwordScreen = profile?.user.must_change_password || changing;
   const employeeView =
     !!profile && !passwordScreen && profile.user.role !== "super_admin";
@@ -929,7 +947,22 @@ export default function Attendance() {
                       "No workplace assigned"}
                   </Text>
                   <Text style={s.subtitle}>
-                    {open
+                    {odOpen
+                      ? "On duty (OD) since " +
+                        time(open.in_at) +
+                        ": " +
+                        open.od_purpose +
+                        ". Punch out from wherever you finish; no workplace boundary."
+                      : odDone
+                        ? "OD punched out at " +
+                          time(done.out_at ?? done.in_at) +
+                          ". " +
+                          (done.source === "od_punch"
+                            ? "Waiting for your manager's approval."
+                            : done.source === "on_duty"
+                              ? "Approved as a full day on duty."
+                              : "Not approved.")
+                      : open
                       ? "Started " +
                         time(open.in_at) +
                         ". End your shift at this same workplace" +
@@ -958,27 +991,60 @@ export default function Attendance() {
                   )}
                   <View style={s.callout}>
                     <Text style={s.note}>
-                      We check a fresh GPS reading when you tap below. Enable
-                      precise location and stay inside the workplace boundary.
+                      {odOpen
+                        ? "We record a fresh GPS reading and the time when you punch out."
+                        : "We check a fresh GPS reading when you tap below. Enable precise location and stay inside the workplace boundary."}
                     </Text>
                   </View>
-                  <Button
-                    title={
-                      busy
-                        ? "Checking attendance…"
-                        : open
-                          ? "Punch out →"
-                          : done
-                            ? "Update punch-out →"
-                            : "Punch in →"
-                    }
-                    onPress={() => void punch()}
-                    disabled={
-                      busy ||
-                      profile.device?.status !== "approved" ||
-                      (!open && !done && !profile.workplace)
-                    }
-                  />
+                  {!odDone && (
+                    <Button
+                      title={
+                        busy
+                          ? "Checking attendance…"
+                          : odOpen
+                            ? "OD punch out →"
+                            : open
+                              ? "Punch out →"
+                              : done
+                                ? "Update punch-out →"
+                                : "Punch in →"
+                      }
+                      onPress={() => void punch()}
+                      disabled={
+                        busy ||
+                        profile.device?.status !== "approved" ||
+                        (!open && !done && !profile.workplace)
+                      }
+                    />
+                  )}
+                  {!open && !done && profile.user.od_punch && (
+                    <View style={s.odBox}>
+                      <Text style={s.label}>On duty outside today? (OD)</Text>
+                      <Text style={s.note}>
+                        Punch in from wherever you are. Your manager approves the
+                        day after you punch out.
+                      </Text>
+                      <TextInput
+                        accessibilityLabel="Purpose of the OD"
+                        style={s.input}
+                        placeholder="Purpose, e.g. Client visit, Kota"
+                        maxLength={200}
+                        value={odPurpose}
+                        onChangeText={setOdPurpose}
+                      />
+                      <Button
+                        title={busy ? "Checking attendance…" : "OD punch in →"}
+                        secondary
+                        onPress={() => void punch(false, odPurpose.trim())}
+                        disabled={
+                          busy ||
+                          !odPurpose.trim() ||
+                          profile.device?.status !== "approved" ||
+                          !profile.workplace
+                        }
+                      />
+                    </View>
+                  )}
                   <Button
                     title="My Attendance"
                     secondary
@@ -1135,6 +1201,7 @@ const s = StyleSheet.create({
   },
   siteName: { fontWeight: "600", fontSize: 15, color: "#3a3c4a" },
   callout: { backgroundColor: "#f3f2f7", borderRadius: 10, padding: 15 },
+  odBox: { gap: 8, borderTopWidth: 1, borderTopColor: "#ececf2", paddingTop: 14 },
   tabs: { flexDirection: "row", gap: 12 },
   crumb: {
     backgroundColor: "#fff",

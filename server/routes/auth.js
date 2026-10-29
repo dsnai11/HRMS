@@ -27,6 +27,7 @@ export const safeUser = (u) => ({
   employee_code: u.employee_code,
   active: Boolean(u.active),
   must_change_password: Boolean(u.must_change_password),
+  od_punch: Boolean(u.od_punch),
   ...(u.role === "custom" ? { role_name: u.custom_role_name ?? null } : {}),
 });
 

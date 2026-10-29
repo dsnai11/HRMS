@@ -350,6 +350,7 @@ export default function More({
           files={files}
           onSection={onSection}
           onSlidePunch={onSlidePunch}
+          onOdPunch={onPunch}
         />
       )}
       {section === "My Attendance" && <MyAttendanceScreen api={api} />}
@@ -464,17 +465,22 @@ function PunchButton({
 }
 
 // The top of Home: the punch-in time, the punch button, and two tiles.
+// OD Punch In opens the punch screen, which asks for the purpose.
 function PunchHero({
   today,
   leaves,
   onSlidePunch,
+  onOdPunch,
 }: {
   today: TodayInfo | null;
   leaves: number | null;
   onSlidePunch: () => Promise<void>;
+  onOdPunch: () => void;
 }) {
   const open = today?.openShift,
     done = today?.todayShift;
+  const odOpen = open?.source === "od_punch",
+    odDone = !open && done?.od_purpose != null;
   const date = new Intl.DateTimeFormat("en-IN", {
     day: "numeric",
     month: "short",
@@ -491,10 +497,29 @@ function PunchHero({
         </Text>
       </View>
       <PunchButton
-        label={open ? "Punch Out" : done ? "Update Punch Out" : "Punch In"}
-        disabled={!today}
+        label={
+          odOpen
+            ? "OD Punch Out"
+            : odDone
+              ? "OD sent for approval"
+              : open
+                ? "Punch Out"
+                : done
+                  ? "Update Punch Out"
+                  : "Punch In"
+        }
+        disabled={!today || odDone}
         onPress={onSlidePunch}
       />
+      {!open && !done && today?.user?.od_punch && (
+        <Pressable
+          style={({ pressed }) => [s.odBtn, pressed && { opacity: 0.8 }]}
+          accessibilityRole="button"
+          onPress={onOdPunch}
+        >
+          <Text style={s.odBtnText}>OD Punch In (on duty outside)</Text>
+        </Pressable>
+      )}
       <View style={s.tiles}>
         <View style={[s.tile, { backgroundColor: "#3aa0f0" }]}>
           <Text style={s.tileLabel}>Leaves Remaining</Text>
@@ -549,8 +574,9 @@ type HolidayRow = {
   branch?: string;
 };
 type TodayInfo = {
-  openShift: { in_at: string; workplace_name: string } | null;
-  todayShift: { in_at: string; out_at: string | null } | null;
+  user?: { od_punch?: boolean };
+  openShift: { in_at: string; workplace_name: string; source?: string } | null;
+  todayShift: { in_at: string; out_at: string | null; od_purpose?: string | null } | null;
   workplace: { name: string } | null;
 };
 const MONTHS = [
@@ -587,11 +613,13 @@ function HomeScreen({
   files,
   onSection,
   onSlidePunch,
+  onOdPunch,
 }: {
   api: Api;
   files: Files;
   onSection: (s: Section) => void;
   onSlidePunch: () => Promise<void>;
+  onOdPunch: () => void;
 }) {
   const year = new Date().getFullYear();
   const home = useLoad(() => api<HomeData>("/home"));
@@ -644,6 +672,7 @@ function HomeScreen({
           void today.reload();
           void bal.reload();
         }}
+        onOdPunch={onOdPunch}
       />
       <View style={s.card}>
         <Text style={s.heading}>Employee Search</Text>
@@ -3007,6 +3036,15 @@ const s = StyleSheet.create({
     justifyContent: "center",
   },
   punchBtnText: { color: "#ac051b", fontWeight: "800", fontSize: 17, letterSpacing: 0.5 },
+  odBtn: {
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 1.5,
+    borderColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  odBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   tiles: { flexDirection: "row", gap: 12 },
   tile: { flex: 1, borderRadius: 14, padding: 14, gap: 2 },
   tileLabel: { color: "#fff", fontWeight: "700", fontSize: 12 },
