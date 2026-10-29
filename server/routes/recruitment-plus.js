@@ -14,7 +14,7 @@ import { tokenHash } from "../db.js";
 import { requireOwned, staffWith } from "../scope.js";
 import { can } from "../rbac.js";
 import { checkFile } from "./documents.js";
-import { applyResume } from "../resume-parse.js";
+import { applyResume, needsOcr, readResumeLater } from "../resume-parse.js";
 
 const STEPS = [
   ["applied", "Applied"],
@@ -512,11 +512,12 @@ export function registerRecruitmentPlus(router, app) {
         rescore: rescoreCandidate,
         actorId: user.id,
         at: nowIso(),
+        ocr: true,
       });
       if (!r)
         throw new HttpError(
           422,
-          "This resume could not be read. Word (.docx) and PDF files with text can be read; photos and old .doc files cannot.",
+          "No text could be read from this resume. Blurred photos, handwriting, password-protected files and black-and-white fax scans cannot be read.",
         );
       await audit("resume_read", { id: c.id, filled: r.filled });
       return send(200, r);
@@ -669,8 +670,15 @@ export function registerRecruitmentPlus(router, app) {
         await rescoreCandidate(db, id);
         return id;
       });
-      if (file)
-        await applyResume(db, id, file.bytes, file.mime, {
+      if (
+        file &&
+        !(await applyResume(db, id, file.bytes, file.mime, {
+          rescore: rescoreCandidate,
+          at: nowIso(),
+        })) &&
+        needsOcr(file.mime)
+      )
+        readResumeLater(db, id, file.bytes, file.mime, {
           rescore: rescoreCandidate,
           at: nowIso(),
         });

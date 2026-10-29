@@ -13,8 +13,10 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
+    "@tesseract.js-data/eng": "^1.0.0",
     "pdfjs-dist": "^6.4.299",
-    "pg": "^8.23.1"
+    "pg": "^8.23.1",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8"

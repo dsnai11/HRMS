@@ -13,7 +13,7 @@ This maps every user story in the proposal (V2, 12 modules) to what this system 
 | RCT-05 | Automated, templated emails on stage changes | Done: acknowledgement, interview invitation, rejection, offer, welcome; editable. Sent when email is set up (`RESEND_API_KEY`, `MAIL_FROM`); otherwise the candidate's timeline records that nothing was sent |
 | RCT-06 | Branded candidate portal with progress tracker | Done: careers page with apply form and a private tracking link |
 | RCT-07 | Dynamic offer letter, CTC breakup, e-acceptance | Done: breakup table in the letter; the candidate accepts online by typing their name (recorded with time and address). This is a click-to-accept record, not a certified e-signature |
-| — | Resume parsing (module summary) | Done: PDF and Word (.docx) resumes are read for name, email, phone, years of experience and skills, which feed the match score; HR can search inside resumes and re-read one. Photos and old .doc files are stored but not read (that needs OCR). Resumes from every source (LinkedIn, Naukri, WhatsApp, agencies, imports) arrive in one inbox per job (*RMS*) |
+| — | Resume parsing (module summary) | Done: PDF, Word (.docx and old .doc) resumes, photos and scanned PDFs (by OCR, in the background) are read for name, email, phone, years of experience and skills, which feed the match score; HR can search inside resumes and re-read one. OCR is English only and skips black-and-white fax scans and handwriting. Resumes from every source (LinkedIn, Naukri, WhatsApp, agencies, imports) arrive in one inbox per job (*RMS*) |
 | RCT-10 | Recruitment dashboard | Done: funnel, time to hire, time to fill, offer acceptance, source of hire |
 
 ## Module 02: CIBIL score integration
@@ -79,7 +79,7 @@ Done on the web portal (branch `claude/stage7-bot`):
 - **Laxmi** (*Ask Laxmi*): answers from the person's own records (leave balance, leave history and status, holidays, payday, latest payslip, this month's attendance, training assigned and completed; for managers, who in the team is on leave or punched in and what waits for approval); a guided leave application that fills in the request and sends it only when the person presses Confirm; HR's knowledge base and the company policies as searchable answers; a log of every question and answer with helpful / not helpful feedback, so HR can add answers for what went unanswered.
 - **Free text by Claude**, optional: with `ANTHROPIC_API_KEY` set, questions the rules cannot answer go to Claude with only the asking person's own facts and matching knowledge-base entries. It has no tools and cannot act.
 
-Also in the phone app (Messages and Ask Laxmi). Chat is text only (no files, no read receipts per person).
+Also in the phone app (Messages and Ask Laxmi). Messages can carry a PDF or photo, and your own messages show ✓ Sent / ✓✓ Seen (in groups, seen by how many), on the web and in the phone app.
 
 ## Module 12: Reports, analytics and compliance
 

@@ -1,8 +1,10 @@
-import { inflateRawSync } from "node:zlib";
+import { crc32, deflateSync, inflateRawSync, inflateSync } from "node:zlib";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 
-// Reads the text of a PDF or Word (.docx) resume and picks out what a recruiter types by
-// hand: name, email, phone, years of experience and skills. Old .doc files and photos are
-// not read (that would need OCR); they are kept as files only.
+// Reads the text of a resume (PDF, Word .docx or old .doc, or a photo or scan through OCR)
+// and picks out what a recruiter types by hand: name, email, phone, years of experience
+// and skills. OCR is slower, so photos and scanned PDFs are read in the background.
 
 const MAX_TEXT = 20000;
 
@@ -86,15 +88,226 @@ function docxText(bytes) {
     .replace(/&amp;/g, "&");
 }
 
-export async function resumeText(bytes, mime) {
+// ---- old Word (.doc): an OLE compound file holding the WordDocument and table streams ----
+function cfbStreams(buf) {
+  if (buf.length < 512 || buf.readUInt32LE(0) !== 0xe011cfd0 || buf.readUInt32LE(4) !== 0xe11ab1a1)
+    return null;
+  const ss = 2 ** buf.readUInt16LE(0x1e),
+    mss = 2 ** buf.readUInt16LE(0x20);
+  if (ss !== 512 && ss !== 4096) return null;
+  const at = (n) => (n + 1) * ss;
+  const END = 0xfffffffa;
+  // The FAT's own sectors: 109 listed in the header, more in a DIFAT chain.
+  const fatSectors = [];
+  for (let i = 0; i < 109; i++) {
+    const n = buf.readUInt32LE(0x4c + i * 4);
+    if (n < END) fatSectors.push(n);
+  }
+  let difat = buf.readUInt32LE(0x44);
+  for (let guard = 0; difat < END && guard < 1000; guard++) {
+    if (at(difat) + ss > buf.length) break;
+    for (let i = 0; i < ss / 4 - 1; i++) {
+      const n = buf.readUInt32LE(at(difat) + i * 4);
+      if (n < END) fatSectors.push(n);
+    }
+    difat = buf.readUInt32LE(at(difat) + ss - 4);
+  }
+  const fat = [];
+  for (const s of fatSectors)
+    for (let i = 0; i < ss / 4 && at(s) + i * 4 + 4 <= buf.length; i++)
+      fat.push(buf.readUInt32LE(at(s) + i * 4));
+  const chain = (start, table, read) => {
+    const parts = [];
+    for (let n = start, guard = 0; n < END && guard < 100000; n = table[n] ?? END, guard++)
+      parts.push(read(n));
+    return Buffer.concat(parts);
+  };
+  const big = (start) => chain(start, fat, (n) => buf.subarray(at(n), at(n) + ss));
+  const dir = big(buf.readUInt32LE(0x30));
+  const entries = [];
+  for (let o = 0; o + 128 <= dir.length; o += 128) {
+    const len = dir.readUInt16LE(o + 64);
+    entries.push({
+      name: dir.toString("utf16le", o, o + Math.max(0, len - 2)),
+      type: dir[o + 66],
+      start: dir.readUInt32LE(o + 116),
+      size: dir.readUInt32LE(o + 120),
+    });
+  }
+  const root = entries.find((e) => e.type === 5);
+  const cutoff = buf.readUInt32LE(0x38);
+  let mini = null,
+    miniFat = null;
+  return (name) => {
+    const e = entries.find((x) => x.type === 2 && x.name === name);
+    if (!e) return null;
+    if (e.size >= cutoff) return big(e.start).subarray(0, e.size);
+    // Small streams live in the mini stream, in 64-byte sectors.
+    if (!mini) {
+      mini = big(root.start);
+      const mf = big(buf.readUInt32LE(0x3c));
+      miniFat = [];
+      for (let i = 0; i + 4 <= mf.length; i += 4) miniFat.push(mf.readUInt32LE(i));
+    }
+    return chain(e.start, miniFat, (n) => mini.subarray(n * mss, (n + 1) * mss)).subarray(0, e.size);
+  };
+}
+
+// Word 97-2003: the piece table (in the table stream) says where each run of text is.
+function docText(bytes) {
+  const stream = cfbStreams(Buffer.from(bytes));
+  const wd = stream?.("WordDocument");
+  if (!wd || wd.length < 0x1aa || wd.readUInt16LE(0) !== 0xa5ec) return "";
+  const flags = wd.readUInt16LE(0x0a);
+  if (flags & 0x0100) return ""; // password-protected
+  const table = stream(flags & 0x0200 ? "1Table" : "0Table");
+  if (!table) return "";
+  let i = wd.readUInt32LE(0x1a2);
+  const end = i + wd.readUInt32LE(0x1a6);
+  while (i < end && table[i] === 0x01) i += 3 + table.readUInt16LE(i + 1);
+  if (table[i] !== 0x02) return "";
+  const lcb = table.readUInt32LE(i + 1),
+    plc = i + 5;
+  const n = (lcb - 4) / 12;
+  if (!Number.isInteger(n) || n < 1 || plc + lcb > table.length) return "";
+  let text = "";
+  for (let k = 0; k < n && text.length < MAX_TEXT * 2; k++) {
+    const chars = table.readUInt32LE(plc + 4 * (k + 1)) - table.readUInt32LE(plc + 4 * k);
+    const fc = table.readUInt32LE(plc + 4 * (n + 1) + 8 * k + 2);
+    if (chars <= 0) continue;
+    if (fc & 0x40000000) {
+      const off = (fc & 0x3fffffff) / 2;
+      text += wd.toString("latin1", off, Math.min(wd.length, off + chars));
+    } else text += wd.toString("utf16le", fc, Math.min(wd.length, fc + 2 * chars));
+  }
+  return text
+    .replace(/\x13[^\x13\x14\x15]*\x14/g, "") // a field's code, e.g. HYPERLINK "mailto:…"
+    .replace(/\x13[^\x13\x15]*\x15/g, "")
+    .replace(/[\r\x0b\x0c]/g, "\n")
+    .replace(/\x07/g, " ")
+    .replace(/[\x00-\x08\x0e-\x1f]/g, "");
+}
+
+// ---- scanned PDFs: the page images, for OCR ----
+function png(width, height, channels, raw) {
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = channels === 3 ? 2 : 0;
+  const row = width * channels;
+  const rows = Buffer.alloc((row + 1) * height);
+  for (let y = 0; y < height; y++) raw.copy(rows, y * (row + 1) + 1, y * row, (y + 1) * row);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(rows)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+// JPEG images as they are; 8-bit grey or colour images (Flate) turned into PNGs.
+// Others (black-and-white fax and JBIG2 scans) are skipped.
+export function pdfImages(bytes, max = 3) {
+  const buf = Buffer.from(bytes);
+  const s = buf.toString("latin1");
+  const out = [];
+  for (const m of s.matchAll(/\/Subtype\s*\/Image/g)) {
+    if (out.length >= max) break;
+    const from = s.lastIndexOf(" obj", m.index);
+    const streamAt = s.indexOf("stream", m.index);
+    if (from < 0 || streamAt < 0) continue;
+    const dict = s.slice(from, streamAt);
+    const num = (k) => Number(dict.match(new RegExp(`/${k}\\s+(\\d+)(?!\\s+\\d+\\s+R)`))?.[1]);
+    const width = num("Width"),
+      height = num("Height");
+    if (!(width * height >= 150 * 150)) continue; // logos and lines
+    let start = streamAt + 6;
+    if (s[start] === "\r") start++;
+    if (s[start] === "\n") start++;
+    const length = num("Length");
+    const stop = Number.isFinite(length) ? start + length : s.indexOf("endstream", start);
+    if (stop <= start) continue;
+    const data = buf.subarray(start, stop);
+    try {
+      if (/\/DCTDecode/.test(dict)) out.push(data);
+      else if (/\/FlateDecode/.test(dict) && num("BitsPerComponent") === 8 && !/\/DecodeParms/.test(dict)) {
+        const channels = /\/DeviceRGB/.test(dict) ? 3 : /\/DeviceGray/.test(dict) ? 1 : 0;
+        const raw = channels && inflateSync(data, { maxOutputLength: 64 * 1024 * 1024 });
+        if (raw && raw.length >= width * height * channels) out.push(png(width, height, channels, raw));
+      }
+    } catch {
+      // a damaged image is skipped
+    }
+  }
+  return out;
+}
+
+// ---- OCR: one English worker, used one job at a time and closed when idle ----
+const require = createRequire(import.meta.url);
+let worker = null,
+  idle = null,
+  ocrQueue = Promise.resolve();
+export async function stopOcr() {
+  clearTimeout(idle);
+  const w = worker;
+  worker = null;
+  if (w) await (await w).terminate();
+}
+function ocrImages(images) {
+  const job = ocrQueue.then(async () => {
+    clearTimeout(idle);
+    worker ??= import("tesseract.js").then(({ createWorker }) =>
+      createWorker("eng", 1, {
+        // The language data ships with the app, so nothing is downloaded.
+        langPath: join(dirname(require.resolve("@tesseract.js-data/eng/package.json")), "4.0.0_best_int"),
+        cacheMethod: "none",
+        gzip: true,
+      }),
+    );
+    const w = await worker;
+    const texts = [];
+    for (const img of images) texts.push((await w.recognize(img)).data.text);
+    return texts.join("\n");
+  });
+  ocrQueue = job
+    .catch(() => {})
+    .then(() => {
+      clearTimeout(idle);
+      idle = setTimeout(() => void stopOcr(), 60000);
+      idle.unref();
+    });
+  return job;
+}
+export const needsOcr = (mime) => mime === "image/jpeg" || mime === "image/png" || mime === "application/pdf";
+
+export async function resumeText(bytes, mime, { ocr = false } = {}) {
   try {
-    const text =
+    let text =
       mime === "application/pdf"
         ? await pdfText(bytes)
         : mime ===
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           ? docxText(bytes)
-          : "";
+          : mime === "application/msword"
+            ? docText(bytes)
+            : "";
+    if (ocr && !text.trim()) {
+      const images =
+        mime === "application/pdf"
+          ? pdfImages(bytes)
+          : mime === "image/jpeg" || mime === "image/png"
+            ? [Buffer.from(bytes)]
+            : [];
+      if (images.length) text = await ocrImages(images);
+    }
     return text
       .replace(/\r/g, "")
       .replace(/[ \t ]+/g, " ")
@@ -178,8 +391,8 @@ export function nameFromFileName(f) {
 }
 
 /** Text plus what was found, or null when the file cannot be read. */
-export async function readResume(bytes, mime, wantedSkills = []) {
-  const text = await resumeText(bytes, mime);
+export async function readResume(bytes, mime, wantedSkills = [], { ocr = false } = {}) {
+  const text = await resumeText(bytes, mime, { ocr });
   return text ? { text, ...parseResume(text, wantedSkills) } : null;
 }
 
@@ -193,13 +406,13 @@ export async function applyResume(
   candidateId,
   bytes,
   mime,
-  { rescore, nameIsGuess = false, actorId = null, at = new Date().toISOString() } = {},
+  { rescore, nameIsGuess = false, actorId = null, at = new Date().toISOString(), ocr = false } = {},
 ) {
   const c = await db.prepare("SELECT * FROM candidates WHERE id=?").get(candidateId);
   const o = c.opening_id
     ? await db.prepare("SELECT skills FROM job_openings WHERE id=?").get(c.opening_id)
     : null;
-  const found = await readResume(bytes, mime, JSON.parse(o?.skills || "[]"));
+  const found = await readResume(bytes, mime, JSON.parse(o?.skills || "[]"), { ocr });
   if (!found) return null;
   const { text } = found;
   const had = JSON.parse(c.skills || "[]");
@@ -228,3 +441,13 @@ export async function applyResume(
   if (rescore) await rescore(db, candidateId);
   return { ...found, text: undefined, filled };
 }
+
+// Photos and scanned PDFs: read by OCR after the candidate is saved, one at a time, so a
+// bulk import does not wait for it. resumesRead() resolves when the queue is empty.
+let later = Promise.resolve();
+export function readResumeLater(db, candidateId, bytes, mime, options) {
+  later = later
+    .then(() => applyResume(db, candidateId, bytes, mime, { ...options, ocr: true }))
+    .catch((e) => console.error("Reading a resume by OCR failed:", e.message));
+}
+export const resumesRead = () => later;

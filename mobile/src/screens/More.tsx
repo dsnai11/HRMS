@@ -149,7 +149,12 @@ type RoomInfo = {
   kind: "direct" | "group" | "team";
   name: string | null;
   is_admin: boolean;
-  members: { id: number; name: string; is_admin: number | boolean }[];
+  members: {
+    id: number;
+    name: string;
+    is_admin: number | boolean;
+    last_read_id?: number;
+  }[];
 };
 type ChatPerson = {
   id: number;
@@ -1317,6 +1322,11 @@ function MessagesScreen({
         }
         onUnread(unread);
         if (fresh.length) void loadRooms();
+        // Refresh who has read what, for the ticks on my messages.
+        if (open !== null) {
+          const i = await api<RoomInfo>("/chat/rooms/" + open).catch(() => null);
+          if (i && roomRef.current === open && !stopped) setInfo(i);
+        }
       } catch {
         // offline for a moment; try again on the next tick
       } finally {
@@ -1457,6 +1467,15 @@ function MessagesScreen({
     );
 
   if (room !== null) {
+    // Ticks on my messages: seen by the other person, or by how many in a group.
+    const readers = (info?.members ?? []).filter((x) => x.id !== userId);
+    const ticks = (id: number) => {
+      const seen = readers.filter((r) => (r.last_read_id ?? 0) >= id).length;
+      if (!seen) return "✓ Sent";
+      return readers.length <= 1
+        ? "✓✓ Seen"
+        : "✓✓ Seen by " + seen + " of " + readers.length;
+    };
     const title = info
       ? info.kind !== "direct"
         ? (info.name ?? "Group")
@@ -1516,6 +1535,17 @@ function MessagesScreen({
                   }
                 >
                   📎 {m.file_name}
+                </Text>
+              )}
+              {mine && !!info && (
+                <Text
+                  style={[
+                    s.note,
+                    { textAlign: "right", fontSize: 11 },
+                    ticks(m.id) !== "✓ Sent" && { color: "#2f7de1" },
+                  ]}
+                >
+                  {ticks(m.id)}
                 </Text>
               )}
             </View>

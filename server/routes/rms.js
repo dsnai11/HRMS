@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { HttpError, clientIp, integer, number, oneOf, optionalString, string } from "../http.js";
 import { candidateMail, rescoreCandidate } from "./recruitment-plus.js";
 import { staffWith } from "../scope.js";
-import { nameFromFileName, readResume } from "../resume-parse.js";
+import { nameFromFileName, needsOcr, readResume, readResumeLater } from "../resume-parse.js";
 
 // Recruitment management: every resume for a job, whichever platform it came from.
 // Each source (LinkedIn, Naukri, WhatsApp, an agency…) has a secret key; a connector
@@ -139,9 +139,18 @@ export function registerRms(router, app) {
       const cand = await db.prepare("SELECT * FROM candidates WHERE id=?").get(id);
       await candidateMail(app, cand, "acknowledgement", {}).catch(() => {});
     }
+    // A photo or scanned PDF is read by OCR in the background.
+    const later = Boolean(file && !read && !dup && needsOcr(file.mime));
+    if (later)
+      readResumeLater(db, id, Buffer.from(file.data, "base64"), file.mime, {
+        rescore: rescoreCandidate,
+        nameIsGuess: !b.name,
+        at,
+      });
     return {
       id,
       duplicate: Boolean(dup),
+      ...(later ? { reading: true } : {}),
       ...(read ? { read: { name: !b.name && Boolean(read.name), email: read.email, phone: read.phone, experience_years: read.experience_years, skills: read.skills } } : {}),
     };
   }

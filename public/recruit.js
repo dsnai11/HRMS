@@ -946,7 +946,7 @@ async function rmsPage(id) {
         .map((s) => `<option value="s:${s.id}">${esc(s.name)}</option>`)
         .join("")}${Object.entries(src.kinds)
         .map(([k, v]) => `<option value="k:${k}">${esc(v)}</option>`)
-        .join("")}</select></label><label class="full">Resume files (PDF, Word or photo; up to 20, each up to 3 MB)<input type="file" name="files" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" multiple required></label><p class="full muted">Each file becomes a candidate. PDF and Word resumes are read for the name, phone, email, experience and skills (photos and old .doc files are kept but not read, so those are named from the file name). Someone already on this job is matched and not added twice.</p><div class="full" id="rms-results"></div>`,
+        .join("")}</select></label><label class="full">Resume files (PDF, Word or photo; up to 20, each up to 3 MB)<input type="file" name="files" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" multiple required></label><p class="full muted">Each file becomes a candidate. Every resume is read for the name, phone, email, experience and skills: PDF and Word (.docx and old .doc) at once, photos and scanned PDFs by OCR within a minute or so (refresh to see them). Someone already on this job is matched and not added twice.</p><div class="full" id="rms-results"></div>`,
       async (f) => {
         const files = [...document.querySelector("dialog input[name=files]").files];
         if (!files.length) throw new Error("Choose the resume files.");
@@ -967,7 +967,7 @@ async function rmsPage(id) {
         });
         const ok = r.results.filter((x) => x.ok);
         notice(
-          `${ok.filter((x) => !x.duplicate).length} new, ${ok.filter((x) => x.duplicate).length} already on this job${r.results.length - ok.length ? `, ${r.results.length - ok.length} not imported` : ""}.`,
+          `${ok.filter((x) => !x.duplicate).length} new, ${ok.filter((x) => x.duplicate).length} already on this job${r.results.length - ok.length ? `, ${r.results.length - ok.length} not imported` : ""}.${ok.some((x) => x.reading) ? ` ${ok.filter((x) => x.reading).length} photo or scanned resume(s) are being read; refresh in a minute.` : ""}`,
         );
       },
     ),
