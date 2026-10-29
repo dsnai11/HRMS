@@ -311,7 +311,7 @@ export default function Attendance() {
     }
   }
   // popup: also show a failure as a pop-up, for actions started away from the
-  // message area (the Home slider sits far above it).
+  // message area (the Home punch button sits far above it).
   async function run(fn: () => Promise<void>, popup = false) {
     if (locked.current) return;
     locked.current = true;

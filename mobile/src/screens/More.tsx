@@ -1,18 +1,15 @@
 import React, {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Animated,
   Image,
   Linking,
   Modal,
-  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -430,71 +427,43 @@ async function attempt(fn: () => Promise<unknown>, done?: string) {
   }
 }
 
-// ---- slide to punch -------------------------------------------------------------------------
-// Drag the knob to the end to punch; letting go early springs it back, so a punch is
-// never recorded by a stray tap.
-function SlideToPunch({
+// ---- punch button ---------------------------------------------------------------------------
+// One tap punches in or out. The punch itself still needs the selfie and location checks.
+function PunchButton({
   label,
   disabled,
-  onDone,
+  onPress,
 }: {
   label: string;
   disabled?: boolean;
-  onDone: () => Promise<void> | void;
+  onPress: () => Promise<void> | void;
 }) {
-  const KNOB = 52;
-  const [x] = useState(() => new Animated.Value(0));
-  const [width, setWidth] = useState(0);
   const [working, setWorking] = useState(false);
-  const max = Math.max(width - KNOB - 8, 1);
-  const responder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => !disabled && !working,
-        onMoveShouldSetPanResponder: () => !disabled && !working,
-        onPanResponderMove: (_, g) => x.setValue(Math.min(Math.max(g.dx, 0), max)),
-        onPanResponderRelease: (_, g) => {
-          if (g.dx >= max * 0.85) {
-            Animated.timing(x, { toValue: max, duration: 120, useNativeDriver: false }).start(
-              async () => {
-                setWorking(true);
-                try {
-                  await onDone();
-                } finally {
-                  setWorking(false);
-                  Animated.spring(x, { toValue: 0, useNativeDriver: false }).start();
-                }
-              },
-            );
-          } else Animated.spring(x, { toValue: 0, useNativeDriver: false }).start();
-        },
-      }),
-    [disabled, working, max, onDone, x],
-  );
   return (
-    <View
-      style={[s.slider, disabled && { opacity: 0.55 }]}
-      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
-      accessibilityRole="adjustable"
+    <Pressable
+      style={({ pressed }) => [
+        s.punchBtn,
+        pressed && { opacity: 0.8 },
+        (disabled || working) && { opacity: 0.55 },
+      ]}
+      disabled={disabled || working}
+      accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityActions={[{ name: "activate" }]}
-      onAccessibilityAction={() => !disabled && void onDone()}
+      onPress={async () => {
+        setWorking(true);
+        try {
+          await onPress();
+        } finally {
+          setWorking(false);
+        }
+      }}
     >
-      <Animated.View
-        style={[s.sliderFill, { width: Animated.add(x, KNOB + 4) }]}
-      />
-      <Text style={s.sliderText}>{working ? "Recording…" : label}</Text>
-      <Animated.View
-        {...responder.panHandlers}
-        style={[s.sliderKnob, { transform: [{ translateX: x }] }]}
-      >
-        <Text style={s.sliderArrow}>›</Text>
-      </Animated.View>
-    </View>
+      {working ? <ActivityIndicator color="#ac051b" /> : <Text style={s.punchBtnText}>{label}</Text>}
+    </Pressable>
   );
 }
 
-// The top of Home, as on the old app: the punch-in time, the slider, and two tiles.
+// The top of Home: the punch-in time, the punch button, and two tiles.
 function PunchHero({
   today,
   leaves,
@@ -521,10 +490,10 @@ function PunchHero({
           {open ? clock(open.in_at) : done?.out_at ? clock(done.out_at) : "--:--"}
         </Text>
       </View>
-      <SlideToPunch
-        label={open ? "Slide to Punch Out" : done ? "Slide to update Punch Out" : "Slide to Punch In"}
+      <PunchButton
+        label={open ? "Punch Out" : done ? "Update Punch Out" : "Punch In"}
         disabled={!today}
-        onDone={onSlidePunch}
+        onPress={onSlidePunch}
       />
       <View style={s.tiles}>
         <View style={[s.tile, { backgroundColor: "#3aa0f0" }]}>
@@ -3030,38 +2999,14 @@ const s = StyleSheet.create({
   },
   timeLabel: { color: "#fde7ea", fontSize: 13, letterSpacing: 1 },
   timeValue: { color: "#fff", fontSize: 34, fontWeight: "800" },
-  slider: {
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    justifyContent: "center",
-    padding: 4,
-  },
-  sliderFill: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    borderRadius: 30,
-    backgroundColor: "rgba(255,255,255,0.25)",
-  },
-  sliderText: {
-    color: "#fff",
-    textAlign: "center",
-    fontWeight: "700",
-    fontSize: 15,
-  },
-  sliderKnob: {
-    position: "absolute",
-    left: 4,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+  punchBtn: {
+    height: 56,
+    borderRadius: 28,
     backgroundColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
   },
-  sliderArrow: { color: "#ac051b", fontSize: 30, fontWeight: "800", marginTop: -3 },
+  punchBtnText: { color: "#ac051b", fontWeight: "800", fontSize: 17, letterSpacing: 0.5 },
   tiles: { flexDirection: "row", gap: 12 },
   tile: { flex: 1, borderRadius: 14, padding: 14, gap: 2 },
   tileLabel: { color: "#fff", fontWeight: "700", fontSize: 12 },
