@@ -110,6 +110,23 @@ test("OD punch in and out from anywhere, sent for approval, counted only when ap
   assert.deepEqual([day("2026-10-19").present, day("2026-10-19").source], [1, "on_duty"]);
   assert.deepEqual([day("2026-10-20").present, day("2026-10-20").source], [0, "od_rejected"]);
 
+  // The punch map shows the OD punches, how far they were from the office, and refused attempts.
+  const mapDay = await call("/admin/punch-map?date=2026-10-19", undefined, admin);
+  assert.equal(mapDay.status, 200, JSON.stringify(mapDay.data));
+  assert.deepEqual(
+    mapDay.data.points.map((p) => [p.kind, p.od, p.od_purpose]),
+    [["in", true, "Collection visit, Kota"], ["out", true, "Collection visit, Kota"]],
+  );
+  assert.ok(mapDay.data.points[0].distance_m > 150000, String(mapDay.data.points[0].distance_m));
+  assert.ok(mapDay.data.refused.length >= 3);
+  assert.ok(mapDay.data.refused.every((r) => r.latitude === away.latitude && r.reason));
+  assert.deepEqual(mapDay.data.workplaces.map((w) => w.name), ["HO"]);
+  assert.equal((await call("/admin/punch-map?date=2026-10-21", undefined, admin)).data.points.length, 0);
+  assert.equal((await call("/admin/punch-map?date=2099-01-01", undefined, admin)).status, 400);
+  assert.equal((await call("/admin/punch-map", undefined, reg.data.token, headers)).status, 403);
+  const leaflet = await fetch(base.replace(/\/api$/, "") + "/vendor/leaflet.js");
+  assert.equal(leaflet.status, 200);
+
   // OD punches do not use up the monthly allowance of corrections.
   const used = await db
     .prepare("SELECT COUNT(*) n FROM regularizations WHERE user_id=? AND from_punch=1")

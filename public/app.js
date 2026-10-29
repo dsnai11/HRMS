@@ -322,6 +322,7 @@ function navGroups() {
         has("employees.read") && ["employees", "Employees"],
         has("org.read") && ["organization", "Organization"],
         has("attendance.read") && ["attendance", "Attendance records"],
+        has("attendance.read") && ["punchmap", "Punch map"],
         has("org.read") && ["workplaces", "Workplaces"],
         has("attendance.read") && ["muster", "Monthly muster"],
         has("leave.manage") && ["leaveadmin", "Leave & holidays"],
@@ -480,6 +481,7 @@ async function render() {
     if (page === "myemployment") return await myEmploymentPage(id);
     if (page === "insights") return await insightsPage(id);
     if (page === "customreports") return await customReportsPage(id);
+    if (page === "punchmap") return await punchMapPage(id);
     if (page === "performance") return await performancePage(id);
     if (page === "learning") return await learningPage(id);
     if (page === "requisitions") return await requisitionsPage(id);

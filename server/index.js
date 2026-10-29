@@ -41,6 +41,7 @@ import { registerGallery } from "./routes/gallery.js";
 import { registerDownloadLinks } from "./routes/download-links.js";
 import { registerRms } from "./routes/rms.js";
 import { registerReportBuilder } from "./routes/report-builder.js";
+import { registerPunchMap } from "./routes/punch-map.js";
 import {
   registerScheduledReports,
   scheduleReports,
@@ -90,6 +91,9 @@ const STATIC = {
   "/ess-plus.js": ["ess-plus.js", "text/javascript"],
   "/chat.js": ["chat.js", "text/javascript"],
   "/reports.js": ["reports.js", "text/javascript"],
+  "/punchmap.js": ["punchmap.js", "text/javascript"],
+  "/vendor/leaflet.js": ["../node_modules/leaflet/dist/leaflet.js", "text/javascript"],
+  "/vendor/leaflet.css": ["../node_modules/leaflet/dist/leaflet.css", "text/css"],
   "/join.html": ["join.html", "text/html"],
   "/join.js": ["join.js", "text/javascript"],
   "/careers.html": ["careers.html", "text/html"],
@@ -223,6 +227,7 @@ export function createApp({
     registerDownloadLinks,
     registerRms,
     registerReportBuilder,
+    registerPunchMap,
   ])
     register(router, app);
 
@@ -271,7 +276,7 @@ export function createApp({
       "Referrer-Policy": "no-referrer",
       "Permissions-Policy": "geolocation=(self)",
       "Content-Security-Policy":
-        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; object-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'",
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://tile.openstreetmap.org; object-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'",
     };
     if (production) headers["Strict-Transport-Security"] = "max-age=31536000";
     const send = (status, data, extra = {}) => {

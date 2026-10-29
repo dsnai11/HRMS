@@ -670,16 +670,17 @@ test("Insights layout is saved per person, and celebrations show dates without b
   );
 });
 
-test("the page policy allows images made in the browser (selfie previews) and nothing remote", async (t) => {
+test("the page policy allows images made in the browser (selfie previews) and nothing remote but map pictures", async (t) => {
   const w = await world(t);
   const res = await fetch(w.base.replace("/api", "/"));
   const csp = res.headers.get("content-security-policy");
-  assert.match(csp, /img-src 'self' data: blob:/);
+  assert.match(csp, /img-src 'self' data: blob: https:\/\/tile\.openstreetmap\.org;/);
   assert.match(csp, /default-src 'self'/);
+  // The punch map's pictures are the only remote content: images only, one host.
   assert.doesNotMatch(
-    csp,
+    csp.replace(" https://tile.openstreetmap.org;", ";"),
     /unsafe-inline|unsafe-eval|https?:\/\//,
-    "no inline code and no remote hosts",
+    "no inline code and no other remote hosts",
   );
 });
 
