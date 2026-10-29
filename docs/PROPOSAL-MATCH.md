@@ -13,6 +13,7 @@ This maps every user story in the proposal (V2, 12 modules) to what this system 
 | RCT-05 | Automated, templated emails on stage changes | Done: acknowledgement, interview invitation, rejection, offer, welcome; editable. Sent when email is set up (`RESEND_API_KEY`, `MAIL_FROM`); otherwise the candidate's timeline records that nothing was sent |
 | RCT-06 | Branded candidate portal with progress tracker | Done: careers page with apply form and a private tracking link |
 | RCT-07 | Dynamic offer letter, CTC breakup, e-acceptance | Done: breakup table in the letter; the candidate accepts online by typing their name (recorded with time and address). This is a click-to-accept record, not a certified e-signature |
+| — | Resume parsing (module summary) | Done: PDF and Word (.docx) resumes are read for name, email, phone, years of experience and skills, which feed the match score; HR can search inside resumes and re-read one. Photos and old .doc files are stored but not read (that needs OCR). Resumes from every source (LinkedIn, Naukri, WhatsApp, agencies, imports) arrive in one inbox per job (*RMS*) |
 | RCT-10 | Recruitment dashboard | Done: funnel, time to hire, time to fill, offer acceptance, source of hire |
 
 ## Module 02: CIBIL score integration

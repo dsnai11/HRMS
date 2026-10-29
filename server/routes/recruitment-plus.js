@@ -14,6 +14,7 @@ import { tokenHash } from "../db.js";
 import { requireOwned, staffWith } from "../scope.js";
 import { can } from "../rbac.js";
 import { checkFile } from "./documents.js";
+import { applyResume } from "../resume-parse.js";
 
 const STEPS = [
   ["applied", "Applied"],
@@ -495,6 +496,32 @@ export function registerRecruitmentPlus(router, app) {
       );
     },
   );
+  // Reads the latest resume again and fills in what the candidate record lacks.
+  router.post(
+    "/api/admin/candidates/:id/read-resume",
+    { perm: "recruitment.manage" },
+    async ({ user, params, companyId, send, audit }) => {
+      const c = await owned("candidates", params.id, companyId, "candidate");
+      const f = await db
+        .prepare(
+          "SELECT data,mime FROM candidate_files WHERE candidate_id=? AND kind='resume' ORDER BY id DESC LIMIT 1",
+        )
+        .get(c.id);
+      if (!f) throw new HttpError(404, "This candidate has no resume file.");
+      const r = await applyResume(db, c.id, Buffer.from(f.data, "base64"), f.mime, {
+        rescore: rescoreCandidate,
+        actorId: user.id,
+        at: nowIso(),
+      });
+      if (!r)
+        throw new HttpError(
+          422,
+          "This resume could not be read. Word (.docx) and PDF files with text can be read; photos and old .doc files cannot.",
+        );
+      await audit("resume_read", { id: c.id, filled: r.filled });
+      return send(200, r);
+    },
+  );
   router.get(
     "/api/admin/candidate-files/:id",
     { perm: "recruitment.manage" },
@@ -510,11 +537,15 @@ export function registerRecruitmentPlus(router, app) {
         "application/pdf": "pdf",
         "image/jpeg": "jpg",
         "image/png": "png",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+        "application/msword": "doc",
       }[f.mime];
+      const fileName =
+        ext && !f.name.toLowerCase().endsWith(`.${ext}`) ? `${f.name}.${ext}` : f.name;
       res.writeHead(200, {
         ...headers,
         "Content-Type": f.mime,
-        "Content-Disposition": `inline; filename="${f.name}.${ext}"`,
+        "Content-Disposition": `inline; filename="${fileName}"`,
         "Cache-Control": "private, no-store",
       });
       res.end(Buffer.from(f.data, "base64"));
@@ -638,6 +669,11 @@ export function registerRecruitmentPlus(router, app) {
         await rescoreCandidate(db, id);
         return id;
       });
+      if (file)
+        await applyResume(db, id, file.bytes, file.mime, {
+          rescore: rescoreCandidate,
+          at: nowIso(),
+        });
       const cand = await db
         .prepare("SELECT * FROM candidates WHERE id=?")
         .get(id);

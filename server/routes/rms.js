@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { HttpError, clientIp, integer, number, oneOf, optionalString, string } from "../http.js";
 import { candidateMail, rescoreCandidate } from "./recruitment-plus.js";
 import { staffWith } from "../scope.js";
+import { nameFromFileName, readResume } from "../resume-parse.js";
 
 // Recruitment management: every resume for a job, whichever platform it came from.
 // Each source (LinkedIn, Naukri, WhatsApp, an agency…) has a secret key; a connector
@@ -55,13 +56,22 @@ export function registerRms(router, app) {
 
   // One candidate in, from any source. Returns { id, duplicate }.
   async function intake(companyId, opening, source, b, actorId) {
-    const name = string(b.name, "Name", 100);
-    const email = optionalString(b.email, "Email", 254)?.toLowerCase() ?? null;
+    const file = resumeFile(b.resume);
+    let email = optionalString(b.email, "Email", 254)?.toLowerCase() ?? null;
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       throw new HttpError(400, "Enter a valid email.");
-    const phone = optionalString(b.phone, "Phone", 20);
+    let phone = optionalString(b.phone, "Phone", 20);
     if (phone && digits(phone).length < 7) throw new HttpError(400, "Phone must be a valid number.");
-    const file = resumeFile(b.resume);
+    // Read the resume first, so a CV sent with nothing else still has a name and contact
+    // details, and is matched against people already on this job.
+    const read = file
+      ? await readResume(Buffer.from(file.data, "base64"), file.mime, JSON.parse(opening.skills || "[]"))
+      : null;
+    email ??= read?.email ?? null;
+    phone ??= read?.phone ?? null;
+    const name = b.name
+      ? string(b.name, "Name", 100)
+      : read?.name || (file ? nameFromFileName(file.name) : string(b.name, "Name", 100));
     const ref = optionalString(b.external_ref, "Reference", 120);
     const same = await db
       .prepare(
@@ -102,6 +112,10 @@ export function registerRms(router, app) {
         await db
           .prepare("INSERT INTO candidate_events(candidate_id,kind,detail,actor_id,created_at) VALUES(?,?,?,?,?)")
           .run(id, "added", `Received from ${source.name}`, actorId, at);
+        if (read)
+          await db
+            .prepare("UPDATE candidates SET resume_text=?,skills=?,experience_years=? WHERE id=?")
+            .run(read.text, JSON.stringify(read.skills), read.experience_years, id);
       } else {
         // Fill in what the earlier record lacked.
         await db
@@ -125,7 +139,11 @@ export function registerRms(router, app) {
       const cand = await db.prepare("SELECT * FROM candidates WHERE id=?").get(id);
       await candidateMail(app, cand, "acknowledgement", {}).catch(() => {});
     }
-    return { id, duplicate: Boolean(dup) };
+    return {
+      id,
+      duplicate: Boolean(dup),
+      ...(read ? { read: { name: !b.name && Boolean(read.name), email: read.email, phone: read.phone, experience_years: read.experience_years, skills: read.skills } } : {}),
+    };
   }
   const openingFor = async (companyId, b) => {
     const raw = b.opening_id ?? b.job_code;
@@ -252,19 +270,26 @@ export function registerRms(router, app) {
       })),
     );
   });
-  router.get("/api/admin/rms/openings/:id/inbox", { perm: "recruitment.manage" }, async ({ params, companyId, send }) => {
+  router.get("/api/admin/rms/openings/:id/inbox", { perm: "recruitment.manage" }, async ({ params, query, companyId, send }) => {
     const opening = await db
       .prepare("SELECT id,title,status FROM job_openings WHERE id=? AND company_id=?")
       .get(integer(Number(params.id)), companyId);
     if (!opening) throw new HttpError(404, "Job opening not found.");
+    // Every word must appear in the name, contact details, skills or the resume itself.
+    const words = String(query.get("q") ?? "")
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length >= 2)
+      .slice(0, 6);
     const people = await db
       .prepare(
-        `SELECT c.id,c.name,c.email,c.phone,c.stage,c.source,c.match_score,c.created_at,
+        `SELECT c.id,c.name,c.email,c.phone,c.stage,c.source,c.match_score,c.created_at,c.skills,c.experience_years,
            (SELECT f.id FROM candidate_files f WHERE f.candidate_id=c.id AND f.kind='resume' ORDER BY f.id DESC LIMIT 1) resume_id,
            (SELECT COUNT(*) FROM candidate_files f WHERE f.candidate_id=c.id AND f.kind='resume') resumes
-         FROM candidates c WHERE c.opening_id=? AND c.company_id=? ORDER BY c.created_at DESC LIMIT 500`,
+         FROM candidates c WHERE c.opening_id=? AND c.company_id=?${words.length ? words.map(() => " AND LOWER(CONCAT_WS(' ',c.name,c.email,c.phone,c.skills,c.resume_text)) LIKE ?").join("") : ""}
+         ORDER BY c.created_at DESC LIMIT 500`,
       )
-      .all(opening.id, companyId);
+      .all(opening.id, companyId, ...words.map((w) => `%${w.replace(/[%_\\]/g, "")}%`));
     const sources = await db
       .prepare(
         `SELECT s.candidate_id,s.source_name,s.received_at FROM candidate_sources s JOIN candidates c ON c.id=s.candidate_id
@@ -277,6 +302,7 @@ export function registerRms(router, app) {
         const mine = sources.filter((s) => s.candidate_id === p.id).map((s) => s.source_name);
         return {
           ...p,
+          skills: JSON.parse(p.skills || "[]"),
           resumes: Number(p.resumes),
           sources: [...new Set(mine.length ? mine : [p.source || "Not recorded"])],
         };

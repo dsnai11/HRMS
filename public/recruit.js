@@ -794,7 +794,8 @@ function onboardingPlusWire() {
 // Sources (LinkedIn, Naukri, WhatsApp, an agency…) each get a secret link a connector posts
 // to; HR can also import resumes by hand. Each job has one inbox, sorted by source.
 let rmsOpening = null,
-  rmsSource = "";
+  rmsSource = "",
+  rmsQuery = "";
 const RESUME_MIME = {
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -803,15 +804,6 @@ const RESUME_MIME = {
   jpeg: "image/jpeg",
   png: "image/png",
 };
-// "asha_rao-CV (1).pdf" becomes "Asha Rao".
-const nameFromFile = (f) =>
-  f
-    .replace(/\.[^.]+$/, "")
-    .replace(/\(\d+\)|\b(cv|resume|curriculum vitae|final|new|updated)\b/gi, "")
-    .replace(/[_\-.]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (c) => c.toUpperCase()) || "Unnamed candidate";
 async function rmsPage(id) {
   const [src, openings] = await Promise.all([
     api("/admin/rms/sources"),
@@ -819,7 +811,11 @@ async function rmsPage(id) {
   ]);
   if (id !== renderId) return;
   const job = rmsOpening && openings.find((o) => o.id === rmsOpening);
-  const inbox = job ? await api(`/admin/rms/openings/${job.id}/inbox`) : null;
+  const inbox = job
+    ? await api(
+        `/admin/rms/openings/${job.id}/inbox${rmsQuery ? `?q=${encodeURIComponent(rmsQuery)}` : ""}`,
+      )
+    : null;
   if (id !== renderId) return;
   const chips = (list) =>
     list.map((s) => `<span class="pill neutral">${esc(s.name)} · ${s.n}</span>`).join(" ");
@@ -849,20 +845,22 @@ async function rmsPage(id) {
     const shown = rmsSource
       ? inbox.people.filter((p) => p.sources.includes(rmsSource))
       : inbox.people;
-    inboxCard = `<div class="card"><div class="card-head"><div><h2>${esc(job.title)} · resume inbox</h2><p class="muted">${inbox.people.length} candidate(s). Someone sent from two places appears once, with both sources.</p></div><div class="actions"><button id="rms-import">Import resumes</button><button class="secondary" id="rms-close">Close</button></div></div><div class="tabs-line"><button type="button" class="${rmsSource ? "" : "on"}" data-rms-src="">All (${inbox.people.length})</button>${all
+    inboxCard = `<div class="card"><div class="card-head"><div><h2>${esc(job.title)} · resume inbox</h2><p class="muted">${inbox.people.length} candidate(s)${rmsQuery ? ` matching "${esc(rmsQuery)}"` : ""}. Someone sent from two places appears once, with both sources. Resumes are read for name, contact details, experience and skills.</p></div><div class="actions"><button id="rms-import">Import resumes</button><button class="secondary" id="rms-close">Close</button></div></div><form class="toolbar" id="rms-search"><input name="q" type="search" value="${esc(rmsQuery)}" placeholder="Search inside resumes: skill, town, company, phone…" aria-label="Search resumes"><button class="secondary">Search</button>${rmsQuery ? '<button type="button" class="ghost" id="rms-clear">Clear</button>' : ""}</form><div class="tabs-line"><button type="button" class="${rmsSource ? "" : "on"}" data-rms-src="">All (${inbox.people.length})</button>${all
       .map(
         (s) =>
           `<button type="button" class="${rmsSource === s ? "on" : ""}" data-rms-src="${esc(s)}">${esc(s)} (${inbox.people.filter((p) => p.sources.includes(s)).length})</button>`,
       )
       .join("")}</div>${
       shown.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Candidate</th><th>Contact</th><th>Sources</th><th>Received</th><th>Match</th><th>Stage</th><th></th></tr></thead><tbody>${shown
+        ? `<div class="table-wrap"><table><thead><tr><th>Candidate</th><th>Contact</th><th>Skills</th><th>Sources</th><th>Received</th><th>Match</th><th>Stage</th><th></th></tr></thead><tbody>${shown
             .map(
               (p) =>
-                `<tr><td><strong>${esc(p.name)}</strong></td><td>${esc(p.phone || "")}<small>${esc(p.email || "")}</small></td><td>${p.sources.map((s) => `<span class="pill neutral">${esc(s)}</span>`).join(" ")}</td><td>${time(p.created_at)}</td><td>${p.match_score == null ? "—" : `${p.match_score}%`}</td><td>${stagePill(p.stage)}</td><td>${p.resume_id ? `<a class="button secondary" href="/api/admin/candidate-files/${p.resume_id}" target="_blank" rel="noopener">Resume${p.resumes > 1 ? ` (${p.resumes})` : ""}</a> ` : ""}<button class="ghost" data-cand-open="${p.id}">Open</button></td></tr>`,
+                `<tr><td><strong>${esc(p.name)}</strong>${p.experience_years != null ? `<small>${p.experience_years} yrs experience</small>` : ""}</td><td>${esc(p.phone || "")}<small>${esc(p.email || "")}</small></td><td>${p.skills.slice(0, 4).map((s) => `<span class="pill neutral">${esc(s)}</span>`).join(" ")}${p.skills.length > 4 ? ` <small>+${p.skills.length - 4}</small>` : ""}</td><td>${p.sources.map((s) => `<span class="pill neutral">${esc(s)}</span>`).join(" ")}</td><td>${time(p.created_at)}</td><td>${p.match_score == null ? "—" : `${p.match_score}%`}</td><td>${stagePill(p.stage)}</td><td>${p.resume_id ? `<a class="button secondary" href="/api/admin/candidate-files/${p.resume_id}" target="_blank" rel="noopener">Resume${p.resumes > 1 ? ` (${p.resumes})` : ""}</a> <button class="ghost" data-read-resume="${p.id}" title="Read the resume again and fill in missing details">Read</button> ` : ""}<button class="ghost" data-cand-open="${p.id}">Open</button></td></tr>`,
             )
             .join("")}</tbody></table></div>`
-        : empty("No resumes yet", "Import resumes, or connect a source to receive them.")
+        : rmsQuery
+          ? empty("No matches", "No resume on this job contains all of those words.")
+          : empty("No resumes yet", "Import resumes, or connect a source to receive them.")
     }</div>`;
   }
   document.querySelector("#content").innerHTML =
@@ -875,7 +873,25 @@ async function rmsPage(id) {
     sourcesCard;
 
   document.querySelectorAll("[data-rms-open]").forEach(
-    (b) => (b.onclick = () => ((rmsOpening = Number(b.dataset.rmsOpen)), (rmsSource = ""), render())),
+    (b) =>
+      (b.onclick = () => (
+        (rmsOpening = Number(b.dataset.rmsOpen)), (rmsSource = ""), (rmsQuery = ""), render()
+      )),
+  );
+  document.querySelector("#rms-search")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    rmsQuery = new FormData(e.target).get("q").trim();
+    render();
+  });
+  document.querySelector("#rms-clear")?.addEventListener("click", () => ((rmsQuery = ""), render()));
+  document.querySelectorAll("[data-read-resume]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        busy(b, async () => {
+          const r = await api(`/admin/candidates/${b.dataset.readResume}/read-resume`, {});
+          notice(r.filled.length ? `Filled in ${r.filled.join(", ")}.` : "Nothing new found in the resume.");
+          await render();
+        })),
   );
   document.querySelector("#rms-close")?.addEventListener("click", () => ((rmsOpening = null), render()));
   document.querySelectorAll("[data-rms-src]").forEach(
@@ -930,7 +946,7 @@ async function rmsPage(id) {
         .map((s) => `<option value="s:${s.id}">${esc(s.name)}</option>`)
         .join("")}${Object.entries(src.kinds)
         .map(([k, v]) => `<option value="k:${k}">${esc(v)}</option>`)
-        .join("")}</select></label><label class="full">Resume files (PDF, Word or photo; up to 20, each up to 3 MB)<input type="file" name="files" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" multiple required></label><p class="full muted">Each file becomes a candidate named from its file name; you can correct names and add contact details from the candidate's page. Someone already on this job is matched and not added twice.</p><div class="full" id="rms-results"></div>`,
+        .join("")}</select></label><label class="full">Resume files (PDF, Word or photo; up to 20, each up to 3 MB)<input type="file" name="files" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" multiple required></label><p class="full muted">Each file becomes a candidate. PDF and Word resumes are read for the name, phone, email, experience and skills (photos and old .doc files are kept but not read, so those are named from the file name). Someone already on this job is matched and not added twice.</p><div class="full" id="rms-results"></div>`,
       async (f) => {
         const files = [...document.querySelector("dialog input[name=files]").files];
         if (!files.length) throw new Error("Choose the resume files.");
@@ -941,7 +957,6 @@ async function rmsPage(id) {
           if (!RESUME_MIME[ext]) throw new Error(`${file.name}: use PDF, Word or a photo.`);
           if (file.size > 3 * 1024 * 1024) throw new Error(`${file.name} is larger than 3 MB.`);
           items.push({
-            name: nameFromFile(file.name),
             resume: { name: file.name, mime: RESUME_MIME[ext], data: await toB64(file) },
           });
         }

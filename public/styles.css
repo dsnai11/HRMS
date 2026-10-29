@@ -2469,3 +2469,7 @@ dialog .gallery-full {
   background: linear-gradient(135deg, #ac051b, #4e5aa8);
   color: #fff;
 }
+/* RMS: search inside resumes */
+.toolbar { display: flex; gap: 8px; margin: 12px 0 4px; flex-wrap: wrap; }
+.toolbar input[type="search"] { flex: 1 1 260px; min-width: 0; }
+tr.selected td { background: color-mix(in srgb, var(--brand, #ac051b) 7%, transparent); }
