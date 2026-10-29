@@ -1704,6 +1704,7 @@ const BOT_LINKS: Partial<Record<string, Section>> = {
   timeoff: "Leave",
   payslips: "Payslips",
   helpdesk: "Helpdesk",
+  mine: "My Attendance",
 };
 const BOT_SUGGESTIONS = [
   "What is my leave balance?",
@@ -1712,6 +1713,7 @@ const BOT_SUGGESTIONS = [
   "When is payday?",
   "Show my last payslip",
   "My attendance this month",
+  "My leave history",
 ];
 
 function LaxmiScreen({

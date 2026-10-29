@@ -433,6 +433,7 @@ const BOT_LINKS = {
   teamcal: "Team calendar",
   policies: "Policies",
   helpdesk: "Helpdesk",
+  learning: "My courses",
 };
 const BOT_SUGGESTIONS = [
   "What is my leave balance?",
@@ -441,6 +442,8 @@ const BOT_SUGGESTIONS = [
   "When is payday?",
   "Show my last payslip",
   "My attendance this month",
+  "My leave history",
+  "My training",
 ];
 
 function botMine(text) {

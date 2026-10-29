@@ -249,6 +249,8 @@ const HELP = `I'm Laxmi, your HR assistant. Try asking:
 • "Next holidays"
 • "When is payday?" or "Show my last payslip"
 • "My attendance this month"
+• "My leave history" or "Status of my leave"
+• "My training" (courses assigned and completed)
 • Managers: "Who in my team is on leave today?"
 Anything else, I look up in the company knowledge base and policies.`;
 
@@ -395,6 +397,66 @@ async function attendance(app, user) {
   };
 }
 
+const shortDate = (d) =>
+  new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", timeZone: "UTC" }).format(
+    new Date(`${d}T00:00:00Z`),
+  );
+
+async function leaveHistory(app, user) {
+  const rows = await app.db
+    .prepare(
+      `SELECT r.from_date,r.to_date,r.days,r.half_day,r.status,t.name type FROM leave_requests r
+       JOIN leave_types t ON t.id=r.leave_type_id WHERE r.user_id=? ORDER BY r.from_date DESC,r.id DESC LIMIT 8`,
+    )
+    .all(user.id);
+  if (!rows.length)
+    return {
+      intent: "leave_history",
+      text: "You have not applied for any leave yet.",
+      links: ["timeoff"],
+    };
+  const status = { pending: "waiting for approval", approved: "approved", rejected: "not approved", cancelled: "cancelled" };
+  const lines = rows.map(
+    (r) =>
+      `• ${shortDate(r.from_date)}${r.to_date !== r.from_date ? `–${shortDate(r.to_date)}` : ""}: ${r.type}, ${r.half_day ? "half day" : plural(r.days, "day")}, ${status[r.status]}`,
+  );
+  const waiting = rows.filter((r) => r.status === "pending").length;
+  return {
+    intent: "leave_history",
+    text: `Your recent leave:
+${lines.join("\n")}${waiting ? `\n${plural(waiting, "request")} still waiting for approval.` : ""}`,
+    links: ["timeoff"],
+  };
+}
+
+async function training(app, user) {
+  const rows = await app.db
+    .prepare(
+      `SELECT t.title,t.mandatory,t.due_date,r.status,r.completed_on,r.score FROM training_records r
+       JOIN trainings t ON t.id=r.training_id WHERE r.user_id=? ORDER BY r.status='completed',t.due_date,t.id`,
+    )
+    .all(user.id);
+  if (!rows.length)
+    return { intent: "training", text: "No training has been assigned to you.", links: ["learning"] };
+  const open = rows.filter((r) => r.status !== "completed");
+  const done = rows.filter((r) => r.status === "completed");
+  const day = today(app);
+  const lines = [
+    ...open.map(
+      (r) =>
+        `• ${r.title}${r.mandatory ? " (mandatory)" : ""}: to do${r.due_date ? `, due ${shortDate(r.due_date)}${r.due_date < day ? " (overdue)" : ""}` : ""}`,
+    ),
+    ...done
+      .slice(0, 5)
+      .map((r) => `• ${r.title}: completed${r.completed_on ? ` on ${shortDate(r.completed_on.slice(0, 10))}` : ""}${r.score != null ? `, score ${r.score}%` : ""}`),
+  ];
+  return {
+    intent: "training",
+    text: `You have completed ${done.length} of ${plural(rows.length, "course")}.\n${lines.join("\n")}`,
+    links: ["learning"],
+  };
+}
+
 async function team(app, user) {
   const manager = await isManager(app, user);
   const companyWide = !manager && can(user, "attendance.read");
@@ -450,6 +512,11 @@ const RULES = [
     /\b(leaves?|cl|sl|el|pl)\b.*\b(balance|left|remaining|available|how many)\b|\b(balance|how many|remaining)\b.*\bleaves?\b/i,
     leaveBalance,
   ],
+  [
+    /\bleaves?\b.*\b(history|status|taken|applied|past|previous|requests?|approved)\b|\b(history|status)\b.*\bleaves?\b|\bmy leaves\s*[?.!]*$/i,
+    leaveHistory,
+  ],
+  [/\b(trainings?|courses?|learning|lms|certifications?)\b/i, training],
   [
     (q, app) =>
       /\b(apply|request|book|take|raise)\b.*\b(leave|day off|half[\s-]?day)\b/i.test(q) ||

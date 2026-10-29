@@ -447,6 +447,36 @@ test("Laxmi: rules answer from the asker's own records, guided leave ends in the
   assert.match(teamA.text, /Waiting for your approval: 1 item/);
   assert.match((await ask("who in my team is on leave today?")).text, /for managers/);
 
+  // Leave history and training completion, only the asker's own (Bot-03).
+  const hist = await ask("show my leave history");
+  assert.equal(hist.intent, "leave_history");
+  assert.match(hist.text, /12 Nov: Casual Leave, 1 day, waiting for approval/);
+  assert.match(hist.text, /1 request still waiting for approval/);
+  assert.equal((await ask("what is the status of my leave?")).intent, "leave_history");
+  assert.doesNotMatch((await ask("my leave history", people.other.token)).text, /12 Nov/);
+  assert.match((await ask("my training")).text, /No training has been assigned/);
+  const course = async (title, extra) =>
+    Number(
+      (
+        await db
+          .prepare(
+            `INSERT INTO trainings(company_id,title,mandatory,due_date,created_at) VALUES((SELECT company_id FROM users WHERE id=?),?,?,?,'2026-10-01')`,
+          )
+          .run(people.emp.id, title, extra.mandatory ?? 0, extra.due ?? null)
+      ).lastInsertRowid,
+    );
+  const kyc = await course("KYC basics", { mandatory: 1, due: "2026-10-30" });
+  const posh = await course("POSH awareness", {});
+  await db.prepare("INSERT INTO training_records(training_id,user_id) VALUES(?,?)").run(kyc, people.emp.id);
+  await db
+    .prepare("INSERT INTO training_records(training_id,user_id,status,completed_on,score) VALUES(?,?,'completed','2026-10-20',90)")
+    .run(posh, people.emp.id);
+  const tr = await ask("which courses have I completed?");
+  assert.equal(tr.intent, "training");
+  assert.match(tr.text, /completed 1 of 2 courses/);
+  assert.match(tr.text, /KYC basics \(mandatory\): to do, due 30 Oct \(overdue\)/);
+  assert.match(tr.text, /POSH awareness: completed on 20 Oct, score 90%/);
+
   // Super administrators have no personal records to answer from.
   assert.equal((await call("/bot/ask", { question: "hello" }, owner)).status, 403);
   assert.equal((await call("/bot/ask", { question: "" }, emp)).status, 400);
