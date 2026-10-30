@@ -197,6 +197,8 @@ export const SECTIONS = [
   "OD Log History",
   "Directory",
   "Helpdesk",
+  "Surveys",
+  "Raise a concern",
   "Alerts",
   "Profile",
 ] as const;
@@ -229,6 +231,8 @@ export const MENU: [string, [Section | "Punch", string][]][] = [
       ["Messages", "Messages"],
       ["Ask Laxmi", "Ask Laxmi"],
       ["Helpdesk", "Helpdesk"],
+      ["Surveys", "Surveys"],
+      ["Raise a concern", "Raise a concern"],
       ["Alerts", "Alerts"],
     ],
   ],
@@ -374,6 +378,8 @@ export default function More({
       {section === "OD Log History" && <OdLogScreen api={api} />}
       {section === "Directory" && <DirectoryScreen api={api} />}
       {section === "Helpdesk" && <HelpdeskScreen api={api} />}
+      {section === "Surveys" && <SurveysScreen api={api} />}
+      {section === "Raise a concern" && <ConcernsScreen api={api} />}
       {section === "Alerts" && <AlertsScreen api={api} onChange={setUnread} />}
       {section === "Profile" && (
         <ProfileWithDetails
@@ -2778,6 +2784,302 @@ function DirectoryScreen({ api }: { api: Api }) {
 }
 
 // ---- helpdesk ----------------------------------------------------------------------------------------
+// ---- surveys: anonymous answers -------------------------------------------------------------------
+type SurveyQ = { id: string; type: "enps" | "rating" | "choice" | "text"; text: string; options?: string[] };
+type Survey = { id: number; title: string; intro: string | null; closes_on: string; answered: boolean; questions: SurveyQ[] };
+function SurveysScreen({ api }: { api: Api }) {
+  const list = useLoad(() => api<Survey[]>("/surveys"));
+  const [open, setOpen] = useState<Survey | null>(null);
+  const [answers, setAnswers] = useState<Record<string, string | number>>({});
+  const [sending, setSending] = useState(false);
+  if (open) {
+    const missing = open.questions.some((q) => q.type !== "text" && answers[q.id] === undefined);
+    return (
+      <View style={s.card}>
+        <Text style={s.heading}>{open.title}</Text>
+        {!!open.intro && <Text style={s.note}>{open.intro}</Text>}
+        {open.questions.map((q) => (
+          <View key={q.id} style={{ gap: 8 }}>
+            <Text style={s.strong}>{q.text}</Text>
+            {q.type === "text" ? (
+              <Field
+                label="Comment (optional)"
+                value={String(answers[q.id] ?? "")}
+                onChange={(v) => setAnswers((a) => ({ ...a, [q.id]: v }))}
+                multiline
+              />
+            ) : (
+              <View style={s.wrap}>
+                {(q.type === "choice"
+                  ? (q.options ?? [])
+                  : Array.from({ length: q.type === "enps" ? 11 : 5 }, (_, i) => (q.type === "enps" ? i : i + 1))
+                ).map((v) => (
+                  <Pressable
+                    key={String(v)}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: answers[q.id] === v }}
+                    onPress={() => setAnswers((a) => ({ ...a, [q.id]: v }))}
+                    style={[s.chip, answers[q.id] === v && s.chipOn]}
+                  >
+                    <Text style={[s.chipText, answers[q.id] === v && { color: "#fff" }]}>{String(v)}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+            {q.type === "enps" && <Text style={s.note}>0 = not at all, 10 = definitely</Text>}
+            {q.type === "rating" && <Text style={s.note}>1 = strongly disagree, 5 = strongly agree</Text>}
+          </View>
+        ))}
+        <Text style={s.note}>
+          Your answers are stored without your name. Results show only when at least 5 people have answered.
+        </Text>
+        <Btn
+          title={sending ? "Sending…" : "Send answers"}
+          disabled={sending || missing}
+          onPress={async () => {
+            setSending(true);
+            const ok = await attempt(
+              () => api("/surveys/" + open.id + "/respond", { answers }),
+              "Thank you. Your answers were sent anonymously.",
+            );
+            setSending(false);
+            if (ok) {
+              setOpen(null);
+              setAnswers({});
+              void list.reload();
+            }
+          }}
+        />
+        <Btn title="Back" secondary onPress={() => setOpen(null)} />
+      </View>
+    );
+  }
+  return (
+    <View style={s.card}>
+      <Text style={s.heading}>Surveys</Text>
+      <Text style={s.note}>Tell us how work is going. Answers are anonymous.</Text>
+      <Status loading={list.loading} error={list.error} />
+      {!list.loading && (list.data ?? []).length === 0 && <Text style={s.note}>No surveys are open for you.</Text>}
+      {(list.data ?? []).map((sv) => (
+        <View key={sv.id} style={s.row}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.strong}>{sv.title}</Text>
+            <Text style={s.note}>Open until {dateText(sv.closes_on)}</Text>
+          </View>
+          {sv.answered ? (
+            <Pill text="answered" />
+          ) : (
+            <Btn
+              title="Answer"
+              onPress={() => {
+                setAnswers({});
+                setOpen(sv);
+              }}
+            />
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// ---- raise a concern: grievance, POSH, whistleblower --------------------------------------------
+type CaseKind = "grievance" | "posh" | "whistleblower";
+type CaseOptions = Record<CaseKind, { label: string; anonymous: boolean; categories: string[] }>;
+type CaseView = {
+  id: number;
+  code: string;
+  kind: CaseKind;
+  subject: string;
+  category: string;
+  description: string;
+  status: string;
+  outcome: string | null;
+  messages: { id: number; author: string; body: string; created_at: string }[];
+};
+function ConcernsScreen({ api }: { api: Api }) {
+  const opts = useLoad(() => api<CaseOptions>("/cases/options"));
+  const mine = useLoad(() => api<CaseView[]>("/cases/mine"));
+  const [view, setView] = useState<{ c: CaseView; follow?: { code: string; key: string } } | null>(null);
+  const [form, setForm] = useState(false);
+  const [kind, setKind] = useState<CaseKind>("grievance");
+  const [category, setCategory] = useState("");
+  const [subject, setSubject] = useState(""),
+    [details, setDetails] = useState(""),
+    [who, setWho] = useState(""),
+    [anon, setAnon] = useState(false),
+    [reply, setReply] = useState(""),
+    [code, setCode] = useState(""),
+    [key, setKey] = useState("");
+  const [sending, setSending] = useState(false);
+  const o = opts.data;
+  if (view) {
+    const c = view.c;
+    return (
+      <View style={s.card}>
+        <Text style={s.heading}>{c.code}</Text>
+        <Text style={s.strong}>{c.subject}</Text>
+        <Text style={s.note}>
+          {c.category} · {c.status}
+        </Text>
+        <Text>{c.description}</Text>
+        {!!c.outcome && <Text style={s.note}>Outcome: {c.outcome}</Text>}
+        {c.messages.map((m) => (
+          <View key={m.id} style={s.bubble}>
+            <Text style={s.strong}>{m.author}</Text>
+            <Text>{m.body}</Text>
+          </View>
+        ))}
+        {c.status !== "closed" && (
+          <>
+            <Field label="Your message" value={reply} onChange={setReply} multiline />
+            <Btn
+              title="Send"
+              disabled={!reply.trim()}
+              onPress={async () => {
+                const ok = await attempt(() =>
+                  view.follow
+                    ? api("/cases/follow/reply", { ...view.follow, body: reply })
+                    : api("/cases/" + c.id + "/reply", { body: reply }),
+                );
+                if (!ok) return;
+                setReply("");
+                const fresh = view.follow
+                  ? await api<CaseView>("/cases/follow", view.follow)
+                  : (await api<CaseView[]>("/cases/mine")).find((x) => x.id === c.id);
+                if (fresh) setView({ ...view, c: fresh });
+              }}
+            />
+          </>
+        )}
+        <Btn title="Back" secondary onPress={() => setView(null)} />
+      </View>
+    );
+  }
+  return (
+    <>
+      <View style={s.card}>
+        <Text style={s.heading}>Raise a concern</Text>
+        <Text style={s.note}>
+          Grievances go to HR. POSH complaints go only to the Internal Committee, and whistleblower reports only
+          to the vigilance committee. Nobody you name can see your case.
+        </Text>
+        <Btn title={form ? "Close" : "New concern"} secondary={form} onPress={() => setForm(!form)} />
+        {form && o && (
+          <View style={{ gap: 12 }}>
+            <View style={s.wrap}>
+              {(Object.keys(o) as CaseKind[]).map((k) => (
+                <Pressable
+                  key={k}
+                  onPress={() => {
+                    setKind(k);
+                    setCategory("");
+                    if (!o[k].anonymous) setAnon(false);
+                  }}
+                  style={[s.chip, kind === k && s.chipOn]}
+                >
+                  <Text style={[s.chipText, kind === k && { color: "#fff" }]}>{o[k].label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={s.label}>Category</Text>
+            <View style={s.wrap}>
+              {o[kind].categories.map((c) => (
+                <Pressable key={c} onPress={() => setCategory(c)} style={[s.chip, category === c && s.chipOn]}>
+                  <Text style={[s.chipText, category === c && { color: "#fff" }]}>{c}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Field label="Subject" value={subject} onChange={setSubject} />
+            <Field label="What happened" value={details} onChange={setDetails} multiline />
+            <Field label="Person involved (optional)" value={who} onChange={setWho} />
+            {o[kind].anonymous ? (
+              <Pressable onPress={() => setAnon(!anon)} style={[s.chip, anon && s.chipOn]}>
+                <Text style={[s.chipText, anon && { color: "#fff" }]}>
+                  {anon ? "✓ Send anonymously" : "Send anonymously"}
+                </Text>
+              </Pressable>
+            ) : (
+              <Text style={s.note}>
+                A POSH complaint needs your name so the committee can inquire. It stays confidential to the committee.
+              </Text>
+            )}
+            <Btn
+              title={sending ? "Sending…" : "Send"}
+              disabled={sending || !category || !subject.trim() || !details.trim()}
+              onPress={async () => {
+                setSending(true);
+                try {
+                  const r = await api<{ code: string; follow_key?: string }>("/cases", {
+                    kind,
+                    category,
+                    subject,
+                    description: details,
+                    against_text: who || null,
+                    anonymous: anon,
+                  });
+                  Alert.alert(
+                    "Sent",
+                    r.follow_key
+                      ? "Write these down. They are the only way to follow this anonymous report and will not be shown again.\n\nCode: " +
+                          r.code +
+                          "\nKey: " +
+                          r.follow_key
+                      : "Your case number is " + r.code + ". Replies appear here.",
+                  );
+                  setForm(false);
+                  setSubject("");
+                  setDetails("");
+                  setWho("");
+                  setAnon(false);
+                  void mine.reload();
+                } catch (e) {
+                  Alert.alert("Could not send", errorText(e));
+                } finally {
+                  setSending(false);
+                }
+              }}
+            />
+          </View>
+        )}
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>Your cases</Text>
+        <Status loading={mine.loading} error={mine.error} />
+        {!mine.loading && (mine.data ?? []).length === 0 && <Text style={s.note}>Nothing raised yet.</Text>}
+        {(mine.data ?? []).map((c) => (
+          <Pressable key={c.id} style={s.row} onPress={() => setView({ c })}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.strong}>
+                {c.code} · {c.subject}
+              </Text>
+              <Text style={s.note}>{c.category}</Text>
+            </View>
+            <Pill text={c.status} />
+          </Pressable>
+        ))}
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>Follow an anonymous report</Text>
+        <Field label="Case code" value={code} onChange={setCode} />
+        <Field label="Key" value={key} onChange={setKey} />
+        <Btn
+          title="Open"
+          disabled={!code.trim() || !key.trim()}
+          onPress={async () => {
+            try {
+              const f = { code: code.trim(), key: key.trim() };
+              setView({ c: await api<CaseView>("/cases/follow", f), follow: f });
+            } catch (e) {
+              Alert.alert("Not found", errorText(e));
+            }
+          }}
+        />
+      </View>
+    </>
+  );
+}
+
 function HelpdeskScreen({ api }: { api: Api }) {
   const list = useLoad(() => api<Ticket[]>("/tickets"));
   const [open, setOpen] = useState<TicketDetail | null>(null);
