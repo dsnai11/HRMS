@@ -91,7 +91,7 @@ export function registerRms(router, app) {
           (
             await db
               .prepare(
-                "INSERT INTO candidates(company_id,opening_id,name,email,phone,source,expected_ctc,notice_days,notes,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO candidates(company_id,opening_id,name,email,phone,source,expected_ctc,notice_days,notes,created_by,created_at,updated_at,location) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
               )
               .run(
                 companyId,
@@ -106,6 +106,7 @@ export function registerRms(router, app) {
                 actorId,
                 at,
                 at,
+                optionalString(b.location, "City", 80),
               )
           ).lastInsertRowid,
         );
@@ -154,6 +155,7 @@ export function registerRms(router, app) {
       ...(read ? { read: { name: !b.name && Boolean(read.name), email: read.email, phone: read.phone, experience_years: read.experience_years, skills: read.skills } } : {}),
     };
   }
+  app.rmsIntake = intake;
   const openingFor = async (companyId, b) => {
     const raw = b.opening_id ?? b.job_code;
     const id = Number(String(raw ?? "").replace(/^J/i, ""));

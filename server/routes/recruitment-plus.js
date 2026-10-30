@@ -15,6 +15,7 @@ import { requireOwned, staffWith } from "../scope.js";
 import { can } from "../rbac.js";
 import { checkFile } from "./documents.js";
 import { applyResume, needsOcr, readResumeLater } from "../resume-parse.js";
+import { cleanScreening, evaluateScreening, publicScreening } from "../screening.js";
 
 const STEPS = [
   ["applied", "Applied"],
@@ -147,6 +148,8 @@ export function openingExtras(b) {
   if (b.published !== undefined) out.published = b.published ? 1 : 0;
   if (b.closing_date !== undefined)
     out.closing_date = isoDate(b.closing_date, "Closing date");
+  if (b.screening !== undefined) out.screening = JSON.stringify(cleanScreening(b.screening));
+  if (b.recruiter_id !== undefined) out.recruiter_id = optionalId(b.recruiter_id, "Recruiter");
   return out;
 }
 export function candidateExtras(b) {
@@ -161,6 +164,7 @@ export function candidateExtras(b) {
   if (b.qualification !== undefined)
     out.qualification =
       optionalString(b.qualification, "Qualification", 200) || null;
+  if (b.location !== undefined) out.location = optionalString(b.location, "City", 80) || null;
   return out;
 }
 export async function setColumns(db, table, id, cols) {
@@ -368,6 +372,7 @@ export function registerRecruitmentPlus(router, app) {
     async ({ params, companyId, body, send, audit }) => {
       const o = await owned("job_openings", params.id, companyId, "opening");
       const extras = openingExtras(await body());
+      if (extras.recruiter_id) await owned("users", extras.recruiter_id, companyId, "recruiter");
       if (extras.published === 1 && o.approval_status !== "approved")
         throw new HttpError(
           409,
@@ -557,7 +562,7 @@ export function registerRecruitmentPlus(router, app) {
   const jobsOf = (companyId) =>
     db
       .prepare(
-        `SELECT o.id,o.title,o.positions,o.employment_type,o.description,o.qualifications,o.min_experience_years,o.location,o.closing_date,o.skills,
+        `SELECT o.id,o.title,o.positions,o.employment_type,o.description,o.qualifications,o.min_experience_years,o.location,o.closing_date,o.skills,o.screening,
            d.name department_name,b.name branch_name
          FROM job_openings o LEFT JOIN departments d ON d.id=o.department_id LEFT JOIN branches b ON b.id=o.branch_id
          WHERE o.company_id=? AND o.published=1 AND o.approval_status='approved' AND o.status='open'
@@ -582,6 +587,8 @@ export function registerRecruitmentPlus(router, app) {
         jobs: (await jobsOf(c.id)).map((j) => ({
           ...j,
           skills: JSON.parse(j.skills || "[]"),
+          // The questions without their knock-out rules.
+          screening: publicScreening(JSON.parse(j.screening || "[]")),
         })),
       });
     },
@@ -616,6 +623,8 @@ export function registerRecruitmentPlus(router, app) {
           "You have already applied for this job. Check your email for your tracking link.",
         );
       const extras = candidateExtras(b);
+      const screen = evaluateScreening(JSON.parse(job.screening || "[]"), b.screening);
+      extras.screening = JSON.stringify(screen);
       const file = b.resume ? checkFile(b.resume) : null;
       const token = randomBytes(24).toString("base64url");
       const id = await transaction(async () => {
@@ -686,9 +695,13 @@ export function registerRecruitmentPlus(router, app) {
         .prepare("SELECT * FROM candidates WHERE id=?")
         .get(id);
       const track = `${base()}/careers.html?t=${token}`;
-      await candidateMail(app, cand, "acknowledgement", {
-        track: `Track your application any time: ${track}`,
-      });
+      // A knock-out answer closes the application at once (the rejection email says so).
+      if (screen.failed.length)
+        await app.moveCandidateStage(cand, "rejected", `Screening: ${screen.failed.join("; ")}`.slice(0, 300), null, co.id);
+      else
+        await candidateMail(app, cand, "acknowledgement", {
+          track: `Track your application any time: ${track}`,
+        });
       await app.notify(await hrIds(co.id), {
         companyId: co.id,
         kind: "hiring",
