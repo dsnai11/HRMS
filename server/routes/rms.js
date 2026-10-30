@@ -171,11 +171,15 @@ export function registerRms(router, app) {
   router.get("/api/admin/rms/sources", { perm: "recruitment.manage" }, async ({ companyId, send }) =>
     send(200, {
       kinds: SOURCE_KINDS,
-      items: await db
+      items: (await db
         .prepare(
-          "SELECT id,name,kind,key_hint,active,received,created_at,last_used_at FROM intake_sources WHERE company_id=? ORDER BY name",
+          "SELECT id,name,kind,key_hint,active,received,created_at,last_used_at,fee_per_hire,monthly_cost,default_opening_id,last_error,settings FROM intake_sources WHERE company_id=? ORDER BY name",
         )
-        .all(companyId),
+        .all(companyId))
+        .map(({ settings, ...s }) => {
+          const x = JSON.parse(settings || "{}");
+          return { ...s, mailbox: x.mailbox ? { host: x.host, user: x.user } : null };
+        }),
     }),
   );
   // The key is shown once; only its hash is kept.

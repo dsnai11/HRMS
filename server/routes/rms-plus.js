@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { HttpError, clientIp, integer, isoDate, number, oneOf, optionalId, optionalString, string } from "../http.js";
 import { rescoreCandidate } from "./recruitment-plus.js";
+import { encryptJson, encryptionKey } from "../crypto-store.js";
+import { readMailbox } from "../mailbox.js";
 export { cleanScreening, evaluateScreening, publicScreening } from "../screening.js";
 
 // RMS, further: the talent pool across every job, adding a past candidate to another job,
@@ -338,6 +340,39 @@ export function registerRmsPlus(router, app) {
         .sort((a, b) => b.received - a.received);
     };
     return send(200, { from, to, total: rows.length, by_source: group("source"), by_branch: group("branch"), by_recruiter: group("recruiter") });
+  });
+
+  // ---- mailbox for an Email source -----------------------------------------------------------
+  router.put("/api/admin/rms/sources/:id/mailbox", { perm: "recruitment.manage" }, async ({ params, companyId, body, send, audit }) => {
+    const s = await owned("intake_sources", params.id, companyId, "source");
+    if (s.kind !== "email") throw new HttpError(409, "Only an Email source reads a mailbox.");
+    const key = encryptionKey();
+    if (!key) throw new HttpError(503, "Saving a mailbox password needs DATA_ENCRYPTION_KEY on the server.");
+    const b = await body();
+    const host = string(b.host, "Server", 120).toLowerCase();
+    if (!/^[a-z0-9.-]+$/.test(host)) throw new HttpError(400, "Server must be a host name such as imap.gmail.com.");
+    const cfg = {
+      host,
+      port: Math.round(number(Number(b.port ?? 993), "Port", 1, 65535)),
+      secure: b.secure !== false,
+      user: string(b.user, "Mailbox user", 200),
+      pass: string(b.password, "Password", 200),
+    };
+    await db
+      .prepare("UPDATE intake_sources SET settings=?,last_error=NULL WHERE id=?")
+      .run(JSON.stringify({ mailbox: encryptJson(cfg, key), host: cfg.host, user: cfg.user }), s.id);
+    await audit("rms_mailbox_set", { id: s.id, host: cfg.host, user: cfg.user });
+    return send(200, { ok: true });
+  });
+  router.post("/api/admin/rms/sources/:id/mailbox/check", { perm: "recruitment.manage" }, async ({ params, companyId, send }) => {
+    const s = await owned("intake_sources", params.id, companyId, "source");
+    if (!JSON.parse(s.settings || "{}").mailbox) throw new HttpError(409, "Set the mailbox first.");
+    try {
+      return send(200, await readMailbox(app, s));
+    } catch (e) {
+      await db.prepare("UPDATE intake_sources SET last_error=? WHERE id=?").run(String(e.message).slice(0, 300), s.id);
+      throw new HttpError(502, `Could not read the mailbox: ${e.message}`);
+    }
   });
 
   // Source costs, the default job and (for agencies) nothing else is set here.

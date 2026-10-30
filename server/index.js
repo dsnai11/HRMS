@@ -50,6 +50,7 @@ import { registerOvertime } from "./routes/overtime.js";
 import { registerSso } from "./routes/sso.js";
 import { registerRmsPlus } from "./routes/rms-plus.js";
 import { registerWhatsapp } from "./routes/whatsapp.js";
+import { scheduleMailboxes } from "./mailbox.js";
 import { ipAllowed, isStaff, loadRole, outsideOffice } from "./security-policy.js";
 import {
   registerScheduledReports,
@@ -469,6 +470,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   scheduleProbationReminders(app);
   scheduleApprovalReminders(app);
   scheduleStaleShiftClose(app);
+  scheduleMailboxes(app);
   app.notify.resumeQueue().catch((e) => console.error("Mail queue:", e.message));
   scheduleReports(app);
   scheduleLearningReminders(app);
