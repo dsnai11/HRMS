@@ -48,6 +48,7 @@ import { registerSurveys } from "./routes/surveys.js";
 import { registerDelegations } from "./routes/delegations.js";
 import { registerOvertime } from "./routes/overtime.js";
 import { registerSso } from "./routes/sso.js";
+import { registerRmsPlus } from "./routes/rms-plus.js";
 import { ipAllowed, isStaff, loadRole, outsideOffice } from "./security-policy.js";
 import {
   registerScheduledReports,
@@ -249,6 +250,7 @@ export function createApp({
     registerDelegations,
     registerOvertime,
     registerSso,
+    registerRmsPlus,
   ])
     register(router, app);
 

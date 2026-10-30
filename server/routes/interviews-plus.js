@@ -216,14 +216,20 @@ export function registerInterviewsPlus(router, app) {
   router.post(
     "/api/admin/candidates/:id/interviews",
     { perm: "recruitment.manage" },
-    async ({ user, params, companyId, body, send, audit }) => {
+    async ({ user, params, companyId, body, send }) => {
       const c = await owned("candidates", params.id, companyId, "candidate");
+      return send(201, await schedulePanel(companyId, c, await body(), user));
+    },
+  );
+  // Schedules a round with a panel, sends calendar invitations to the panel and the
+  // candidate. `user` is null when the candidate picked the slot themselves.
+  async function schedulePanel(companyId, c, b, user) {
+    {
       if (!OPEN.includes(c.stage))
         throw new HttpError(
           409,
           "This candidate is no longer in the pipeline.",
         );
-      const b = await body();
       const ids = [
         ...new Set(
           (Array.isArray(b.interviewer_ids) && b.interviewer_ids.length
@@ -305,14 +311,16 @@ export function registerInterviewsPlus(router, app) {
           .run(
             c.id,
             "interview_scheduled",
-            `${round} with ${panel.map((p) => p.name).join(", ")}`,
-            user.id,
+            `${round} with ${panel.map((p) => p.name).join(", ")}${user ? "" : " (slot chosen by the candidate)"}`,
+            user?.id ?? null,
             nowIso(),
           );
-        await audit("interview_panel_scheduled", {
-          candidateId: c.id,
-          ids: out.map((o) => o.id),
-        });
+        await app.audit(
+          user,
+          "interview_panel_scheduled",
+          { candidateId: c.id, ids: out.map((o) => o.id), byCandidate: !user },
+          companyId,
+        );
         return out;
       });
       // Invitations: calendar file to each panelist and to the candidate.
@@ -369,13 +377,14 @@ export function registerInterviewsPlus(router, app) {
         },
         ics(`${rows[0].id}-c`, "candidate"),
       );
-      return send(201, {
+      return {
         id: rows[0].id,
         ids: rows.map((r) => r.id),
         questions: questions.length,
-      });
-    },
-  );
+      };
+    }
+  }
+  app.schedulePanel = schedulePanel;
 
   // ---- interviewer's view of an interview ----------------------------------------------------
   async function accessible(user, id) {

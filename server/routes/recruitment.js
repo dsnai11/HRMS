@@ -434,35 +434,44 @@ export function registerRecruitment(router, app) {
   router.post(
     "/api/admin/candidates/:id/stage",
     { perm: "recruitment.manage" },
-    async ({ user, params, companyId, body, send, audit }) => {
+    async ({ user, params, companyId, body, send }) => {
       const c = await owned("candidates", params.id, companyId, "candidate");
       const b = await body();
-      const stage = oneOf(b.stage, "Stage", MANUAL);
-      if (["hired"].includes(c.stage))
-        throw new HttpError(409, "This candidate has already been hired.");
-      const reason = optionalString(b.reason, "Reason", 300);
-      if ((stage === "rejected" || stage === "withdrawn") && !reason)
-        throw new HttpError(400, "Say why.");
-      await transaction(async () => {
-        if (stage === "rejected" || stage === "withdrawn")
-          await db
-            .prepare(
-              "UPDATE offers SET status='withdrawn',decided_at=? WHERE candidate_id=? AND status IN ('draft','sent')",
-            )
-            .run(nowIso(), c.id);
-        await db
-          .prepare(
-            "UPDATE candidates SET stage=?,closed_reason=?,updated_at=? WHERE id=?",
-          )
-          .run(stage, reason, nowIso(), c.id);
-        await event(c.id, `stage_${stage}`, reason, user.id);
-        await audit("candidate_stage", { id: c.id, stage });
-      });
-      if (stage === "rejected" && c.stage !== "rejected")
-        await candidateMail(app, c, "rejection");
+      await moveStage(c, b.stage, b.reason, user, companyId);
       return send(200, { ok: true });
     },
   );
+
+  // Moves a candidate by hand (the stage button and bulk actions): offer and hired follow
+  // from offers and hiring; rejecting or withdrawing needs a reason, withdraws open offers
+  // and tells a rejected candidate.
+  async function moveStage(c, wanted, why, user, companyId, { mail = true } = {}) {
+    const stage = oneOf(wanted, "Stage", MANUAL);
+    if (["hired"].includes(c.stage))
+      throw new HttpError(409, "This candidate has already been hired.");
+    const reason = optionalString(why, "Reason", 300);
+    if ((stage === "rejected" || stage === "withdrawn") && !reason)
+      throw new HttpError(400, "Say why.");
+    await transaction(async () => {
+      if (stage === "rejected" || stage === "withdrawn")
+        await db
+          .prepare(
+            "UPDATE offers SET status='withdrawn',decided_at=? WHERE candidate_id=? AND status IN ('draft','sent')",
+          )
+          .run(nowIso(), c.id);
+      await db
+        .prepare(
+          "UPDATE candidates SET stage=?,closed_reason=?,updated_at=? WHERE id=?",
+        )
+        .run(stage, reason, nowIso(), c.id);
+      await event(c.id, `stage_${stage}`, reason, user?.id ?? null);
+      await app.audit(user, "candidate_stage", { id: c.id, stage }, companyId);
+    });
+    if (mail && stage === "rejected" && c.stage !== "rejected")
+      await candidateMail(app, c, "rejection");
+    return stage;
+  }
+  app.moveCandidateStage = moveStage;
 
   // ---- interviews -------------------------------------------------------------------------
   router.patch(
