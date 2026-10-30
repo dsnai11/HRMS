@@ -50,6 +50,7 @@ import { registerOvertime } from "./routes/overtime.js";
 import { registerSeparation } from "./routes/separation.js";
 import { registerSalaryBills } from "./routes/salary-bills.js";
 import { registerCompetencies } from "./routes/competencies.js";
+import { registerTrainingSessions } from "./routes/training-sessions.js";
 import { registerSso } from "./routes/sso.js";
 import { registerRmsPlus } from "./routes/rms-plus.js";
 import { registerWhatsapp } from "./routes/whatsapp.js";
@@ -113,6 +114,7 @@ const STATIC = {
   "/separation.js": ["separation.js", "text/javascript"],
   "/salary-bills.js": ["salary-bills.js", "text/javascript"],
   "/appraisal.js": ["appraisal.js", "text/javascript"],
+  "/sessions.js": ["sessions.js", "text/javascript"],
   "/vendor/leaflet.js": ["../node_modules/leaflet/dist/leaflet.js", "text/javascript"],
   "/vendor/leaflet.css": ["../node_modules/leaflet/dist/leaflet.css", "text/css"],
   "/join.html": ["join.html", "text/html"],
@@ -267,6 +269,7 @@ export function createApp({
     registerSeparation,
     registerSalaryBills,
     registerCompetencies,
+    registerTrainingSessions,
     registerSso,
     registerRmsPlus,
     registerWhatsapp,

@@ -376,3 +376,53 @@ test("a course without a quiz completes when the last lesson is read; new joiner
     "completed",
   );
 });
+
+test("classroom sessions: scheduled, invited, attended, and the training completes", async (t) => {
+  const w = await world(t);
+  const { call, people, db, setNow } = w;
+  const hr = people.hr.token;
+  // A tracked training assigned to everyone; MGR has already done it.
+  const tr = await call("/admin/trainings", { title: "Fire drill", hours: 2, mandatory: true }, hr);
+  assert.equal(tr.status, 201, JSON.stringify(tr.data));
+  await db.prepare("UPDATE training_records SET status='completed',completed_on='2026-10-01' WHERE training_id=? AND user_id=?").run(tr.data.id, people.mgr.id);
+
+  const base = { training_id: tr.data.id, trainer: "Safety officer", venue: "Jaipur HO, 2nd floor", starts_at: "2026-11-12T10:00", ends_at: "2026-11-12T12:00" };
+  assert.equal((await call("/admin/training-sessions", base, people.emp.token)).status, 403);
+  assert.equal((await call("/admin/training-sessions", { ...base, starts_at: "2026-11-01T10:00", ends_at: "2026-11-01T11:00" }, hr)).status, 400, "in the past");
+  assert.equal((await call("/admin/training-sessions", { ...base, ends_at: "2026-11-12T09:00" }, hr)).status, 400);
+  assert.equal((await call("/admin/training-sessions", { ...base, starts_at: "12/11/2026" }, hr)).status, 400);
+  const s = await call("/admin/training-sessions", base, hr);
+  assert.equal(s.status, 201, JSON.stringify(s.data));
+  assert.equal(s.data.invited, 3, "everyone with the training still to do: HR, payroll and EMP");
+  const detail = (await call(`/admin/training-sessions/${s.data.id}`, undefined, hr)).data;
+  assert.equal(detail.title, "Fire drill", "takes the training's title");
+  assert.equal(detail.starts_at, "2026-11-12T04:30:00.000Z", "IST to UTC");
+  assert.ok(!detail.attendees.some((a) => a.user_id === people.mgr.id), "MGR already did it");
+  const note = await db.prepare("SELECT title FROM notifications WHERE user_id=? ORDER BY id DESC").get(people.emp.id);
+  assert.match(note.title, /Training session: Fire drill/);
+
+  // Capacity, extra invites, the employee's view.
+  const small = (await call("/admin/training-sessions", { title: "Excel basics", starts_at: "2026-11-20T15:00", ends_at: "2026-11-20T16:00", capacity: 1, user_ids: [people.emp.id] }, hr)).data.id;
+  assert.equal((await call(`/admin/training-sessions/${small}/invite`, { user_ids: [people.mgr.id] }, hr)).status, 409, "full");
+  assert.equal((await call(`/admin/training-sessions/${s.data.id}/invite`, { user_ids: [people.mgr.id] }, hr)).data.invited, 1);
+  const mine = (await call("/training-sessions/mine", undefined, people.emp.token)).data;
+  assert.deepEqual(mine.upcoming.map((x) => x.title), ["Fire drill", "Excel basics"]);
+  assert.equal((await call("/admin/training-sessions", undefined, hr)).data.length, 2);
+
+  // Attendance only once it has started; it completes the training for those who came.
+  const marks = [{ user_id: people.emp.id, attended: true }, { user_id: people.pay.id, attended: false }];
+  assert.equal((await call(`/admin/training-sessions/${s.data.id}/attendance`, { marks }, hr)).status, 409);
+  assert.equal((await call(`/admin/training-sessions/${small}/cancel`, { reason: "Trainer unwell" }, hr)).status, 200);
+  setNow("2026-11-12T13:00:00+05:30");
+  assert.equal((await call(`/admin/training-sessions/${s.data.id}/attendance`, { marks: [{ user_id: people.hr.id, attended: true }] }, hr)).status, 403, "not your own");
+  assert.equal((await call(`/admin/training-sessions/${s.data.id}/attendance`, { marks: [{ user_id: people.mgr.id + 999, attended: true }] }, hr)).status, 400);
+  const done = await call(`/admin/training-sessions/${s.data.id}/attendance`, { marks }, hr);
+  assert.equal(done.status, 200, JSON.stringify(done.data));
+  assert.equal(done.data.completed, 1);
+  const rec = await db.prepare("SELECT status,completed_on FROM training_records WHERE training_id=? AND user_id=?").get(tr.data.id, people.emp.id);
+  assert.deepEqual([rec.status, rec.completed_on], ["completed", "2026-11-12"]);
+  assert.equal((await db.prepare("SELECT status FROM training_records WHERE training_id=? AND user_id=?").get(tr.data.id, people.pay.id)).status, "assigned");
+  const after = (await call("/training-sessions/mine", undefined, people.emp.token)).data;
+  assert.deepEqual(after.past.map((x) => [x.title, x.status, x.attendance]), [["Excel basics", "cancelled", "invited"], ["Fire drill", "completed", "attended"]]);
+  assert.equal((await call("/admin/training-sessions?when=past", undefined, hr)).data.length, 1);
+});
