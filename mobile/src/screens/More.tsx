@@ -19,6 +19,10 @@ import {
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import { File } from "expo-file-system";
+import { SupervisorScreen } from "./Supervisor";
+import { ClaimsScreen, TaxScreen } from "./Money";
+import { ResignationScreen } from "./Exit";
+import { LearningScreen, PerformanceScreen } from "./Growth";
 
 // Self-service screens for the phone: leave, messages, the Laxmi assistant,
 // payslips, attendance requests, directory, helpdesk, alerts and profile. Everything talks to the same API as
@@ -202,6 +206,12 @@ export const SECTIONS = [
   "Raise a concern",
   "Alerts",
   "Profile",
+  "Supervisor",
+  "Tax Declaration",
+  "My Claims",
+  "Resignation",
+  "Performance",
+  "Learning",
 ] as const;
 export type Section = (typeof SECTIONS)[number];
 // The phone menu, grouped like the web portal and the company's earlier HR portal.
@@ -219,14 +229,25 @@ export const MENU: [string, [Section | "Punch", string][]][] = [
     ],
   ],
   ["Leave", [["Leave", "My Leaves"]]],
-  ["TDS", [["Payslips", "Payslips"]]],
+  ["Supervisor", [["Supervisor", "Approvals & Team"]]],
+  [
+    "TDS",
+    [
+      ["Payslips", "Payslips & Form 16"],
+      ["Tax Declaration", "Declaration & Bills"],
+    ],
+  ],
+  ["Reimbursement", [["My Claims", "My Claims"]]],
   [
     "Employee",
     [
       ["Profile", "My Profile"],
       ["Directory", "Directory & Referrals"],
+      ["Resignation", "Resignation"],
     ],
   ],
+  ["PMR", [["Performance", "Goals & Reviews"]]],
+  ["LMS", [["Learning", "My Learning"]]],
   [
     "Connect",
     [
@@ -384,6 +405,12 @@ export default function More({
       {section === "Overtime" && <OvertimeScreen api={api} />}
       {section === "Raise a concern" && <ConcernsScreen api={api} />}
       {section === "Alerts" && <AlertsScreen api={api} onChange={setUnread} />}
+      {section === "Supervisor" && <SupervisorScreen api={api} />}
+      {section === "Tax Declaration" && <TaxScreen api={api} />}
+      {section === "My Claims" && <ClaimsScreen api={api} />}
+      {section === "Resignation" && <ResignationScreen api={api} />}
+      {section === "Performance" && <PerformanceScreen api={api} />}
+      {section === "Learning" && <LearningScreen api={api} />}
       {section === "Profile" && (
         <ProfileWithDetails
           api={api}
