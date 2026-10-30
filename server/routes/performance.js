@@ -24,6 +24,11 @@ export function registerPerformance(router, app) {
       throw new HttpError(400, `${label} must be 1 to 5.`);
     return n;
   };
+  // A mid-year check-in is a conversation: the overall rating is optional there.
+  const phaseRating = (cycle, v) =>
+    cycle.phase === "mid_year" && (v === undefined || v === null || v === "")
+      ? null
+      : rating(v, "Rating");
 
   // ---- goals ------------------------------------------------------------------------------------
   router.get("/api/goals", async ({ user, query, send }) => {
@@ -102,25 +107,53 @@ export function registerPerformance(router, app) {
             ? "done"
             : g.status
           : oneOf(b.status, "Status", ["active", "done", "dropped"]);
-      await db
-        .prepare(
-          "UPDATE goals SET title=?,description=?,weight=?,due_date=?,progress=?,status=? WHERE id=?",
-        )
-        .run(
-          b.title === undefined ? g.title : string(b.title, "Title", 150),
+      const next = {
+        title: b.title === undefined ? g.title : string(b.title, "Title", 150),
+        description:
           b.description === undefined
             ? g.description
             : optionalString(b.description, "Description", 1000),
+        weight:
           b.weight === undefined
             ? g.weight
             : Math.round(number(b.weight, "Weight", 0, 100)),
+        due_date:
           b.due_date === undefined
             ? g.due_date
             : isoDate(b.due_date, "Due date"),
-          progress,
-          status,
-          g.id,
-        );
+        progress,
+        status,
+      };
+      await transaction(async () => {
+        await db
+          .prepare(
+            "UPDATE goals SET title=?,description=?,weight=?,due_date=?,progress=?,status=? WHERE id=?",
+          )
+          .run(
+            next.title,
+            next.description,
+            next.weight,
+            next.due_date,
+            next.progress,
+            next.status,
+            g.id,
+          );
+        // Change history: one row per field that changed.
+        for (const [field, value] of Object.entries(next))
+          if (String(g[field] ?? "") !== String(value ?? ""))
+            await db
+              .prepare(
+                "INSERT INTO goal_changes(goal_id,field,old_value,new_value,changed_by,changed_at) VALUES(?,?,?,?,?,?)",
+              )
+              .run(
+                g.id,
+                field,
+                g[field] == null ? null : String(g[field]),
+                value == null ? null : String(value),
+                user.id,
+                nowIso(),
+              );
+      });
       await audit("goal_updated", { id: g.id, progress, status });
       return send(200, { ok: true });
     },
@@ -161,14 +194,15 @@ export function registerPerformance(router, app) {
       if (!start || !end || end < start)
         throw new HttpError(400, "Choose a start date and a later end date.");
       const name = string(b.name, "Name", 80);
+      const phase = oneOf(b.phase ?? "year_end", "Phase", ["mid_year", "year_end"]);
       const out = await transaction(async () => {
         const id = Number(
           (
             await db
               .prepare(
-                "INSERT INTO review_cycles(company_id,name,start_date,end_date,created_by,created_at) VALUES(?,?,?,?,?,?)",
+                "INSERT INTO review_cycles(company_id,name,phase,start_date,end_date,created_by,created_at) VALUES(?,?,?,?,?,?,?)",
               )
-              .run(companyId, name, start, end, user.id, nowIso())
+              .run(companyId, name, phase, start, end, user.id, nowIso())
           ).lastInsertRowid,
         );
         const people = await db
@@ -194,7 +228,7 @@ export function registerPerformance(router, app) {
         {
           companyId,
           kind: "review",
-          title: `Your self-review for ${name} is open`,
+          title: `Your ${phase === "mid_year" ? "mid-year check-in" : "self-review"} for ${name} is open`,
           link: "performance",
         },
       );
@@ -264,7 +298,7 @@ export function registerPerformance(router, app) {
   );
 
   // ---- reviews: employee and manager sides -------------------------------------------------------------
-  const MINE = `SELECT r.*,c.name cycle_name,c.end_date,c.status cycle_status,u.name employee_name,m.name manager_name FROM reviews r JOIN review_cycles c ON c.id=r.cycle_id JOIN users u ON u.id=r.user_id LEFT JOIN users m ON m.id=r.manager_id`;
+  const MINE = `SELECT r.*,c.name cycle_name,c.phase,c.end_date,c.status cycle_status,u.name employee_name,m.name manager_name FROM reviews r JOIN review_cycles c ON c.id=r.cycle_id JOIN users u ON u.id=r.user_id LEFT JOIN users m ON m.id=r.manager_id`;
   // Hide the manager's view from the employee until it is released.
   const shape = (r, viewerId) =>
     r.user_id === viewerId && !r.released
@@ -304,13 +338,10 @@ export function registerPerformance(router, app) {
       const r = await owned("reviews", params.id, user.company_id, "review");
       if (r.user_id !== user.id)
         throw new HttpError(403, "This is not your review.");
-      if (
-        (
-          await db
-            .prepare("SELECT status FROM review_cycles WHERE id=?")
-            .get(r.cycle_id)
-        ).status !== "open"
-      )
+      const cycle = await db
+        .prepare("SELECT status,phase FROM review_cycles WHERE id=?")
+        .get(r.cycle_id);
+      if (cycle.status !== "open")
         throw new HttpError(409, "This cycle is closed.");
       if (r.status !== "pending_self")
         throw new HttpError(
@@ -323,7 +354,7 @@ export function registerPerformance(router, app) {
           "UPDATE reviews SET self_rating=?,self_comment=?,status='pending_manager' WHERE id=?",
         )
         .run(
-          rating(b.rating, "Rating"),
+          phaseRating(cycle, b.rating),
           string(b.comment, "Comment", 2000),
           r.id,
         );
@@ -353,13 +384,10 @@ export function registerPerformance(router, app) {
             ? "This review is complete."
             : "The employee has not submitted a self-review yet.",
         );
-      if (
-        (
-          await db
-            .prepare("SELECT status FROM review_cycles WHERE id=?")
-            .get(r.cycle_id)
-        ).status !== "open"
-      )
+      const cycle = await db
+        .prepare("SELECT status,phase FROM review_cycles WHERE id=?")
+        .get(r.cycle_id);
+      if (cycle.status !== "open")
         throw new HttpError(409, "This cycle is closed.");
       const b = await body();
       await db
@@ -367,7 +395,7 @@ export function registerPerformance(router, app) {
           "UPDATE reviews SET manager_rating=?,manager_comment=?,status='completed',completed_at=? WHERE id=?",
         )
         .run(
-          rating(b.rating, "Rating"),
+          phaseRating(cycle, b.rating),
           string(b.comment, "Comment", 2000),
           nowIso(),
           r.id,

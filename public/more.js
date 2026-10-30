@@ -262,7 +262,7 @@ async function performancePage(id) {
     ...(me.is_manager ? { team: "My team's reviews" } : {}),
     feedback: "Feedback",
     multirater: "360° feedback",
-    ...(manage ? { cycles: "Review cycles", kras: "KRAs" } : {}),
+    ...(manage ? { cycles: "Review cycles", competencies: "Competencies", kras: "KRAs" } : {}),
   };
   if (!tabs[perfTab]) perfTab = "mine";
   const html = await perfHtml(perfTab);
@@ -282,7 +282,7 @@ async function performancePage(id) {
 }
 const goalRows = (goals, mine) =>
   goals.length
-    ? `<div class="table-wrap"><table><thead><tr><th>Goal</th><th>Weight</th><th>Due</th><th>Progress</th><th></th></tr></thead><tbody>${goals.map((g) => `<tr><td>${esc(g.title)}${g.description ? `<small>${esc(g.description)}</small>` : ""}</td><td>${g.weight}%</td><td>${g.due_date ? fmtDate(g.due_date) : "—"}</td><td><span class="pill ${g.status === "active" ? "neutral" : ""}">${g.status === "done" ? "Done" : g.status === "dropped" ? "Dropped" : `${g.progress}%`}</span></td><td>${g.status === "active" ? `<button class="secondary" data-progress="${g.id}" data-now="${g.progress}">Update</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+    ? `<div class="table-wrap"><table><thead><tr><th>Goal</th><th>Weight</th><th>Due</th><th>Progress</th><th></th></tr></thead><tbody>${goals.map((g) => `<tr><td>${esc(g.title)}${g.description ? `<small>${esc(g.description)}</small>` : ""}</td><td>${g.weight}%</td><td>${g.due_date ? fmtDate(g.due_date) : "—"}</td><td><span class="pill ${g.status === "active" ? "neutral" : ""}">${g.status === "done" ? "Done" : g.status === "dropped" ? "Dropped" : `${g.progress}%`}</span></td><td>${g.status === "active" ? `<button class="secondary" data-progress="${g.id}" data-now="${g.progress}">Update</button> ` : ""}<button class="ghost" data-goal-history="${g.id}">History</button></td></tr>`).join("")}</tbody></table></div>`
     : empty(
         "No goals",
         mine ? "Add a goal, or ask your manager to set some." : "No goals yet.",
@@ -294,11 +294,11 @@ async function perfHtml(tab) {
       api("/goals"),
       api("/reviews/mine"),
     ]);
-    return `<div class="card"><div class="card-head"><div><h2>My goals</h2></div><button id="new-goal">Add a goal</button></div>${goalRows(goals, true)}</div><div class="card"><h2>My reviews</h2>${reviews.length ? reviews.map((r) => `<div class="activity"><strong>${esc(r.cycle_name)}</strong> · <span class="pill ${r.status === "completed" ? "" : "neutral"}">${REVIEW_STATUS[r.status]}</span>${r.self_rating ? `<br><small>Your rating ${r.self_rating}/5 · ${esc(r.self_comment || "")}</small>` : ""}${r.manager_rating ? `<br><small>Manager rating ${r.manager_rating}/5 · ${esc(r.manager_comment || "")}</small>` : r.status === "completed" ? "<br><small>Your manager's rating will be shared by HR.</small>" : ""}${r.status === "pending_self" && r.cycle_status === "open" ? ` <button data-self="${r.id}">Write self-review</button>` : ""}</div>`).join("") : empty("No reviews", "Reviews appear when HR starts a cycle.")}</div>`;
+    return `<div class="card"><div class="card-head"><div><h2>My goals</h2></div><button id="new-goal">Add a goal</button></div>${goalRows(goals, true)}</div><div class="card"><h2>My reviews</h2>${reviews.length ? reviews.map((r) => `<div class="activity"><strong>${esc(r.cycle_name)}</strong> · ${PHASE[r.phase] || ""} · <span class="pill ${r.status === "completed" ? "" : "neutral"}">${REVIEW_STATUS[r.status]}</span>${r.self_rating ? `<br><small>Your rating ${r.self_rating}/5 · ${esc(r.self_comment || "")}</small>` : r.self_comment ? `<br><small>${esc(r.self_comment)}</small>` : ""}${r.manager_rating ? `<br><small>Manager rating ${r.manager_rating}/5 · ${esc(r.manager_comment || "")}</small>` : r.status === "completed" ? "<br><small>Your manager's rating will be shared by HR.</small>" : ""}${r.status === "pending_self" && r.cycle_status === "open" ? ` <button data-self="${r.id}" data-phase="${r.phase}">${r.phase === "mid_year" ? "Write check-in" : "Write self-review"}</button>` : ""} <button class="ghost" data-comp-view="${r.id}" data-name="${esc(r.cycle_name)}">Competencies</button></div>`).join("") : empty("No reviews", "Reviews appear when HR starts a cycle.")}</div>`;
   }
   if (tab === "team") {
     const rows = await api("/reviews/team");
-    return `<div class="card"><h2>Reviews waiting for you</h2>${rows.length ? rows.map((r) => `<div class="activity"><strong>${esc(r.employee_name)}</strong> · ${esc(r.cycle_name)}<br><small>Self-rating ${r.self_rating}/5 · ${esc(r.self_comment || "")}</small> <button data-mgr="${r.id}" data-name="${esc(r.employee_name)}">Review</button> <button class="ghost" data-goals-of="${r.user_id}" data-name="${esc(r.employee_name)}">See goals</button></div>`).join("") : empty("Nothing waiting", "Self-reviews from your team appear here.")}</div>`;
+    return `<div class="card"><h2>Reviews waiting for you</h2>${rows.length ? rows.map((r) => `<div class="activity"><strong>${esc(r.employee_name)}</strong> · ${esc(r.cycle_name)} · ${PHASE[r.phase] || ""}<br><small>${r.self_rating ? `Self-rating ${r.self_rating}/5 · ` : ""}${esc(r.self_comment || "")}</small> <button data-mgr="${r.id}" data-phase="${r.phase}" data-name="${esc(r.employee_name)}">Review</button> <button class="ghost" data-goals-of="${r.user_id}" data-name="${esc(r.employee_name)}">See goals</button></div>`).join("") : empty("Nothing waiting", "Self-reviews from your team appear here.")}</div>`;
   }
   if (tab === "feedback") {
     const [got, given] = await Promise.all([
@@ -321,26 +321,21 @@ async function perfHtml(tab) {
     const rows = await api("/trainings/mine");
     return `<div class="card"><h2>My training</h2>${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Course</th><th>Hours</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((t) => `<tr><td>${esc(t.title)}${t.mandatory ? ' <span class="pill">Mandatory</span>' : ""}</td><td>${t.hours}</td><td>${t.due_date ? fmtDate(t.due_date) : "—"}</td><td><span class="pill ${t.status === "completed" ? "" : "neutral"}">${t.status === "completed" ? `Done ${fmtDate(t.completed_on)}${t.score != null ? ` · ${t.score}%` : ""}` : "To do"}</span></td><td>${t.status === "assigned" && !t.mandatory ? `<button class="secondary" data-done-train="${t.id}">Mark done</button>` : t.status === "assigned" ? "<small>Confirmed by your manager or HR</small>" : ""}</td></tr>`).join("")}</tbody></table></div>` : empty("No training", "Courses assigned to you appear here.")}</div>`;
   }
+  if (tab === "competencies") return competenciesHtml();
   if (tab === "cycles") {
     const rows = await api("/admin/review-cycles");
-    return `<div class="card"><div class="card-head"><div><h2>Review cycles</h2><p class="muted">Starting a cycle opens a self-review for every active employee.</p></div><button id="new-cycle">Start a cycle</button></div>${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Cycle</th><th>Period</th><th>Completed</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((c) => `<tr><td>${esc(c.name)}</td><td>${fmtDate(c.start_date)} – ${fmtDate(c.end_date)}</td><td>${c.completed} of ${c.reviews}</td><td><span class="pill ${c.status === "open" ? "" : "neutral"}">${c.status}</span></td><td><button class="secondary" data-cycle="${c.id}" data-name="${esc(c.name)}">Open</button></td></tr>`).join("")}</tbody></table></div>` : empty("No cycles", "Start the first review cycle.")}</div>`;
+    return `<div class="card"><div class="card-head"><div><h2>Review cycles</h2><p class="muted">Starting a cycle opens a self-review for every active employee.</p></div><button id="new-cycle">Start a cycle</button></div>${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Cycle</th><th>Phase</th><th>Period</th><th>Completed</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((c) => `<tr><td>${esc(c.name)}</td><td>${PHASE[c.phase]}</td><td>${fmtDate(c.start_date)} – ${fmtDate(c.end_date)}</td><td>${c.completed} of ${c.reviews}</td><td><span class="pill ${c.status === "open" ? "" : "neutral"}">${c.status}</span></td><td><button class="secondary" data-cycle="${c.id}" data-name="${esc(c.name)}">Open</button></td></tr>`).join("")}</tbody></table></div>` : empty("No cycles", "Start the first review cycle.")}</div>`;
   }
   const rows = await api("/admin/trainings");
   return `<div class="card"><div class="card-head"><div><h2>Training</h2></div><button id="new-training">Assign training</button></div>${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Course</th><th>Hours</th><th>Due</th><th>Completed</th><th></th></tr></thead><tbody>${rows.map((t) => `<tr><td>${esc(t.title)}${t.mandatory ? ' <span class="pill">Mandatory</span>' : ""}</td><td>${t.hours}</td><td>${t.due_date ? fmtDate(t.due_date) : "—"}</td><td>${t.completed} of ${t.assigned}</td><td><button class="secondary" data-train="${t.id}" data-name="${esc(t.title)}">Records</button></td></tr>`).join("")}</tbody></table></div>` : empty("No training", "Assign a course to everyone or to selected people.")}</div>`;
 }
 function perfWire(tab) {
   if (tab === "multirater") return multiRaterWire();
+  if (tab === "competencies") return competenciesWire();
   const on = (s, fn) =>
     document.querySelector(s)?.addEventListener("click", fn);
   const each = (s, fn) =>
     document.querySelectorAll(s).forEach((b) => (b.onclick = () => fn(b)));
-  const ratingSel = (value = 3) =>
-    sel(
-      "rating",
-      "Rating (5 is best)",
-      [1, 2, 3, 4, 5].map((n) => [n, n]),
-      value,
-    );
   each("[data-progress]", (b) =>
     dialog(
       "Update progress",
@@ -375,13 +370,18 @@ function perfWire(tab) {
       },
     ),
   );
-  each("[data-self]", (b) =>
+  each("[data-goal-history]", (b) => goalHistoryDialog(b.dataset.goalHistory));
+  each("[data-comp-view]", (b) =>
+    competencyResultsDialog(b.dataset.compView, `Competencies · ${b.dataset.name}`),
+  );
+  each("[data-self]", async (b) =>
     dialog(
-      "Self-review",
-      `${ratingSel()}<label class="full">How did the period go?<textarea name="comment" rows="5" maxlength="2000" required></textarea></label>`,
+      b.dataset.phase === "mid_year" ? "Mid-year check-in" : "Self-review",
+      `${phaseRatingSel(b.dataset.phase)}<label class="full">${b.dataset.phase === "mid_year" ? "Progress so far, and help you need" : "How did the period go?"}<textarea name="comment" rows="5" maxlength="2000" required></textarea></label>${await competencyFields(b.dataset.self, "self")}`,
       async (f) => {
+        await saveCompetencies(b.dataset.self, f);
         await api(`/reviews/${b.dataset.self}/self`, {
-          rating: Number(f.rating),
+          rating: f.rating ? Number(f.rating) : undefined,
           comment: f.comment,
         });
         notice("Sent to your manager.");
@@ -389,13 +389,14 @@ function perfWire(tab) {
       },
     ),
   );
-  each("[data-mgr]", (b) =>
+  each("[data-mgr]", async (b) =>
     dialog(
-      `Review of ${b.dataset.name}`,
-      `${ratingSel()}<label class="full">Your assessment<textarea name="comment" rows="5" maxlength="2000" required></textarea></label>`,
+      `${b.dataset.phase === "mid_year" ? "Check-in" : "Review"} of ${b.dataset.name}`,
+      `${phaseRatingSel(b.dataset.phase)}<label class="full">Your assessment<textarea name="comment" rows="5" maxlength="2000" required></textarea></label>${await competencyFields(b.dataset.mgr, "manager")}`,
       async (f) => {
+        await saveCompetencies(b.dataset.mgr, f);
         await api(`/reviews/${b.dataset.mgr}/manager`, {
-          rating: Number(f.rating),
+          rating: f.rating ? Number(f.rating) : undefined,
           comment: f.comment,
         });
         notice("Review saved. HR will release the result.");
@@ -472,7 +473,7 @@ function perfWire(tab) {
   on("#new-cycle", () =>
     dialog(
       "Start a review cycle",
-      `${input("name", "Name", `FY ${taxYearStart()}-${String(taxYearStart() + 1).slice(2)}`, "required maxlength=80")}${input("start_date", "Period start", `${taxYearStart()}-04-01`, 'type="date" required')}${input("end_date", "Period end", `${taxYearStart() + 1}-03-31`, 'type="date" required')}`,
+      `${sel("phase", "Phase", Object.entries(PHASE), "year_end")}${input("name", "Name", `FY ${taxYearStart()}-${String(taxYearStart() + 1).slice(2)}`, "required maxlength=80")}${input("start_date", "Period start", `${taxYearStart()}-04-01`, 'type="date" required')}${input("end_date", "Period end", `${taxYearStart() + 1}-03-31`, 'type="date" required')}`,
       async (b) => {
         const r = await api("/admin/review-cycles", b);
         notice(`Started for ${r.reviews} people.`);
