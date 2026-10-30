@@ -30,6 +30,10 @@ async function loadMe() {
     is_manager: p.is_manager,
     approvals_pending: p.approvals_pending,
     company: p.company,
+    // Company policy asks for two-factor login before anything else.
+    needs_2fa: Boolean(p.needs_2fa),
+    // Kinds of case (grievance, POSH, whistleblower) this person handles.
+    case_kinds: p.case_kinds ?? [],
   };
   companies = me.role === "super_admin" ? await api("/admin/companies") : [];
 }
@@ -307,6 +311,7 @@ function navGroups() {
         staff && ["chat", 'Messages<span id="chat-n" class="nav-n"></span>'],
         (staff || has("bot.manage")) && ["laxmi", "Ask Laxmi"],
         ["helpdesk", "Helpdesk"],
+        staff && ["concerns", "Raise a concern"],
       ],
     ],
     [
@@ -335,6 +340,7 @@ function navGroups() {
         has("devices.manage") && ["devices", "Devices"],
         has("roles.assign") && ["roles", "Roles & rights"],
         has("security.read") && ["security", "Security"],
+        ((me.case_kinds ?? []).length > 0 || has("roles.assign")) && ["cases", "Cases"],
         has("audit.read") && ["audit", "Activity log"],
       ],
     ],
@@ -545,6 +551,8 @@ async function render() {
     if (page === "insights") return await insightsPage(id);
     if (page === "customreports") return await customReportsPage(id);
     if (page === "punchmap") return await punchMapPage(id);
+    if (page === "concerns") return await concernsPage(id);
+    if (page === "cases") return await casesPage(id);
     if (page === "performance") return await performancePage(id);
     if (page === "learning") return await learningPage(id);
     if (page === "requisitions") return await requisitionsPage(id);

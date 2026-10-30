@@ -28,6 +28,7 @@ const HR = [
   "credit.manage",
   "bot.manage",
   "hrchat.use",
+  "cases.manage",
 ];
 const PAYROLL = ["payroll.manage", "payroll.read"];
 const ADMIN = [
@@ -83,6 +84,7 @@ export const GRANTABLE = {
   "helpdesk.manage": ["Engagement", "Answer helpdesk tickets"],
   "bot.manage": ["Engagement", "Laxmi assistant knowledge and log"],
   "hrchat.use": ["Engagement", "HR team chat (the private HR Team room)"],
+  "cases.manage": ["Engagement", "Handle grievances (POSH and whistleblower cases go only to their committees)"],
   "insights.read": ["Reports", "Insights dashboards"],
   "security.read": ["Reports", "Security overview"],
   "audit.read": ["Reports", "Activity log"],

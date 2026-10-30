@@ -10,6 +10,7 @@ import { HttpError, string, password, email, clientIp } from "../http.js";
 import { permissionsOf } from "../rbac.js";
 import { ipAllowed, isStaff, loadRole, outsideOffice, policyOf } from "../security-policy.js";
 import { odAllowed } from "./od-visits.js";
+import { caseKindsHandled } from "./cases.js";
 import { bindDevice, deviceFromHeaders } from "../devices.js";
 import { closeStaleShifts, finishedToday } from "./attendance.js";
 import { pendingApprovals } from "../approval.js";
@@ -250,6 +251,8 @@ export function registerAuth(router, app) {
             .prepare("SELECT id,purpose,out_at FROM od_visits WHERE user_id=? AND status='open'")
             .get(user.id)) || null,
         od_allowed: await odAllowed(app, user),
+        // Which kinds of case (grievance, POSH, whistleblower) this person handles.
+        case_kinds: await caseKindsHandled(db, user),
         device: await deviceFromHeaders(app, user, req).then((d) =>
           d ? { status: d.status } : null,
         ),
