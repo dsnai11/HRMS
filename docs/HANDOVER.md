@@ -79,6 +79,7 @@ scripts/smoke/           browser smoke scripts (see its README)
 | `ANTHROPIC_API_KEY`, `BOT_MODEL` | optional, **not set** | turns on Laxmi's free-text answers by Claude (default model `claude-opus-5-5`). Without it Laxmi answers from rules, the knowledge base and policies only |
 | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION` | recommended | file storage for selfies and documents; see `docs/LAUNCH-5000.md` |
 | `MAIL_PER_SECOND` | optional | mail provider sending rate (default 2) |
+| `SSO_ALLOWED_DOMAINS`, `SSO_GOOGLE_CLIENT_ID`/`_SECRET`, `SSO_MICROSOFT_CLIENT_ID`/`_SECRET`/`_TENANT` | optional | "Sign in with Google / Microsoft" on the web portal for people already in the HRMS with an email in the allowed domains. Redirect URI: `<PUBLIC_URL>/api/sso/google/callback` (or `/microsoft/`) |
 | `PHOTO_RETENTION_DAYS`, `DB_POOL_MAX`, `LOGIN_IP_LIMIT`, `DB_SIZE_LIMIT_BYTES`, `TRUST_PROXY_HOPS`, `CREDIT_ALLOW_PRIVATE` | optional | see `docs/OPERATIONS.md`; `CREDIT_ALLOW_PRIVATE=1` is for tests only, never in production |
 
 Secrets are never committed. GitHub repository secrets for the Actions: `DATABASE_URL` and `BACKUP_PASSPHRASE` (backups), `GOOGLE_SERVICES_JSON` (Android push build, optional).

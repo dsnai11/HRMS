@@ -134,8 +134,30 @@ const empty = (title, description) =>
   `<div class="empty"><div class="empty-icon">◎</div><strong>${esc(title)}</strong>${esc(description)}</div>`;
 function login() {
   if (config.setupRequired) return setup();
-  app.innerHTML = `<div class="login"><section class="login-story">${brand()}<div><div class="eyebrow">${esc(config.company)}</div><h1>Employee Engagement Portal</h1><p>Creating a great place to work.</p></div><footer class="muted">© ${new Date().getFullYear()}, ${esc(config.company)}</footer></section><section class="login-panel"><h2>Sign In</h2><p class="muted">Use your company email and password.</p><form id="login"><label>Email address<input type="email" name="email" autocomplete="username" placeholder="you@company.com" required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button>Sign in →</button><a href="#" id="forgot" class="forgot">Forgot password?</a></form><p class="login-footer">Employees: use the credentials provided by your administrator.<br>Location is requested only when you punch in or out.</p></section></div>`;
+  app.innerHTML = `<div class="login"><section class="login-story">${brand()}<div><div class="eyebrow">${esc(config.company)}</div><h1>Employee Engagement Portal</h1><p>Creating a great place to work.</p></div><footer class="muted">© ${new Date().getFullYear()}, ${esc(config.company)}</footer></section><section class="login-panel"><h2>Sign In</h2><p class="muted">Use your company email and password.</p><form id="login"><label>Email address<input type="email" name="email" autocomplete="username" placeholder="you@company.com" required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button>Sign in →</button><a href="#" id="forgot" class="forgot">Forgot password?</a></form><div id="sso"></div><p class="login-footer">Employees: use the credentials provided by your administrator.<br>Location is requested only when you punch in or out.</p></section></div>`;
   document.querySelector("#forgot")?.addEventListener("click", forgotDialog);
+  // Google Workspace / Microsoft 365 sign-in, when the server has it set up.
+  const ssoErrors = {
+    no_account: "That account is not in the HRMS. Ask HR to add you with this email.",
+    domain: "Use your company account.",
+    office_only: "Your account has HR or admin rights, which can be used only from the office network.",
+    expired: "The sign-in took too long or was opened in another browser. Try again.",
+    cancelled: "Sign-in was cancelled.",
+    failed: "The sign-in could not be checked. Try again.",
+    not_set_up: "This sign-in option is not set up.",
+  };
+  const ssoError = new URLSearchParams(location.search).get("sso_error");
+  if (ssoError) {
+    notice(ssoErrors[ssoError] || "Sign-in failed.", true);
+    history.replaceState(null, "", "/");
+  }
+  api("/sso/providers")
+    .then((list) => {
+      const box = document.querySelector("#sso");
+      if (box && list.length)
+        box.innerHTML = `<p class="muted sso-or">or</p>${list.map((p) => `<a class="button secondary sso-btn" href="/api/sso/${encodeURIComponent(p.id)}/start">Sign in with ${esc(p.label)}</a>`).join("")}`;
+    })
+    .catch(() => {});
   document.querySelector("#login").onsubmit = (e) => {
     e.preventDefault();
     busy(e.submitter, async () => {

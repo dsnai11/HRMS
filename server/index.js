@@ -47,6 +47,7 @@ import { registerCases } from "./routes/cases.js";
 import { registerSurveys } from "./routes/surveys.js";
 import { registerDelegations } from "./routes/delegations.js";
 import { registerOvertime } from "./routes/overtime.js";
+import { registerSso } from "./routes/sso.js";
 import { ipAllowed, isStaff, loadRole, outsideOffice } from "./security-policy.js";
 import {
   registerScheduledReports,
@@ -247,6 +248,7 @@ export function createApp({
     registerSurveys,
     registerDelegations,
     registerOvertime,
+    registerSso,
   ])
     register(router, app);
 
@@ -258,13 +260,13 @@ export function createApp({
       token &&
       (await db
         .prepare(
-          `SELECT u.*,s.native session_native,s.last_seen_at session_seen,c.staff_ip_allowlist policy_ips,
+          `SELECT u.*,s.native session_native,s.last_seen_at session_seen,s.via session_via,c.staff_ip_allowlist policy_ips,
              c.idle_minutes policy_idle,c.require_staff_2fa policy_2fa
            FROM sessions s JOIN users u ON u.id=s.user_id JOIN companies c ON c.id=u.company_id WHERE s.token_hash=? AND s.expires_at>? AND u.active=1 AND c.active=1`,
         )
         .get(tokenHash(token), Date.now()));
     if (!row) throw new HttpError(401, "Please sign in again.");
-    const { session_native, session_seen, policy_ips, policy_idle, policy_2fa, ...user } = row;
+    const { session_native, session_seen, session_via, policy_ips, policy_idle, policy_2fa, ...user } = row;
     await loadRole(db, user);
     // The company's security policy applies to browser sessions; the phone app is bound
     // to an approved device instead.
@@ -283,7 +285,9 @@ export function createApp({
         throw outsideOffice();
       if (now - seen > 60000)
         await db.prepare("UPDATE sessions SET last_seen_at=? WHERE token_hash=?").run(now, tokenHash(token));
-      user.needs_2fa = Boolean(policy_2fa) && isStaff(user) && !user.totp_enabled;
+      // A Google or Microsoft sign-in counts: the company account has its own second factor.
+      user.needs_2fa =
+        Boolean(policy_2fa) && isStaff(user) && !user.totp_enabled && !String(session_via ?? "").startsWith("sso:");
     }
     return { user, token };
   }
