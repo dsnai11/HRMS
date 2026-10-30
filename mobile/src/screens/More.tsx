@@ -301,7 +301,7 @@ function Btn({
       onPress={onPress}
       style={[s.btn, secondary && s.btnSecondary, disabled && { opacity: 0.5 }]}
     >
-      <Text style={[s.btnText, secondary && { color: "#4e5aa8" }]}>
+      <Text style={[s.btnText, secondary && { color: "#c8102e" }]}>
         {title}
       </Text>
     </Pressable>
@@ -451,7 +451,7 @@ function useLoad<T>(load: () => Promise<T>) {
 }
 const Status = ({ loading, error }: { loading: boolean; error: string }) =>
   loading ? (
-    <ActivityIndicator color="#4e5aa8" />
+    <ActivityIndicator color="#c8102e" />
   ) : error ? (
     <Text style={s.error}>{error}</Text>
   ) : null;
@@ -1544,7 +1544,7 @@ function MessagesScreen({
             <Text style={s.link}>Back</Text>
           </Pressable>
         </View>
-        {!info && <ActivityIndicator color="#4e5aa8" />}
+        {!info && <ActivityIndicator color="#c8102e" />}
         {earlier && (
           <Btn
             title="Show earlier messages"
@@ -3374,7 +3374,7 @@ function AlertsScreen({
           }}
         >
           <View style={{ flex: 1 }}>
-            <Text style={[s.strong, !n.read_at && { color: "#4e5aa8" }]}>
+            <Text style={[s.strong, !n.read_at && { color: "#c8102e" }]}>
               {!n.read_at ? "● " : ""}
               {n.title}
             </Text>
@@ -3470,20 +3470,20 @@ const s = StyleSheet.create({
   btn: {
     paddingVertical: 15,
     paddingHorizontal: 20,
-    backgroundColor: "#4e5aa8",
+    backgroundColor: "#c8102e",
     borderRadius: 12,
     alignItems: "center",
   },
-  btnSecondary: { backgroundColor: "#eceefa" },
+  btnSecondary: { backgroundColor: "#fff1f3" },
   btnText: { fontSize: 15, color: "#fff", fontWeight: "600" },
   chip: {
     paddingVertical: 9,
     paddingHorizontal: 14,
     borderRadius: 18,
-    backgroundColor: "#eceefa",
+    backgroundColor: "#fff1f3",
   },
-  chipOn: { backgroundColor: "#4e5aa8" },
-  chipText: { color: "#4e5aa8", fontWeight: "600", fontSize: 13 },
+  chipOn: { backgroundColor: "#c8102e" },
+  chipText: { color: "#c8102e", fontWeight: "600", fontSize: 13 },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   row: {
     flexDirection: "row",
@@ -3496,7 +3496,7 @@ const s = StyleSheet.create({
   },
   strong: { fontWeight: "600", color: "#3a3c4a", fontSize: 14 },
   note: { color: "#7a7d8c", fontSize: 12, lineHeight: 18 },
-  link: { color: "#4e5aa8", fontWeight: "600", fontSize: 13 },
+  link: { color: "#c8102e", fontWeight: "600", fontSize: 13 },
   error: {
     color: "#894a35",
     backgroundColor: "#f9eae3",
@@ -3504,8 +3504,8 @@ const s = StyleSheet.create({
     borderRadius: 10,
   },
   pill: {
-    backgroundColor: "#eceefa",
-    color: "#4e5aa8",
+    backgroundColor: "#fff1f3",
+    color: "#c8102e",
     fontSize: 11,
     fontWeight: "600",
     paddingVertical: 3,
@@ -3538,7 +3538,7 @@ const s = StyleSheet.create({
     width: 220,
     height: 220,
     borderRadius: 110,
-    backgroundColor: "#4e5aa8",
+    backgroundColor: "#c8102e",
     opacity: 0.55,
     right: -70,
     top: -90,
@@ -3614,7 +3614,7 @@ const s = StyleSheet.create({
     color: "#fff",
     fontSize: 11,
     fontWeight: "700",
-    backgroundColor: "#4e5aa8",
+    backgroundColor: "#c8102e",
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 10,
@@ -3677,13 +3677,13 @@ const s = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: "#eceefa",
+    backgroundColor: "#fff1f3",
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarText: { color: "#4e5aa8", fontWeight: "700", fontSize: 13 },
+  avatarText: { color: "#c8102e", fontWeight: "700", fontSize: 13 },
   count: {
-    backgroundColor: "#4e5aa8",
+    backgroundColor: "#c8102e",
     color: "#fff",
     fontSize: 11,
     fontWeight: "700",
@@ -3704,8 +3704,8 @@ const s = StyleSheet.create({
     marginTop: 4,
   },
   callout: {
-    color: "#4e5aa8",
-    backgroundColor: "#eceefa",
+    color: "#c8102e",
+    backgroundColor: "#fff1f3",
     padding: 12,
     borderRadius: 10,
     overflow: "hidden",

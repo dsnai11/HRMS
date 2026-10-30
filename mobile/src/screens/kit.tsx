@@ -64,7 +64,7 @@ export function Btn({
       onPress={onPress}
       style={[k.btn, secondary && k.btnSecondary, disabled && { opacity: 0.5 }]}
     >
-      <Text style={[k.btnText, secondary && { color: "#4e5aa8" }]}>
+      <Text style={[k.btnText, secondary && { color: "#c8102e" }]}>
         {title}
       </Text>
     </Pressable>
@@ -148,7 +148,7 @@ export const Status = ({
   error: string;
 }) =>
   loading ? (
-    <ActivityIndicator color="#4e5aa8" />
+    <ActivityIndicator color="#c8102e" />
   ) : error ? (
     <Text style={k.error}>{error}</Text>
   ) : null;
@@ -268,20 +268,20 @@ export const k = StyleSheet.create({
   btn: {
     paddingVertical: 15,
     paddingHorizontal: 20,
-    backgroundColor: "#4e5aa8",
+    backgroundColor: "#c8102e",
     borderRadius: 12,
     alignItems: "center",
   },
-  btnSecondary: { backgroundColor: "#eceefa" },
+  btnSecondary: { backgroundColor: "#fff1f3" },
   btnText: { fontSize: 15, color: "#fff", fontWeight: "600" },
   chip: {
     paddingVertical: 9,
     paddingHorizontal: 14,
     borderRadius: 18,
-    backgroundColor: "#eceefa",
+    backgroundColor: "#fff1f3",
   },
-  chipOn: { backgroundColor: "#4e5aa8" },
-  chipText: { color: "#4e5aa8", fontWeight: "600", fontSize: 13 },
+  chipOn: { backgroundColor: "#c8102e" },
+  chipText: { color: "#c8102e", fontWeight: "600", fontSize: 13 },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   row: {
     flexDirection: "row",
@@ -302,7 +302,7 @@ export const k = StyleSheet.create({
   strong: { fontWeight: "600", color: "#3a3c4a", fontSize: 14 },
   note: { color: "#7a7d8c", fontSize: 12, lineHeight: 18 },
   body: { color: "#3a3c4a", fontSize: 14, lineHeight: 21 },
-  link: { color: "#4e5aa8", fontWeight: "600", fontSize: 13 },
+  link: { color: "#c8102e", fontWeight: "600", fontSize: 13 },
   error: {
     color: "#894a35",
     backgroundColor: "#f9eae3",
@@ -310,8 +310,8 @@ export const k = StyleSheet.create({
     borderRadius: 10,
   },
   pill: {
-    backgroundColor: "#eceefa",
-    color: "#4e5aa8",
+    backgroundColor: "#fff1f3",
+    color: "#c8102e",
     fontSize: 11,
     fontWeight: "600",
     paddingVertical: 3,
