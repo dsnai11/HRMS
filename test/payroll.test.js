@@ -1873,3 +1873,51 @@ test("labour welfare fund applies in the months the state's rule names", async (
     200,
   );
 });
+
+test("bills against a bill-backed component are verified by payroll and lower TDS", async (t) => {
+  const w = await prepared(t);
+  const { call, people } = w;
+  const pay = people.pay.token,
+    e4 = people.e4.token;
+  const fuel = await call("/admin/payroll/components", { code: "FUEL", name: "Fuel reimbursement", calc: "fixed", value: 3000 }, pay);
+  assert.equal(fuel.status, 201, JSON.stringify(fuel.data));
+  assert.equal((await call(`/admin/salary-components/${fuel.data.id}/bill-based`, { bill_based: true }, e4, "PUT")).status, 403);
+  assert.equal((await call(`/admin/salary-components/${fuel.data.id}/bill-based`, { bill_based: true }, pay, "PUT")).status, 200);
+  const before = await call("/admin/payroll/runs", { month: "2026-10" }, pay);
+  const taxBefore = (await itemOf(w, pay, before.data.id, "e4")).tds;
+  assert.equal(taxBefore.bill_exempt, 0);
+  await call(`/admin/payroll/runs/${before.data.id}`, undefined, pay, "DELETE");
+  assert.equal((await call(`/admin/employees/${people.e4.id}/salary`, { effective_from: "2026-10-01", monthly_gross: 200000 }, pay)).status, 201);
+
+  const mine = (await call("/salary-bills", undefined, e4)).data;
+  assert.deepEqual(mine.components.map((c) => [c.code, c.monthly, c.yearly]), [["FUEL", 3000, 36000]]);
+  assert.equal((await call("/salary-bills", undefined, people.e1.token)).data.components.length, 0, "not in E1's salary");
+  const bill = (body) => call("/salary-bills", { component_id: fuel.data.id, description: "Petrol", ...body }, e4);
+  assert.equal((await bill({ bill_date: "2026-11-30", amount: 100 })).status, 400, "future");
+  assert.equal((await bill({ bill_date: "2026-03-10", amount: 100 })).status, 400, "last tax year");
+  assert.equal((await call("/salary-bills", { component_id: fuel.data.id, description: "x", bill_date: "2026-10-01", amount: 5 }, people.e1.token)).status, 400);
+  const b1 = (await bill({ bill_date: "2026-10-10", amount: 12000, bill_no: "HP-1" })).data.id;
+  const b2 = (await bill({ bill_date: "2026-10-20", amount: 9000 })).data.id;
+  const b3 = (await bill({ bill_date: "2026-11-02", amount: 5000 })).data.id;
+
+  assert.equal((await call(`/admin/salary-bills/${b1}/verify`, { decision: "verified", verified_amount: 11000 }, pay)).status, 400, "a lower amount needs a reason");
+  assert.equal((await call(`/admin/salary-bills/${b1}/verify`, { decision: "verified", verified_amount: 11000, note: "One receipt is not a fuel bill" }, pay)).status, 200);
+  assert.equal((await call(`/admin/salary-bills/${b2}/verify`, { decision: "verified" }, pay)).status, 200);
+  assert.equal((await call(`/admin/salary-bills/${b2}/verify`, { decision: "verified" }, pay)).status, 409);
+  assert.equal((await call(`/admin/salary-bills/${b3}/verify`, { decision: "verified" }, e4)).status, 403);
+  assert.equal((await call(`/salary-bills/${b2}/cancel`, {}, e4)).status, 409, "verified bills stay");
+  const after = (await call("/salary-bills", undefined, e4)).data.components[0];
+  assert.deepEqual([after.verified, after.pending, after.exempt], [20000, 5000, 20000]);
+  assert.equal((await call("/admin/salary-bills?status=pending", undefined, pay)).data.items.length, 1);
+
+  // Only verified bills count: ₹20,000 off taxable income, at the 25% slab plus 4% cess.
+  const run = await call("/admin/payroll/runs", { month: "2026-10" }, pay);
+  assert.equal(run.status, 201, JSON.stringify(run.data));
+  const tax = (await itemOf(w, pay, run.data.id, "e4")).tds;
+  assert.equal(tax.bill_exempt, 20000);
+  assert.equal(taxBefore.annual_tax - tax.annual_tax, 5200);
+
+  // The exemption is capped at a year of the component.
+  await w.db.prepare("UPDATE salary_bills SET status='verified',verified_amount=30000 WHERE id=?").run(b3);
+  assert.equal((await call("/salary-bills", undefined, e4)).data.components[0].exempt, 36000);
+});

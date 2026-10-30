@@ -6,6 +6,7 @@ import { computeMuster } from "../muster.js";
 import { monthRange } from "../calendar.js";
 import { computePayslip } from "../payroll/engine.js";
 import { taxYearOf } from "../payroll/tax.js";
+import { billExemptions } from "./salary-bills.js";
 import { loadConfig, readPrivate } from "./payroll-setup.js";
 import { encryptionKey } from "../crypto-store.js";
 
@@ -54,6 +55,13 @@ export function registerPayrollRuns(router, app) {
     const linesOf = new Map();
     for (const l of lineRows)
       linesOf.set(l.salary_id, [...(linesOf.get(l.salary_id) ?? []), l]);
+    // Verified bills against bill-backed components, left out of taxable income.
+    const billExempt = await billExemptions(
+      db,
+      companyId,
+      taxYearOf(month),
+      [...salaries.values()].map((s) => s.id),
+    );
     const adjustments = await db
       .prepare(
         "SELECT * FROM payroll_adjustments WHERE company_id=? AND month=?",
@@ -187,6 +195,7 @@ export function registerPayrollRuns(router, app) {
           vpf_percent: Number(salary.vpf_percent ?? 0),
           tax_regime: salary.tax_regime,
           declared_deductions: salary.declared_deductions,
+          bill_exempt: billExempt.get(salary.user_id) ?? 0,
         },
         person: { gender: p.gender, date_of_birth: p.date_of_birth },
         lwf: (() => {

@@ -92,7 +92,7 @@ async function payrollTabHtml(tab) {
     payrollCache.components = comps;
     return `<div class="card"><div class="card-head"><div><h2>Salary structure</h2><p class="muted">How a monthly gross splits into components. Exactly one component must be the balancing figure. Basic at 50% of gross satisfies the labour codes' wage definition by itself.</p></div>${has("payroll.manage") ? '<div class="actions"><button class="secondary" id="seed-comps">Add standard structure</button><button id="add-comp">+ Add component</button></div>' : ""}</div>${
       comps.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Component</th><th>Calculation</th><th>Basic / DA</th><th>Taxable</th><th>ESI wages</th><th>Status</th><th></th></tr></thead><tbody>${comps.map((c) => `<tr><td>${esc(c.name)}<small>${esc(c.code)}</small></td><td>${{ percent_of_gross: `${c.value}% of gross`, percent_of_basic: `${c.value}% of basic`, fixed: `${inr(c.value)} fixed`, balance: "Balance (gross minus the rest)" }[c.calc]}</td><td>${yn(c.is_basic)}</td><td>${yn(c.taxable)}</td><td>${yn(c.esi_wage)}</td><td><span class="pill ${c.active ? "" : "neutral"}">${c.active ? "Active" : "Inactive"}</span></td><td>${has("payroll.manage") ? `<button class="secondary" data-edit-comp="${c.id}">Edit</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+        ? `<div class="table-wrap"><table><thead><tr><th>Component</th><th>Calculation</th><th>Basic / DA</th><th>Taxable</th><th>ESI wages</th><th>Bill-backed</th><th>Status</th><th></th></tr></thead><tbody>${comps.map((c) => `<tr><td>${esc(c.name)}<small>${esc(c.code)}</small></td><td>${{ percent_of_gross: `${c.value}% of gross`, percent_of_basic: `${c.value}% of basic`, fixed: `${inr(c.value)} fixed`, balance: "Balance (gross minus the rest)" }[c.calc]}</td><td>${yn(c.is_basic)}</td><td>${yn(c.taxable)}</td><td>${yn(c.esi_wage)}</td><td>${yn(c.bill_based)}</td><td><span class="pill ${c.active ? "" : "neutral"}">${c.active ? "Active" : "Inactive"}</span></td><td>${has("payroll.manage") ? `<button class="secondary" data-edit-comp="${c.id}">Edit</button>${c.is_basic || c.calc === "balance" || c.code.toUpperCase() === "HRA" ? "" : ` <button class="ghost" data-bill-comp="${c.id}" data-on="${c.bill_based ? 1 : 0}">${c.bill_based ? "Not bill-backed" : "Bill-backed"}</button>`}` : ""}</td></tr>`).join("")}</tbody></table></div>`
         : empty(
             "No components",
             "Add the standard structure (Basic, HRA, Special allowance) to begin.",
@@ -333,6 +333,23 @@ async function payrollWire(tab) {
       }),
     );
     on("#add-comp", () => componentDialog());
+    document.querySelectorAll("[data-bill-comp]").forEach(
+      (b) =>
+        (b.onclick = () =>
+          busy(b, async () => {
+            await api(
+              `/admin/salary-components/${b.dataset.billComp}/bill-based`,
+              { bill_based: b.dataset.on !== "1" },
+              "PUT",
+            );
+            notice(
+              b.dataset.on !== "1"
+                ? "Bills against this component will now be tax-free once verified."
+                : "This component is no longer bill-backed.",
+            );
+            await reload();
+          })),
+    );
     document
       .querySelectorAll("[data-edit-comp]")
       .forEach(
@@ -650,6 +667,7 @@ async function payslipsPage(id) {
     }</div>`;
   await ytdCard(id);
   await declarationCard(id);
+  await salaryBillsCard(id);
   await taxStatementCard(id);
   await form16Card(id);
 }

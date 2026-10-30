@@ -154,7 +154,7 @@ export function professionalTax(slabs, { gross, gender, monthNumber }) {
  *   lines        monthly salary lines { code, name, amount, is_basic, taxable, esi_wage }
  *   attendance   { paid_days } from the muster
  *   adjustments  one-off { kind: "earning"|"deduction", name, amount, taxable }
- *   flags        { pf_applicable, esi_applicable, pt_applicable, eps_eligible, vpf_percent, tax_regime, declared_deductions }
+ *   flags        { pf_applicable, esi_applicable, pt_applicable, eps_eligible, vpf_percent, tax_regime, declared_deductions, bill_exempt }
  *   person       { gender, date_of_birth }
  *   ptSlabs      slab rows for the employee's state
  *   ytd          { taxable_income, tds_deducted, pt_deducted } earned earlier this tax year
@@ -252,6 +252,9 @@ export function computePayslip({
       taxableThisMonth +
       (left - 1) * fullTaxableMonth;
     let deductions = standardDeduction(regime, taxYear);
+    // Bill-backed reimbursements (fuel, telephone…) verified this tax year, under either regime.
+    const billExempt = flags.bill_exempt ?? 0;
+    deductions += billExempt;
     if (regime === "old") {
       deductions += flags.declared_deductions ?? 0;
       deductions += (ytd.pt_deducted ?? 0) + ptAmount * left; // professional tax is deductible
@@ -272,6 +275,7 @@ export function computePayslip({
       taxable_income: Math.round(taxableIncome),
       annual_tax: annualTax,
       already_deducted: ytd.tds_deducted ?? 0,
+      bill_exempt: Math.round(billExempt),
       this_month: tdsAmount,
     };
   }
