@@ -1146,13 +1146,15 @@ async function profileView(id) {
 
 async function teamView(id) {
   const members = await api("/team/members");
+  const separation = await teamSeparationHtml();
   if (id !== renderId) return;
   document.querySelector("#content").innerHTML =
     heading(
       "My team",
       "People who report to you, directly or through others.",
     ) +
-    `<div class="card"><h2>Members</h2><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Relation</th><th>Status</th></tr></thead><tbody>${members.map((m) => `<tr><td>${esc(m.name)}<small>${esc(m.employee_code || "")} · ${esc(m.email)}</small></td><td>${esc(m.department_name || "—")}<small>${esc(m.designation_name || "")}</small></td><td>${m.direct ? "Direct report" : "Indirect"}</td><td><span class="pill ${m.active ? "" : "neutral"}">${m.active ? "Active" : "Inactive"}</span></td></tr>`).join("")}</tbody></table></div></div><div class="card"><form class="filters" id="filters"><label>From<input type="date" name="from" value="${today()}" required></label><label>To<input type="date" name="to" value="${today()}" required></label><button>Show attendance</button></form></div><div class="card" id="records">Loading…</div>`;
+    `<div class="card"><h2>Members</h2><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Relation</th><th>Status</th></tr></thead><tbody>${members.map((m) => `<tr><td>${esc(m.name)}<small>${esc(m.employee_code || "")} · ${esc(m.email)}</small></td><td>${esc(m.department_name || "—")}<small>${esc(m.designation_name || "")}</small></td><td>${m.direct ? "Direct report" : "Indirect"}</td><td><span class="pill ${m.active ? "" : "neutral"}">${m.active ? "Active" : "Inactive"}</span></td></tr>`).join("")}</tbody></table></div></div><div class="card"><form class="filters" id="filters"><label>From<input type="date" name="from" value="${today()}" required></label><label>To<input type="date" name="to" value="${today()}" required></label><button>Show attendance</button></form></div><div class="card" id="records">Loading…</div>${separation}`;
+  teamSeparationWire(members);
   const load = async (query) => {
     const rows = await api(`/team/attendance?${query}`);
     if (id === renderId)

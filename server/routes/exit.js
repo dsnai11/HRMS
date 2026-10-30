@@ -20,6 +20,7 @@ const KINDS = [
   "termination",
   "retirement",
   "end_of_contract",
+  "absconding",
   "other",
 ];
 // Leave encashment on resignation or retirement is exempt up to this amount.
@@ -79,6 +80,8 @@ export function registerExit(router, app) {
         )
         .run(exit.id, "Admin", `Return ${a.name} (${a.tag})`, a.id);
   }
+  // Separation requests a manager raised start their exit the same way (separation.js).
+  app.startExitClearance = startClearance;
   const EXIT_SELECT = `SELECT x.*,u.name employee_name,u.employee_code,u.date_of_joining,d.name department_name,g.name designation_name
     FROM exits x JOIN users u ON u.id=x.user_id LEFT JOIN departments d ON d.id=u.department_id LEFT JOIN designations g ON g.id=u.designation_id`;
 

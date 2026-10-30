@@ -47,6 +47,7 @@ import { registerCases } from "./routes/cases.js";
 import { registerSurveys } from "./routes/surveys.js";
 import { registerDelegations } from "./routes/delegations.js";
 import { registerOvertime } from "./routes/overtime.js";
+import { registerSeparation } from "./routes/separation.js";
 import { registerSso } from "./routes/sso.js";
 import { registerRmsPlus } from "./routes/rms-plus.js";
 import { registerWhatsapp } from "./routes/whatsapp.js";
@@ -107,6 +108,7 @@ const STATIC = {
   "/surveys.js": ["surveys.js", "text/javascript"],
   "/overtime.js": ["overtime.js", "text/javascript"],
   "/rms-plus.js": ["rms-plus.js", "text/javascript"],
+  "/separation.js": ["separation.js", "text/javascript"],
   "/vendor/leaflet.js": ["../node_modules/leaflet/dist/leaflet.js", "text/javascript"],
   "/vendor/leaflet.css": ["../node_modules/leaflet/dist/leaflet.css", "text/css"],
   "/join.html": ["join.html", "text/html"],
@@ -258,6 +260,7 @@ export function createApp({
     registerSurveys,
     registerDelegations,
     registerOvertime,
+    registerSeparation,
     registerSso,
     registerRmsPlus,
     registerWhatsapp,
