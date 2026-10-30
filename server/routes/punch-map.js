@@ -61,6 +61,38 @@ export function registerPunchMap(router, app) {
               distance_m: Math.round(distanceMeters(lat, lng, s.site_latitude, s.site_longitude)),
             });
       }
+      const trips = await db
+        .prepare(
+          `SELECT v.*,u.name,u.employee_code,b.name branch_name,s.workplace_name,s.site_latitude,s.site_longitude
+           FROM od_visits v JOIN shifts s ON s.id=v.shift_id JOIN users u ON u.id=v.user_id LEFT JOIN branches b ON b.id=u.branch_id
+           WHERE v.out_at>=? AND v.out_at<? AND ${people} ORDER BY v.out_at`,
+        )
+        .all(from, to, ...args);
+      for (const v of trips)
+        for (const [kind, at, lat, lng, acc] of [
+          ["od_out", v.out_at, v.out_latitude, v.out_longitude, v.out_accuracy],
+          ["od_in", v.ended_by === "od_in" ? v.in_at : null, v.in_latitude, v.in_longitude, v.in_accuracy],
+        ])
+          if (at && Number.isFinite(lat) && Number.isFinite(lng))
+            points.push({
+              shift_id: v.shift_id,
+              trip_id: v.id,
+              user_id: v.user_id,
+              name: v.name,
+              employee_code: v.employee_code,
+              branch_name: v.branch_name,
+              workplace_name: v.workplace_name,
+              od: true,
+              od_purpose: v.purpose,
+              trip_status: v.status,
+              source: "od_trip",
+              kind,
+              at,
+              latitude: lat,
+              longitude: lng,
+              accuracy: acc,
+              distance_m: Math.round(distanceMeters(lat, lng, v.site_latitude, v.site_longitude)),
+            });
       const refused = (
         await db
           .prepare(

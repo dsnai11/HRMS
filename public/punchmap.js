@@ -4,6 +4,10 @@
 let pmLeaflet = null,
   pmTimer = null;
 const pm = { table: { q: "", page: 0 }, date: null, branch: "", show: { in: true, out: true, refused: true, workplaces: true }, odOnly: false, outsideOnly: false };
+// OD Out is shown with punch-outs, OD In with punch-ins.
+const PM_SHOW = { in: "in", out: "out", od_out: "out", od_in: "in" };
+const PM_LABEL = { in: "Punch in", out: "Punch out", od_out: "OD Out", od_in: "OD In" };
+const pmKey = (p) => (p.trip_id ? `t${p.trip_id}${p.kind}` : `p${p.shift_id}${p.kind}`);
 const PM_COLORS = { in: "#146c53", out: "#2f6fd6", od: "#e08a00", refused: "#c0392b" };
 
 function pmLoadLeaflet() {
@@ -62,7 +66,7 @@ async function punchMapPage(id) {
     const radiusOf = new Map(d.workplaces.map((w) => [w.name, w.radius]));
     const outside = (p) => p.distance_m > (radiusOf.get(p.workplace_name) ?? 0);
     const points = d.points.filter(
-      (p) => pm.show[p.kind] && (!pm.odOnly || p.od) && (!pm.outsideOnly || outside(p)),
+      (p) => pm.show[PM_SHOW[p.kind]] && (!pm.odOnly || p.od) && (!pm.outsideOnly || outside(p)),
     );
     const refused = pm.show.refused && !pm.odOnly ? d.refused : [];
     const bounds = [];
@@ -77,10 +81,10 @@ async function punchMapPage(id) {
       const color = p.od ? PM_COLORS.od : PM_COLORS[p.kind];
       const m = L.circleMarker([p.latitude, p.longitude], { radius: 8, color: "#fff", weight: 2, fillColor: color, fillOpacity: 0.95 })
         .bindPopup(
-          `<strong>${esc(p.name)}</strong>${p.employee_code ? ` (${esc(p.employee_code)})` : ""}<br>${p.kind === "in" ? "Punch in" : "Punch out"} ${time(p.at)}${p.od ? `<br>OD: ${esc(p.od_purpose || "")}` : ""}<br>${pmDistance(p.distance_m)} from ${esc(p.workplace_name)} · GPS ±${Math.round(p.accuracy ?? 0)} m${p.branch_name ? `<br>${esc(p.branch_name)}` : ""}`,
+          `<strong>${esc(p.name)}</strong>${p.employee_code ? ` (${esc(p.employee_code)})` : ""}<br>${p.od && !p.trip_id ? "OD day " : ""}${PM_LABEL[p.kind]} ${time(p.at)}${p.trip_status ? ` · ${esc(p.trip_status)}` : ""}${p.od ? `<br>OD: ${esc(p.od_purpose || "")}` : ""}<br>${pmDistance(p.distance_m)} from ${esc(p.workplace_name)} · GPS ±${Math.round(p.accuracy ?? 0)} m${p.branch_name ? `<br>${esc(p.branch_name)}` : ""}`,
         )
         .addTo(layer);
-      markers.set(`p${p.shift_id}${p.kind}`, m);
+      markers.set(pmKey(p), m);
       bounds.push([p.latitude, p.longitude]);
     }
     for (const r of refused) {
@@ -113,7 +117,7 @@ async function punchMapPage(id) {
         : "";
 
     const rows = [
-      ...points.map((p) => ({ key: `p${p.shift_id}${p.kind}`, at: p.at, p })),
+      ...points.map((p) => ({ key: pmKey(p), at: p.at, p })),
       ...refused.map((r) => ({ key: `r${r.id}`, at: r.at, r })),
     ].sort((a, b) => (a.at < b.at ? 1 : -1));
     pagedList(document.querySelector("#pm-list"), rows, {
@@ -121,7 +125,7 @@ async function punchMapPage(id) {
       row: ({ key, p, r }) => {
         const x = p ?? r;
         const what = p
-          ? `<span class="pill ${p.od ? "" : "neutral"}">${p.od ? "OD " : ""}${p.kind === "in" ? "In" : "Out"}</span>${p.od ? `<small>${esc(p.od_purpose || "")}</small>` : ""}`
+          ? `<span class="pill ${p.od ? "" : "neutral"}">${p.trip_id ? PM_LABEL[p.kind] : `${p.od ? "OD day " : ""}${p.kind === "in" ? (p.od ? "in" : "In") : p.od ? "out" : "Out"}`}</span>${p.od ? `<small>${esc(p.od_purpose || "")}</small>` : ""}`
           : `<span class="pill">Refused</span><small>${esc(r.reason || "")}</small>`;
         const where = p ? `${pmDistance(p.distance_m)} from ${esc(p.workplace_name)}` : "—";
         return `<tr><td>${esc(x.name)}<small>${esc(x.employee_code || "")}${x.branch_name ? ` · ${esc(x.branch_name)}` : ""}</small></td><td>${what}</td><td>${time(x.at)}</td><td>${where}</td><td>±${Math.round(x.accuracy ?? 0)} m</td><td><button class="ghost" data-pm-show="${key}">Show on map</button> <a href="https://www.google.com/maps?q=${x.latitude},${x.longitude}" target="_blank" rel="noreferrer">Google Maps ↗</a></td></tr>`;

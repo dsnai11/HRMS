@@ -516,13 +516,20 @@ function PunchHero({
         disabled={!today || odDone}
         onPress={onSlidePunch}
       />
-      {!open && !done && today?.user?.od_punch && (
+      {/* OD Punch In before the day starts; OD Out / OD In during a normal shift. */}
+      {today?.od_allowed && ((!open && !done) || (open && !odOpen)) && (
         <Pressable
           style={({ pressed }) => [s.odBtn, pressed && { opacity: 0.8 }]}
           accessibilityRole="button"
           onPress={onOdPunch}
         >
-          <Text style={s.odBtnText}>OD Punch In (on duty outside)</Text>
+          <Text style={s.odBtnText}>
+            {!open
+              ? "OD Punch In (on duty outside)"
+              : today.openTrip
+                ? "OD In (back from " + today.openTrip.purpose.slice(0, 24) + ")"
+                : "OD Out (going out for work)"}
+          </Text>
         </Pressable>
       )}
       <View style={s.tiles}>
@@ -580,6 +587,8 @@ type HolidayRow = {
 };
 type TodayInfo = {
   user?: { od_punch?: boolean };
+  od_allowed?: boolean;
+  openTrip?: { purpose: string; out_at: string } | null;
   openShift: { in_at: string; workplace_name: string; source?: string } | null;
   todayShift: { in_at: string; out_at: string | null; od_purpose?: string | null } | null;
   workplace: { name: string } | null;
@@ -2589,30 +2598,74 @@ function RequestsScreen({ api }: { api: Api }) {
 }
 
 // ---- on-duty log: the days marked on duty and how each was decided ------------------------
+type OdTrip = {
+  id: number;
+  purpose: string;
+  out_at: string;
+  in_at: string | null;
+  ended_by: "od_in" | "punch_out" | "auto" | null;
+  status: "open" | "pending" | "approved" | "rejected";
+  decision_note: string | null;
+};
+const TRIP_END: Record<string, string> = {
+  od_in: "back",
+  punch_out: "punched out outside",
+  auto: "no OD In",
+};
 function OdLogScreen({ api }: { api: Api }) {
   const list = useLoad(() => api<Correction[]>("/regularizations"));
+  const trips = useLoad(() => api<OdTrip[]>("/od-visits"));
   const rows = (list.data ?? []).filter((r) => r.kind === "on_duty");
   return (
-    <View style={s.card}>
-      <Text style={s.heading}>OD Log History</Text>
-      <Text style={s.note}>
-        Days you were on duty away from your workplace. Ask for one under
-        Regularization.
-      </Text>
-      <Status loading={list.loading} error={list.error} />
-      {!list.loading && rows.length === 0 && (
-        <Text style={s.note}>No on-duty days yet.</Text>
-      )}
-      {rows.map((r) => (
-        <View key={r.id} style={s.row}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.strong}>{dateText(r.date)}</Text>
-            <Text style={s.note}>{r.reason}</Text>
+    <>
+      <View style={s.card}>
+        <Text style={s.heading}>OD trips</Text>
+        <Text style={s.note}>
+          Times you went out of the office on duty during the day (OD Out and OD In).
+        </Text>
+        <Status loading={trips.loading} error={trips.error} />
+        {!trips.loading && (trips.data ?? []).length === 0 && (
+          <Text style={s.note}>No OD trips yet.</Text>
+        )}
+        {(trips.data ?? []).map((r) => (
+          <View key={r.id} style={s.row}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.strong}>{r.purpose}</Text>
+              <Text style={s.note}>
+                {dateText(r.out_at.slice(0, 10))} · out {clock(r.out_at)}
+                {r.in_at
+                  ? " · " + (TRIP_END[r.ended_by ?? ""] ?? "back") + " " + clock(r.in_at)
+                  : r.ended_by
+                    ? " · " + TRIP_END[r.ended_by]
+                    : ""}
+              </Text>
+              {!!r.decision_note && <Text style={s.note}>{r.decision_note}</Text>}
+            </View>
+            <Pill text={r.status === "open" ? "out now" : r.status} />
           </View>
-          <Pill text={r.status} />
-        </View>
-      ))}
-    </View>
+        ))}
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>OD Log History</Text>
+        <Text style={s.note}>
+          Days you were on duty away from your workplace. Ask for one under
+          Regularization.
+        </Text>
+        <Status loading={list.loading} error={list.error} />
+        {!list.loading && rows.length === 0 && (
+          <Text style={s.note}>No on-duty days yet.</Text>
+        )}
+        {rows.map((r) => (
+          <View key={r.id} style={s.row}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.strong}>{dateText(r.date)}</Text>
+              <Text style={s.note}>{r.reason}</Text>
+            </View>
+            <Pill text={r.status} />
+          </View>
+        ))}
+      </View>
+    </>
   );
 }
 

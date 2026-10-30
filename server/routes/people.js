@@ -509,7 +509,7 @@ export function registerPeople(router, app) {
         200,
         await db
           .prepare(
-            "SELECT require_selfie,min_app_version FROM companies WHERE id=?",
+            "SELECT require_selfie,min_app_version,od_everyone FROM companies WHERE id=?",
           )
           .get(companyId),
       ),
@@ -521,7 +521,7 @@ export function registerPeople(router, app) {
       const b = await body();
       const row = await db
         .prepare(
-          "SELECT require_selfie,min_app_version FROM companies WHERE id=?",
+          "SELECT require_selfie,min_app_version,od_everyone FROM companies WHERE id=?",
         )
         .get(companyId);
       const min =
@@ -534,7 +534,7 @@ export function registerPeople(router, app) {
         throw new HttpError(400, "Version must look like 1.2.0.");
       await db
         .prepare(
-          "UPDATE companies SET require_selfie=?,min_app_version=? WHERE id=?",
+          "UPDATE companies SET require_selfie=?,min_app_version=?,od_everyone=? WHERE id=?",
         )
         .run(
           b.require_selfie === undefined
@@ -543,6 +543,7 @@ export function registerPeople(router, app) {
               ? 1
               : 0,
           min,
+          b.od_everyone === undefined ? row.od_everyone : b.od_everyone ? 1 : 0,
           companyId,
         );
       await audit("attendance_settings_updated", {

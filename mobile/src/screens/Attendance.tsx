@@ -57,6 +57,9 @@ type Profile = {
   company?: { id: number; name: string; require_selfie?: boolean } | null;
   workplace: { name: string; radius: number } | null;
   openShift: Shift | null;
+  // Out of the office on duty during the open shift (OD Out), if so.
+  openTrip?: { id: number; purpose: string; out_at: string } | null;
+  od_allowed?: boolean;
   todayShift: Shift | null;
   device: { status: "pending" | "approved" | "revoked" } | null;
 };
@@ -123,7 +126,7 @@ export default function Attendance() {
   const [selfieOpen, setSelfieOpen] = useState(false);
   // "Mark IN / OUT": the person sees where the phone says they are and confirms.
   const [fix, setFix] = useState<{
-    action: "in" | "out";
+    action: "in" | "out" | "od_out" | "od_in";
     address: string;
     accuracy: number;
   } | null>(null);
@@ -133,7 +136,7 @@ export default function Attendance() {
   const [odPurpose, setOdPurpose] = useState("");
   async function confirmPlace(
     position: Location.LocationObject,
-    action: "in" | "out",
+    action: "in" | "out" | "od_out" | "od_in",
   ): Promise<boolean> {
     let address = "";
     try {
@@ -429,7 +432,12 @@ export default function Attendance() {
     });
   // od: an OD punch-in with this purpose. An OD shift's punch-out needs nothing extra:
   // the server knows the shift is OD and skips the workplace boundary.
-  const punch = (popup = false, od?: string) =>
+  // trip: OD Out (leaving the office on duty, with a purpose) or OD In (back) in a shift.
+  const punch = (
+    popup = false,
+    od?: string,
+    trip?: { action: "od_out" | "od_in"; purpose?: string },
+  ) =>
     run(async () => {
       const current = await api<Profile>("/me");
       setProfile(current);
@@ -448,7 +456,9 @@ export default function Attendance() {
         );
       const ending = current.openShift ?? current.todayShift;
       const required = ending?.required_out_at;
+      if (trip && !current.openShift) throw new Error("Punch in first.");
       if (
+        !trip &&
         ending &&
         required &&
         Date.now() < Date.parse(required) &&
@@ -472,7 +482,7 @@ export default function Attendance() {
       )
         return;
       let selfie: string | undefined;
-      if (current.company?.require_selfie) {
+      if (current.company?.require_selfie && !trip) {
         const photo = await takeSelfie();
         if (!photo) throw new Error("A selfie is needed to punch.");
         selfie = photo;
@@ -506,7 +516,7 @@ export default function Attendance() {
       }
       if (AppState.currentState !== "active")
         throw new Error("Keep the app open while recording attendance.");
-      const action = ending ? "out" : "in";
+      const action = trip?.action ?? (ending ? "out" : "in");
       if (od && action === "out")
         throw new Error("You are already punched in today.");
       if (!(await confirmPlace(position, action))) return;
@@ -519,6 +529,7 @@ export default function Attendance() {
         await api("/punch", {
           action,
           ...(od ? { od: { purpose: od } } : {}),
+          ...(trip?.purpose ? { purpose: trip.purpose } : {}),
           ...(selfie ? { selfie } : {}),
           location: {
             latitude: position.coords.latitude,
@@ -541,7 +552,16 @@ export default function Attendance() {
       }
       await refresh();
       const odShift = od || ending?.source === "od_punch";
-      if (od) setOdPurpose("");
+      if (od || trip) setOdPurpose("");
+      if (trip) {
+        Alert.alert(
+          trip.action === "od_out" ? "OD Out recorded" : "OD In recorded",
+          trip.action === "od_out"
+            ? "You are out on duty. Tap OD In when you are back, or punch out wherever you finish."
+            : "Welcome back. Your OD trip is sent to your manager for approval.",
+        );
+        return;
+      }
       Alert.alert(
         "Attendance recorded",
         odShift
@@ -585,6 +605,7 @@ export default function Attendance() {
   );
   const open = profile?.openShift,
     done = profile?.todayShift;
+  const trip = profile?.openTrip ?? null;
   const odOpen = open?.source === "od_punch",
     odDone = !open && done?.od_purpose != null;
   const passwordScreen = profile?.user.must_change_password || changing;
@@ -962,6 +983,12 @@ export default function Attendance() {
                             : done.source === "on_duty"
                               ? "Approved as a full day on duty."
                               : "Not approved.")
+                      : open && trip
+                      ? "Out on duty since " +
+                        time(trip.out_at) +
+                        ": " +
+                        trip.purpose +
+                        ". Tap OD In when you are back, or punch out wherever you finish."
                       : open
                       ? "Started " +
                         time(open.in_at) +
@@ -991,7 +1018,7 @@ export default function Attendance() {
                   )}
                   <View style={s.callout}>
                     <Text style={s.note}>
-                      {odOpen
+                      {odOpen || trip
                         ? "We record a fresh GPS reading and the time when you punch out."
                         : "We check a fresh GPS reading when you tap below. Enable precise location and stay inside the workplace boundary."}
                     </Text>
@@ -1003,7 +1030,9 @@ export default function Attendance() {
                           ? "Checking attendance…"
                           : odOpen
                             ? "OD punch out →"
-                            : open
+                            : open && trip
+                              ? "Punch out here (ends OD) →"
+                              : open
                               ? "Punch out →"
                               : done
                                 ? "Update punch-out →"
@@ -1017,7 +1046,53 @@ export default function Attendance() {
                       }
                     />
                   )}
-                  {!open && !done && profile.user.od_punch && (
+                  {open && !odOpen && profile.od_allowed && (
+                    <View style={s.odBox}>
+                      {trip ? (
+                        <>
+                          <Text style={s.label}>Back in the office?</Text>
+                          <Button
+                            title={busy ? "Checking attendance…" : "OD In (I am back) →"}
+                            secondary
+                            onPress={() => void punch(false, undefined, { action: "od_in" })}
+                            disabled={busy || profile.device?.status !== "approved"}
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <Text style={s.label}>Going out for work? (OD Out)</Text>
+                          <Text style={s.note}>
+                            Record when you leave the office on duty. Tap OD In when you
+                            are back; your manager approves the trip.
+                          </Text>
+                          <TextInput
+                            accessibilityLabel="Purpose of the OD"
+                            style={s.input}
+                            placeholder="Purpose, e.g. Bank deposit, SBI MI Road"
+                            maxLength={200}
+                            value={odPurpose}
+                            onChangeText={setOdPurpose}
+                          />
+                          <Button
+                            title={busy ? "Checking attendance…" : "OD Out →"}
+                            secondary
+                            onPress={() =>
+                              void punch(false, undefined, {
+                                action: "od_out",
+                                purpose: odPurpose.trim(),
+                              })
+                            }
+                            disabled={
+                              busy ||
+                              !odPurpose.trim() ||
+                              profile.device?.status !== "approved"
+                            }
+                          />
+                        </>
+                      )}
+                    </View>
+                  )}
+                  {!open && !done && profile.od_allowed && (
                     <View style={s.odBox}>
                       <Text style={s.label}>On duty outside today? (OD)</Text>
                       <Text style={s.note}>
@@ -1099,7 +1174,13 @@ export default function Attendance() {
         <View style={s.sheetWrap}>
           <View style={s.sheet}>
             <Text style={s.sheetTitle}>
-              {fix?.action === "out" ? "Mark OUT" : "Mark IN"}
+              {fix?.action === "od_out"
+                ? "Mark OD OUT"
+                : fix?.action === "od_in"
+                  ? "Mark OD IN"
+                  : fix?.action === "out"
+                    ? "Mark OUT"
+                    : "Mark IN"}
             </Text>
             <View style={s.pinRow}>
               <Text style={s.pin}>📍</Text>

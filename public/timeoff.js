@@ -270,8 +270,45 @@ async function approvalsPage(id) {
   );
   await claimsApprovals(id);
   await hiringApprovals(id);
+  await odTripApprovals(id);
   await compOffApprovals(id);
   await bankChangeApprovals(id);
+}
+
+// OD trips: out of the office on duty during a shift, waiting for the manager.
+async function odTripApprovals(id) {
+  const rows = await api("/od-visits/pending");
+  if (id !== renderId || !rows.length) return;
+  const ended = { od_in: "came back", punch_out: "punched out outside", auto: "no OD In or punch-out" };
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>OD trips</h2><p class="muted">Out of the office on duty during the day. Rejecting a trip that ended the day outside moves the punch-out back to when the person left the office.</p><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Purpose</th><th>Out</th><th>Back</th><th>Where</th><th></th></tr></thead><tbody>${rows
+    .map(
+      (r) =>
+        `<tr><td>${esc(r.employee_name)}<small>${esc(r.employee_code || "")}</small></td><td>${esc(r.purpose)}</td><td>${time(r.out_at)}</td><td>${r.in_at ? time(r.in_at) : "—"}<small>${esc(ended[r.ended_by] || "")}</small></td><td><a href="https://www.google.com/maps?q=${r.out_latitude},${r.out_longitude}" target="_blank" rel="noreferrer">Left ↗</a>${r.in_latitude != null ? ` · <a href="https://www.google.com/maps?q=${r.in_latitude},${r.in_longitude}" target="_blank" rel="noreferrer">Back ↗</a>` : ""}</td><td><button class="secondary" data-trip-ok="${r.id}">Approve</button> <button class="ghost" data-trip-no="${r.id}">Reject</button></td></tr>`,
+    )
+    .join("")}</tbody></table></div>`;
+  document.querySelector("#content").append(card);
+  card.querySelectorAll("[data-trip-ok]").forEach((b) =>
+    b.addEventListener("click", () =>
+      busy(b, async () => {
+        await api(`/od-visits/${b.dataset.tripOk}/decision`, { decision: "approved" });
+        notice("OD trip approved.");
+        await loadMe();
+        render();
+      }),
+    ),
+  );
+  card.querySelectorAll("[data-trip-no]").forEach((b) =>
+    b.addEventListener("click", () =>
+      dialog("Reject OD trip", '<label class="full">Reason<input name="note" maxlength="300" required></label>', async (f) => {
+        const r = await api(`/od-visits/${b.dataset.tripNo}/decision`, { decision: "rejected", note: f.note });
+        notice(r.adjusted ? "Rejected. The punch-out was moved back to when they left the office." : "Rejected.");
+        await loadMe();
+        render();
+      }),
+    ),
+  );
 }
 
 // ---- HR: leave types, holidays, settings, requests, balances ------------------

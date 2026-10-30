@@ -289,13 +289,17 @@ document.addEventListener("click", async (e) => {
 // ---- OD punch: who may punch in and out on duty, away from their workplace -----------------------------
 async function odPunchCard(id) {
   if (!has("attendance.read")) return;
-  const allowed = await api("/admin/od-punch");
+  const [allowed, settings] = await Promise.all([api("/admin/od-punch"), api("/admin/attendance-settings")]);
   if (id !== renderId) return;
   const who = (p) => `${esc(p.name)}${p.employee_code ? ` (${esc(p.employee_code)})` : ""}`;
   const editable = has("employees.write");
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = `<h2>OD punch (on duty)</h2><p class="muted">These people get <strong>OD Punch In</strong> and <strong>OD Punch Out</strong> in the phone app. They can punch from anywhere: the time, GPS location and selfie are kept, and the day goes to their manager for approval. Approved, it counts as a full day on duty; rejected, it does not count.</p>${
+  card.innerHTML = `<h2>OD punch (on duty)</h2><p class="muted">These people get <strong>OD Punch In</strong> and <strong>OD Punch Out</strong> in the phone app. They can punch from anywhere: the time, GPS location and selfie are kept, and the day goes to their manager for approval. Approved, it counts as a full day on duty; rejected, it does not count. During a normal day they can also tap <strong>OD Out</strong> when they leave the office on work and <strong>OD In</strong> when they are back; each trip goes to their manager.</p>${
+    has("org.manage")
+      ? `<label class="check"><input type="checkbox" id="od-everyone" ${settings.od_everyone ? "checked" : ""}> Everyone can use OD (otherwise only the people listed below)</label>`
+      : ""
+  }${
     editable
       ? `<div class="actions"><label>Add people<input type="search" id="od-q" placeholder="Search name, code or branch" autocomplete="off"></label></div><div id="od-found"></div>`
       : ""
@@ -303,6 +307,10 @@ async function odPunchCard(id) {
   document.querySelector("#content").append(card);
   const save = (ids, allowedNow) =>
     api("/admin/od-punch", { user_ids: ids, allowed: allowedNow }, "PATCH");
+  card.querySelector("#od-everyone")?.addEventListener("change", async (e) => {
+    await api("/admin/attendance-settings", { od_everyone: e.target.checked }, "PATCH");
+    notice(e.target.checked ? "Everyone can now use OD." : "Only the people listed can use OD.");
+  });
   pagedList(card.querySelector("#od-allowed"), allowed, {
     head: "<tr><th>Employee</th><th>Branch</th><th></th></tr>",
     row: (p) => `<tr><td>${who(p)}</td><td>${esc(p.branch_name || "—")}</td><td>${editable ? `<button class="ghost" data-od-remove="${p.id}">Remove</button>` : ""}</td></tr>`,

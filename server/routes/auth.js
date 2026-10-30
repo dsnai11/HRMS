@@ -9,6 +9,7 @@ import {
 import { HttpError, string, password, email, clientIp } from "../http.js";
 import { permissionsOf } from "../rbac.js";
 import { ipAllowed, isStaff, loadRole, outsideOffice, policyOf } from "../security-policy.js";
+import { odAllowed } from "./od-visits.js";
 import { bindDevice, deviceFromHeaders } from "../devices.js";
 import { closeStaleShifts, finishedToday } from "./attendance.js";
 import { pendingApprovals } from "../approval.js";
@@ -243,6 +244,12 @@ export function registerAuth(router, app) {
             .prepare("SELECT * FROM shifts WHERE user_id=? AND out_at IS NULL")
             .get(user.id)) || null,
         todayShift: await finishedToday(app, user.id, clock()),
+        // An OD trip out of the office in the open shift, if any.
+        openTrip:
+          (await db
+            .prepare("SELECT id,purpose,out_at FROM od_visits WHERE user_id=? AND status='open'")
+            .get(user.id)) || null,
+        od_allowed: await odAllowed(app, user),
         device: await deviceFromHeaders(app, user, req).then((d) =>
           d ? { status: d.status } : null,
         ),

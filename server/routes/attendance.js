@@ -4,6 +4,7 @@ import { assessPunch, parseSignals } from "../risk.js";
 import { evaluatePunchIn, halfDayReasons } from "../policy.js";
 import { deviceFromHeaders } from "../devices.js";
 import { submitCorrection } from "./regularization.js";
+import { odAllowed, tripApprovers } from "./od-visits.js";
 
 // One shift per local day: the most recent finished shift that started today.
 export async function finishedToday(app, userId, nowMs) {
@@ -38,6 +39,10 @@ export async function closeStaleShifts(app, userId = null) {
       )
       .run(JSON.stringify(["missed_out"]), s.id);
     if (r.changes)
+      await app.db
+        .prepare("UPDATE od_visits SET status='pending',ended_by='auto' WHERE shift_id=? AND status='open'")
+        .run(s.id);
+    if (r.changes)
       await app.audit(
         null,
         "shift_closed_missed_out",
@@ -55,7 +60,7 @@ export function scheduleStaleShiftClose(app) {
   setInterval(run, 3600000).unref();
 }
 
-async function recordPunchEvent(app, user, event) {
+export async function recordPunchEvent(app, user, event) {
   const finite = (n) => (Number.isFinite(n) ? n : null);
   await app.db
     .prepare(
@@ -153,8 +158,10 @@ export function registerAttendance(router, app) {
     rateLimit(`punch:${user.id}`, 60);
     // Phones on app versions before the selfie was shrunk send a full camera photo (2 MB+).
     const b = await body(3000000);
-    if (!["in", "out"].includes(b.action))
+    // od_out / od_in: leaving the office on duty during a shift, and coming back.
+    if (!["in", "out", "od_out", "od_in"].includes(b.action))
       throw new HttpError(400, "Choose punch-in or punch-out.");
+    const trip = b.action === "od_out" || b.action === "od_in";
     const signals = parseSignals(b.signals);
     let device = null,
       stored = null,
@@ -182,7 +189,7 @@ export function registerAttendance(router, app) {
           `device_${device.status}`,
         );
       await closeStaleShifts(app, user.id);
-      const selfie = await readSelfie(b.selfie, user.company_id);
+      const selfie = trip ? null : await readSelfie(b.selfie, user.company_id);
       stored = selfie ? await app.blobs.put(selfie, "selfies") : null;
       const result = await transaction(async () => {
         const nowMs = clock();
@@ -197,16 +204,39 @@ export function registerAttendance(router, app) {
             409,
             "Today's shift is already complete. Attendance is one shift per day.",
           );
+        if (trip && !open)
+          throw new HttpError(
+            409,
+            "Punch in first. OD Out is for leaving the office on duty during your shift.",
+          );
         // A second punch-out on the same day replaces the earlier one.
         const target = open || (b.action === "out" ? done : null);
         if (b.action === "out" && !target)
           throw new HttpError(409, "There is no active shift to end.");
         // OD (on duty): punched anywhere, no workplace boundary; the day waits for approval.
         const od = b.action === "in" ? Boolean(b.od) : target.od_purpose != null;
+        if (trip && od)
+          throw new HttpError(409, "You are on an OD day already: punch out wherever you finish.");
+        // An OD trip out of the office in this shift, if one is open.
+        const visit =
+          target && b.action !== "in"
+            ? await db.prepare("SELECT * FROM od_visits WHERE shift_id=? AND status='open'").get(target.id)
+            : null;
+        const tripPurpose = b.action === "od_out" ? string(b.purpose, "Purpose of the OD", 200) : null;
+        if (b.action === "od_out") {
+          if (!(await odAllowed(app, user)))
+            throw new HttpError(403, "OD is not switched on for you. Ask HR.", "od_not_allowed");
+          if (visit)
+            throw new HttpError(
+              409,
+              `You are already out on duty since ${localTime.format(new Date(visit.out_at))}. Tap OD In when you are back.`,
+            );
+        }
+        if (b.action === "od_in" && !visit) throw new HttpError(409, "You are not out on duty.");
         const purpose =
           b.action === "in" && od ? string(b.od?.purpose, "Purpose of the OD", 200) : null;
         if (od && b.action === "in") {
-          if (!user.od_punch)
+          if (!(await odAllowed(app, user)))
             throw new HttpError(
               403,
               "OD punch is not switched on for you. Ask HR.",
@@ -242,10 +272,13 @@ export function registerAttendance(router, app) {
           );
         await checkAppVersion(user.company_id, b.signals?.appVersion);
         try {
-          checkLocation(b.location, od ? { ...site, radius: Infinity } : site, nowMs);
+          // OD days, OD trips and a punch-out during a trip are recorded wherever the person is.
+          checkLocation(b.location, od || trip || visit ? { ...site, radius: Infinity } : site, nowMs);
         } catch (e) {
-          if (e.code === "outside_geofence" && b.action === "in" && user.od_punch)
+          if (e.code === "outside_geofence" && b.action === "in" && (await odAllowed(app, user)))
             e.message += " Working outside today? Use OD Punch In.";
+          if (e.code === "outside_geofence" && b.action === "out" && (await odAllowed(app, user)))
+            e.message += " Out on work? Tap OD Out when you leave the office, and you can punch out wherever you finish.";
           throw e;
         }
         const { latitude, longitude, accuracy } = b.location;
@@ -264,6 +297,54 @@ export function registerAttendance(router, app) {
             flags: risk.flags,
           });
         const now = new Date(nowMs).toISOString();
+        if (trip) {
+          let tripId = visit?.id;
+          if (b.action === "od_out")
+            tripId = Number(
+              (
+                await db
+                  .prepare(
+                    "INSERT INTO od_visits(company_id,user_id,shift_id,purpose,out_at,out_latitude,out_longitude,out_accuracy,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                  )
+                  .run(user.company_id, user.id, target.id, tripPurpose, now, latitude, longitude, accuracy, now)
+              ).lastInsertRowid,
+            );
+          else {
+            const closed = await db
+              .prepare(
+                "UPDATE od_visits SET in_at=?,in_latitude=?,in_longitude=?,in_accuracy=?,ended_by='od_in',status='pending' WHERE id=? AND status='open'",
+              )
+              .run(now, latitude, longitude, accuracy, visit.id);
+            if (!closed.changes) throw new HttpError(409, "You are not out on duty.");
+          }
+          await recordPunchEvent(app, user, {
+            action: b.action,
+            outcome: "accepted",
+            shiftId: target.id,
+            flags: risk.flags,
+            deviceId: device.id,
+            location: b.location,
+            signals,
+          });
+          await db.prepare("UPDATE devices SET last_seen_at=? WHERE id=?").run(now, device.id);
+          await app.audit(user, b.action === "od_out" ? "od_trip_started" : "od_trip_ended", {
+            tripId,
+            shiftId: target.id,
+            flags: risk.flags,
+          });
+          if (b.action === "od_in")
+            await app.notify(await tripApprovers(app, user), {
+              companyId: user.company_id,
+              kind: "approval",
+              title: `${user.name} was out on duty (${visit.purpose})`,
+              body: `${localTime.format(new Date(visit.out_at))}–${localTime.format(new Date(nowMs))}. Approve or reject under Approvals.`,
+              link: "approvals",
+            });
+          return {
+            ...(await db.prepare("SELECT * FROM shifts WHERE id=?").get(target.id)),
+            trip: await db.prepare("SELECT * FROM od_visits WHERE id=?").get(tripId),
+          };
+        }
         let id = target?.id;
         const rules =
           b.action === "in"
@@ -322,6 +403,21 @@ export function registerAttendance(router, app) {
               JSON.stringify(reasons),
               id,
             );
+          // Punching out during an OD trip ends the trip there.
+          if (visit) {
+            await db
+              .prepare(
+                "UPDATE od_visits SET in_at=?,in_latitude=?,in_longitude=?,in_accuracy=?,ended_by='punch_out',status='pending' WHERE id=? AND status='open'",
+              )
+              .run(now, latitude, longitude, accuracy, visit.id);
+            await app.notify(await tripApprovers(app, user), {
+              companyId: user.company_id,
+              kind: "approval",
+              title: `${user.name} ended the day out on duty (${visit.purpose})`,
+              body: `Out from ${localTime.format(new Date(visit.out_at))}, punched out at ${localTime.format(new Date(nowMs))}. Approve or reject under Approvals.`,
+              link: "approvals",
+            });
+          }
           if (od) {
             const date = app.dayOf(target.in_at);
             if (await pendingCorrection(user.id, date))
@@ -366,6 +462,7 @@ export function registerAttendance(router, app) {
           workplaceId: site.id,
           flags: risk.flags,
           ...(od ? { od: true } : {}),
+          ...(visit ? { tripId: visit.id } : {}),
         });
         return await db.prepare("SELECT * FROM shifts WHERE id=?").get(id);
       });

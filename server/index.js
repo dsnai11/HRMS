@@ -42,6 +42,7 @@ import { registerDownloadLinks } from "./routes/download-links.js";
 import { registerRms } from "./routes/rms.js";
 import { registerReportBuilder } from "./routes/report-builder.js";
 import { registerPunchMap } from "./routes/punch-map.js";
+import { registerOdVisits } from "./routes/od-visits.js";
 import { ipAllowed, isStaff, loadRole, outsideOffice } from "./security-policy.js";
 import {
   registerScheduledReports,
@@ -234,6 +235,7 @@ export function createApp({
     registerRms,
     registerReportBuilder,
     registerPunchMap,
+    registerOdVisits,
   ])
     register(router, app);
 

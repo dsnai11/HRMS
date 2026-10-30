@@ -34,6 +34,18 @@ export async function inboxScope(app, user) {
   return null;
 }
 
+// OD trips waiting for this approver (their team, or their branches for HR).
+async function pendingTrips(app, user) {
+  const scope = await inboxScope(app, user);
+  if (!scope) return 0;
+  const rows = await app.db
+    .prepare(`SELECT r.user_id FROM od_visits r WHERE r.company_id=? AND r.status='pending' AND r.user_id<>?${scope.sql} LIMIT 300`)
+    .all(user.company_id, user.id, ...scope.params);
+  let n = 0;
+  for (const r of rows) if (await mayDecide(app, user, r.user_id)) n++;
+  return n;
+}
+
 export async function pendingApprovals(app, user) {
   // Interviews to give feedback on and joining tasks for this person.
   let n = (
@@ -43,6 +55,7 @@ export async function pendingApprovals(app, user) {
       )
       .get(user.id)
   ).n;
+  n = Number(n) + (await pendingTrips(app, user));
   n += (
     await app.db
       .prepare(
