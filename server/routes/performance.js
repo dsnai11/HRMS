@@ -7,7 +7,7 @@ import {
   optionalString,
   string,
 } from "../http.js";
-import { requireOwned } from "../scope.js";
+import { branchScope, inBranchScope, requireOwned } from "../scope.js";
 import { can } from "../rbac.js";
 import { mayDecide } from "../approval.js";
 
@@ -215,23 +215,39 @@ export function registerPerformance(router, app) {
   router.get(
     "/api/admin/review-cycles/:id/reviews",
     { perm: "performance.manage" },
-    async ({ params, companyId, send }) => {
+    async ({ user, params, companyId, send }) => {
       const c = await owned("review_cycles", params.id, companyId, "cycle");
+      // Branch HR sees only their branches. Running the cycle does not show anyone
+      // their own manager's rating early: it stays hidden until someone else releases it.
+      const scope = branchScope(user, "r.user_id");
+      const rows = await db
+        .prepare(
+          `SELECT r.*,u.name employee_name,u.employee_code,m.name manager_name FROM reviews r JOIN users u ON u.id=r.user_id LEFT JOIN users m ON m.id=r.manager_id WHERE r.cycle_id=?${scope.sql} ORDER BY u.name`,
+        )
+        .all(c.id, ...scope.params);
       return send(
         200,
-        await db
-          .prepare(
-            `SELECT r.*,u.name employee_name,u.employee_code,m.name manager_name FROM reviews r JOIN users u ON u.id=r.user_id LEFT JOIN users m ON m.id=r.manager_id WHERE r.cycle_id=? ORDER BY u.name`,
-          )
-          .all(c.id),
+        rows.map((r) =>
+          r.user_id === user.id
+            ? { ...shape(r, user.id), own: true }
+            : r,
+        ),
       );
     },
   );
   router.post(
     "/api/admin/reviews/:id/release",
     { perm: "performance.manage" },
-    async ({ params, companyId, send, audit }) => {
+    async ({ user, params, companyId, send, audit }) => {
       const r = await owned("reviews", params.id, companyId, "review");
+      const person = await db.prepare("SELECT branch_id FROM users WHERE id=?").get(r.user_id);
+      if (!inBranchScope(user, person?.branch_id))
+        throw new HttpError(404, "Review not found.");
+      if (r.user_id === user.id)
+        throw new HttpError(
+          403,
+          "You cannot release your own review. Another HR person or an administrator must release it.",
+        );
       if (r.status !== "completed")
         throw new HttpError(409, "The review is not complete yet.");
       await db.prepare("UPDATE reviews SET released=1 WHERE id=?").run(r.id);

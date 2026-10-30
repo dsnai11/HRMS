@@ -493,8 +493,27 @@ test("goals, review cycles and training", async (t) => {
     (await call("/reviews/mine", undefined, emp)).data[0].manager_rating,
     3,
   );
+  // HR runs the cycle but cannot see or release their own result early.
+  const hrReview = (await call("/reviews/mine", undefined, hr)).data[0];
+  await db
+    .prepare("UPDATE reviews SET self_rating=4,manager_rating=2,manager_comment='Needs work',status='completed' WHERE id=?")
+    .run(hrReview.id);
+  const cycleRows = (await call(`/admin/review-cycles/${cycle.data.id}/reviews`, undefined, hr)).data;
+  const own = cycleRows.find((r) => r.id === hrReview.id);
+  assert.deepEqual([own.own, own.manager_rating, own.manager_comment], [true, null, null]);
+  assert.equal(cycleRows.find((r) => r.id === mine.id).manager_rating, 3, "others' ratings stay visible");
+  const selfRelease = await call(`/admin/reviews/${hrReview.id}/release`, {}, hr);
+  assert.equal(selfRelease.status, 403);
+  assert.match(selfRelease.data.error, /own review/);
+  assert.equal((await call(`/admin/reviews/${hrReview.id}/release`, {}, w.owner)).status, 200);
+  assert.equal(
+    (await call(`/admin/review-cycles/${cycle.data.id}/reviews`, undefined, hr)).data.find((r) => r.id === hrReview.id)
+      .manager_rating,
+    2,
+    "visible once someone else releases it",
+  );
   const cycles = (await call("/admin/review-cycles", undefined, hr)).data;
-  assert.deepEqual([cycles[0].reviews, Number(cycles[0].completed)], [4, 1]);
+  assert.deepEqual([cycles[0].reviews, Number(cycles[0].completed)], [4, 2]);
   assert.equal(
     (await call(`/admin/review-cycles/${cycle.data.id}/close`, {}, hr)).status,
     200,

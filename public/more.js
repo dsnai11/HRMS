@@ -418,7 +418,7 @@ function perfWire(tab) {
     const rows = await api(`/admin/review-cycles/${b.dataset.cycle}/reviews`);
     viewDialog(
       `${b.dataset.name} reviews`,
-      `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Manager</th><th>Self</th><th>Manager rating</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.employee_name)}</td><td>${esc(r.manager_name || "—")}</td><td>${r.self_rating ?? "—"}</td><td>${r.manager_rating ?? "—"}</td><td>${REVIEW_STATUS[r.status]}${r.released ? " · released" : ""}</td><td>${r.status === "completed" && !r.released ? `<button class="ghost" data-release="${r.id}">Release</button>` : ""}</td></tr>`).join("")}</tbody></table></div><div class="actions"><button class="ghost" id="close-cycle">Close this cycle</button></div>`,
+      `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Manager</th><th>Self</th><th>Manager rating</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.employee_name)}</td><td>${esc(r.manager_name || "—")}</td><td>${r.self_rating ?? "—"}</td><td>${r.own && !r.released ? '<span class="muted">hidden until released</span>' : (r.manager_rating ?? "—")}</td><td>${REVIEW_STATUS[r.status]}${r.released ? " · released" : ""}</td><td>${r.status === "completed" && !r.released ? (r.own ? '<span class="muted">Your own: someone else releases it</span>' : `<button class="ghost" data-release="${r.id}">Release</button>`) : ""}</td></tr>`).join("")}</tbody></table></div><div class="actions"><button class="ghost" id="close-cycle">Close this cycle</button></div>`,
     );
     document.querySelectorAll("dialog [data-release]").forEach(
       (x) =>
