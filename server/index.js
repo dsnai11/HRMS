@@ -44,6 +44,7 @@ import { registerReportBuilder } from "./routes/report-builder.js";
 import { registerPunchMap } from "./routes/punch-map.js";
 import { registerOdVisits } from "./routes/od-visits.js";
 import { registerCases } from "./routes/cases.js";
+import { registerSurveys } from "./routes/surveys.js";
 import { ipAllowed, isStaff, loadRole, outsideOffice } from "./security-policy.js";
 import {
   registerScheduledReports,
@@ -97,6 +98,7 @@ const STATIC = {
   "/reports.js": ["reports.js", "text/javascript"],
   "/punchmap.js": ["punchmap.js", "text/javascript"],
   "/cases.js": ["cases.js", "text/javascript"],
+  "/surveys.js": ["surveys.js", "text/javascript"],
   "/vendor/leaflet.js": ["../node_modules/leaflet/dist/leaflet.js", "text/javascript"],
   "/vendor/leaflet.css": ["../node_modules/leaflet/dist/leaflet.css", "text/css"],
   "/join.html": ["join.html", "text/html"],
@@ -239,6 +241,7 @@ export function createApp({
     registerPunchMap,
     registerOdVisits,
     registerCases,
+    registerSurveys,
   ])
     register(router, app);
 

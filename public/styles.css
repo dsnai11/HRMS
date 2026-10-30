@@ -2502,3 +2502,15 @@ tr.selected td { background: color-mix(in srgb, var(--brand, #ac051b) 7%, transp
 .pl-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
 .pl-bar .pl-q { flex: 1 1 220px; max-width: 360px; }
 .pl-bar .spacer { flex: 1; }
+
+/* Surveys */
+.survey-q { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+.survey-q legend { font-weight: 600; padding: 0 4px; }
+.scale { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
+.scale-pick input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.scale-pick span { display: inline-flex; min-width: 36px; height: 36px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.scale-pick input:checked + span { background: var(--green); color: #fff; border-color: var(--green); }
+.scale-pick input:focus-visible + span { outline: 2px solid var(--green); outline-offset: 2px; }
+.sv-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.sv-row input[data-k="text"] { flex: 1 1 240px; }
+.sv-row input[data-k="options"] { flex: 1 1 100%; }

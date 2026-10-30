@@ -312,6 +312,7 @@ function navGroups() {
         (staff || has("bot.manage")) && ["laxmi", "Ask Laxmi"],
         ["helpdesk", "Helpdesk"],
         staff && ["concerns", "Raise a concern"],
+        staff && ["surveys", "Surveys"],
       ],
     ],
     [
@@ -341,6 +342,7 @@ function navGroups() {
         has("roles.assign") && ["roles", "Roles & rights"],
         has("security.read") && ["security", "Security"],
         ((me.case_kinds ?? []).length > 0 || has("roles.assign")) && ["cases", "Cases"],
+        has("surveys.manage") && ["surveyadmin", "Engagement surveys"],
         has("audit.read") && ["audit", "Activity log"],
       ],
     ],
@@ -553,6 +555,8 @@ async function render() {
     if (page === "punchmap") return await punchMapPage(id);
     if (page === "concerns") return await concernsPage(id);
     if (page === "cases") return await casesPage(id);
+    if (page === "surveys") return await surveysPage(id);
+    if (page === "surveyadmin") return await surveyAdminPage(id);
     if (page === "performance") return await performancePage(id);
     if (page === "learning") return await learningPage(id);
     if (page === "requisitions") return await requisitionsPage(id);
