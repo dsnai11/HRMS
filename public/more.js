@@ -171,7 +171,33 @@ async function securityCard(id) {
       },
     ),
   );
-  card.querySelector("#tf-on")?.addEventListener("click", async () => {
+  card.querySelector("#tf-on")?.addEventListener("click", () => twoFactorDialog());
+}
+
+// Turning on two-factor login: a key for the authenticator app, then one code to confirm.
+// `required` is the screen shown when the company policy asks for it before anything else.
+async function twoFactorSetupCard(id, required) {
+  const tf = await api("/2fa");
+  if (id !== renderId) return;
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = tf.available
+    ? `<p>Install Google Authenticator, Microsoft Authenticator or Authy, then press the button.</p><div class="actions"><button id="tf-start">Set up now</button>${required ? '<button class="ghost" id="tf-signout">Sign out</button>' : ""}</div>`
+    : '<p class="muted">Two-factor login is not available until the server has DATA_ENCRYPTION_KEY set. Ask your administrator.</p>';
+  document.querySelector("#content").append(card);
+  card.querySelector("#tf-start")?.addEventListener("click", () =>
+    twoFactorDialog(async () => {
+      me.needs_2fa = false;
+      await render();
+    }),
+  );
+  card.querySelector("#tf-signout")?.addEventListener("click", async () => {
+    await api("/logout", {}).catch(() => {});
+    location.reload();
+  });
+}
+async function twoFactorDialog(after) {
+  {
     const s = await api("/2fa/setup", {});
     dialog(
       "Turn on two-factor login",
@@ -182,9 +208,48 @@ async function securityCard(id) {
           "Save your recovery codes",
           `<p>Each code works once if you lose your phone. They will not be shown again.</p><div class="codes">${r.recovery_codes.map((c) => `<code>${c}</code>`).join(" ")}</div>`,
         );
+        if (after) document.querySelector("dialog #close")?.addEventListener("click", () => void after());
       },
     );
-  });
+  }
+}
+
+// ---- company security policy (Administration > Security) -------------------------------------------
+async function securityPolicyCard(id) {
+  const p = await api("/admin/security-policy");
+  if (id !== renderId) return;
+  const edit = has("roles.assign");
+  const card = document.createElement("div");
+  card.className = "card";
+  const dis = edit ? "" : "disabled";
+  card.innerHTML = `<h2>Security policy</h2><p class="muted">"Staff" means anyone with HR or admin rights. Plain employees and the phone app are not affected by the office-address rule.</p>
+    <form id="sp-form" class="form-grid">
+      <label class="full">Office addresses for staff on the web portal (one per line; a single address or a range like 203.0.113.0/24). Empty means anywhere.
+        <textarea name="ips" rows="4" ${dis} placeholder="203.0.113.10&#10;198.51.100.0/24">${esc(p.staff_ip_allowlist.join("\n"))}</textarea></label>
+      <p class="full muted">Your address now: <strong>${esc(p.your_ip || "unknown")}</strong>. It must be in the list, or you could not save it.</p>
+      ${input("idle", "Sign browsers out after this many idle minutes (0 = off)", p.idle_minutes, `type="number" min="0" max="720" ${dis}`)}
+      ${input("pwdays", "Passwords expire after this many days (0 = never)", p.password_max_days, `type="number" min="0" max="365" ${dis}`)}
+      <label class="check full"><input type="checkbox" name="tfa" ${p.require_staff_2fa ? "checked" : ""} ${dis} ${p.two_factor_available ? "" : "disabled"}> Require two-factor login for staff on the web portal${p.two_factor_available ? "" : " (needs DATA_ENCRYPTION_KEY on the server)"}</label>
+      ${edit ? '<div class="actions full"><button>Save policy</button></div>' : ""}
+    </form>`;
+  document.querySelector("#content").append(card);
+  card.querySelector("#sp-form").onsubmit = (e) => {
+    e.preventDefault();
+    const f = e.target;
+    busy(e.submitter, async () => {
+      await api(
+        "/admin/security-policy",
+        {
+          staff_ip_allowlist: f.ips.value.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean),
+          idle_minutes: Number(f.idle.value || 0),
+          password_max_days: Number(f.pwdays.value || 0),
+          require_staff_2fa: f.tfa.checked,
+        },
+        "PATCH",
+      );
+      notice("Security policy saved.");
+    });
+  };
 }
 
 // ---- performance ---------------------------------------------------------------------------------------

@@ -482,9 +482,9 @@ export function registerPeople(router, app) {
       await transaction(async () => {
         await db
           .prepare(
-            "UPDATE users SET password_hash=?,must_change_password=0 WHERE id=?",
+            "UPDATE users SET password_hash=?,must_change_password=0,password_changed_at=? WHERE id=?",
           )
-          .run(passwordHash(pw), row.user_id);
+          .run(passwordHash(pw), nowIso(), row.user_id);
         await db
           .prepare("UPDATE password_resets SET used_at=? WHERE id=?")
           .run(nowIso(), row.id);

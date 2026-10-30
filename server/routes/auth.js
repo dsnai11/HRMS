@@ -8,6 +8,7 @@ import {
 } from "../db.js";
 import { HttpError, string, password, email, clientIp } from "../http.js";
 import { permissionsOf } from "../rbac.js";
+import { ipAllowed, isStaff, loadRole, outsideOffice, policyOf } from "../security-policy.js";
 import { bindDevice, deviceFromHeaders } from "../devices.js";
 import { closeStaleShifts, finishedToday } from "./attendance.js";
 import { pendingApprovals } from "../approval.js";
@@ -103,6 +104,29 @@ export function registerAuth(router, app) {
     );
     if (!valid || !user?.active)
       throw new HttpError(401, "Email or password is incorrect.");
+    // Company security policy: office addresses for staff on the web, password expiry.
+    await loadRole(db, user);
+    const policy = policyOf(
+      await db
+        .prepare("SELECT staff_ip_allowlist,password_max_days FROM companies WHERE id=?")
+        .get(user.company_id),
+    );
+    if (b.native !== true && isStaff(user) && !ipAllowed(clientIp(req), policy.staff_ip_allowlist)) {
+      await app.audit(user, "login_blocked_ip", { ip: clientIp(req) });
+      throw outsideOffice();
+    }
+    if (policy.password_max_days && !user.must_change_password) {
+      const changed = Date.parse(user.password_changed_at ?? "");
+      if (!changed)
+        await db
+          .prepare("UPDATE users SET password_changed_at=? WHERE id=?")
+          .run(new Date(clock()).toISOString(), user.id);
+      else if (clock() - changed > policy.password_max_days * 86400000) {
+        await db.prepare("UPDATE users SET must_change_password=1 WHERE id=?").run(user.id);
+        user.must_change_password = 1;
+        await app.audit(user, "password_expired", { days: policy.password_max_days });
+      }
+    }
     if (b.native === true && !b.device && PHONE_ROLES.includes(user.role))
       throw new HttpError(
         400,
@@ -131,7 +155,7 @@ export function registerAuth(router, app) {
       .run(Date.now());
     await db
       .prepare(
-        "INSERT INTO sessions(token_hash,user_id,expires_at,created_at,ip,agent) VALUES(?,?,?,?,?,?)",
+        "INSERT INTO sessions(token_hash,user_id,expires_at,created_at,ip,agent,native,last_seen_at) VALUES(?,?,?,?,?,?,?,?)",
       )
       .run(
         tokenHash(token),
@@ -142,6 +166,8 @@ export function registerAuth(router, app) {
         new Date(clock()).toISOString(),
         clientIp(req),
         String(req.headers["user-agent"] ?? "").slice(0, 200),
+        b.native === true ? 1 : 0,
+        clock(),
       );
     await app.audit(user, "login", {});
     return send(
@@ -191,6 +217,7 @@ export function registerAuth(router, app) {
         .get(user.id);
       return send(200, {
         user: { ...safeUser(user), designation: job?.designation ?? null },
+        ...(user.needs_2fa ? { needs_2fa: true } : {}),
         company: company && {
           ...company,
           require_selfie: Boolean(company.require_selfie),
@@ -241,9 +268,9 @@ export function registerAuth(router, app) {
       await transaction(async () => {
         await db
           .prepare(
-            "UPDATE users SET password_hash=?,must_change_password=0 WHERE id=?",
+            "UPDATE users SET password_hash=?,must_change_password=0,password_changed_at=? WHERE id=?",
           )
-          .run(passwordHash(next), user.id);
+          .run(passwordHash(next), new Date(clock()).toISOString(), user.id);
         await db
           .prepare("DELETE FROM sessions WHERE user_id=? AND token_hash<>?")
           .run(user.id, tokenHash(token));

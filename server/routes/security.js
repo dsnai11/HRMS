@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
-import { HttpError, integer, string } from "../http.js";
+import { HttpError, clientIp, integer, string } from "../http.js";
+import { ipAllowed, isStaff, parseAllowlist, policyOf } from "../security-policy.js";
 import { passwordMatches, tokenHash } from "../db.js";
 import { decryptJson, encryptJson, encryptionKey } from "../crypto-store.js";
 import { newSecret, otpauthUri, verify } from "../totp.js";
@@ -67,6 +68,11 @@ export function registerSecurity(router, app) {
     app.rateLimit(`password:${user.id}`, 10);
     if (!passwordMatches(String(b.password ?? ""), user.password_hash))
       throw new HttpError(403, "Password is incorrect.");
+    const { require_staff_2fa } = policyOf(
+      await db.prepare("SELECT require_staff_2fa FROM companies WHERE id=?").get(user.company_id),
+    );
+    if (require_staff_2fa && isStaff(user))
+      throw new HttpError(409, "Your company requires two-factor login for HR and admin accounts, so it cannot be turned off.");
     await db
       .prepare(
         "UPDATE users SET totp_secret=NULL,totp_pending=NULL,totp_enabled=0,totp_recovery=NULL,totp_last_step=NULL WHERE id=?",
@@ -75,6 +81,65 @@ export function registerSecurity(router, app) {
     await audit("2fa_disabled", {});
     return send(200, { ok: true });
   });
+  // ---- company security policy ------------------------------------------------------------------
+  router.get(
+    "/api/admin/security-policy",
+    { perm: "security.read" },
+    async ({ req, companyId, send }) => {
+      const c = await db
+        .prepare("SELECT staff_ip_allowlist,idle_minutes,password_max_days,require_staff_2fa FROM companies WHERE id=?")
+        .get(companyId);
+      return send(200, {
+        ...policyOf(c),
+        your_ip: clientIp(req),
+        two_factor_available: Boolean(encryptionKey()),
+      });
+    },
+  );
+  router.patch(
+    "/api/admin/security-policy",
+    { perm: "roles.assign" },
+    async ({ req, user, companyId, body, send, audit }) => {
+      const b = await body();
+      const now = policyOf(
+        await db
+          .prepare("SELECT staff_ip_allowlist,idle_minutes,password_max_days,require_staff_2fa FROM companies WHERE id=?")
+          .get(companyId),
+      );
+      const next = { ...now };
+      if (b.staff_ip_allowlist !== undefined) next.staff_ip_allowlist = parseAllowlist(b.staff_ip_allowlist);
+      const whole = (v, label, min, max) => {
+        const n = Number(v);
+        if (!Number.isInteger(n) || (n !== 0 && (n < min || n > max)))
+          throw new HttpError(400, `${label} must be 0 (off) or between ${min} and ${max}.`);
+        return n;
+      };
+      if (b.idle_minutes !== undefined) next.idle_minutes = whole(b.idle_minutes, "Idle sign-out", 5, 720);
+      if (b.password_max_days !== undefined)
+        next.password_max_days = whole(b.password_max_days, "Password age", 30, 365);
+      if (b.require_staff_2fa !== undefined) next.require_staff_2fa = Boolean(b.require_staff_2fa);
+      // Never lock out the person making the change.
+      if (isStaff(user) && !ipAllowed(clientIp(req), next.staff_ip_allowlist))
+        throw new HttpError(
+          400,
+          `Your own address (${clientIp(req)}) is not in the list. Add it, or you would be signed out.`,
+        );
+      if (next.require_staff_2fa && !encryptionKey())
+        throw new HttpError(503, "Two-factor login needs DATA_ENCRYPTION_KEY to be set on the server first.");
+      await db
+        .prepare("UPDATE companies SET staff_ip_allowlist=?,idle_minutes=?,password_max_days=?,require_staff_2fa=? WHERE id=?")
+        .run(
+          JSON.stringify(next.staff_ip_allowlist),
+          next.idle_minutes,
+          next.password_max_days,
+          next.require_staff_2fa ? 1 : 0,
+          companyId,
+        );
+      await audit("security_policy_updated", next);
+      return send(200, next);
+    },
+  );
+
   // An administrator can switch it off for someone who lost their phone.
   router.post(
     "/api/admin/employees/:id/2fa-reset",

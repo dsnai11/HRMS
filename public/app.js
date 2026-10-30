@@ -456,6 +456,14 @@ async function render() {
   // Announcements are on the front page (older alerts still link to the old page).
   if (page === "announcements") page = landing();
   shell();
+  if (me.needs_2fa) {
+    document.querySelector("#content").innerHTML = heading(
+      "Turn on two-factor login",
+      "Your company requires it for accounts with HR or admin rights. It takes a minute with an authenticator app on your phone.",
+    );
+    await twoFactorSetupCard(id, true);
+    return;
+  }
   if (me.must_change_password) {
     document.querySelector("#content").innerHTML =
       heading(
@@ -629,6 +637,7 @@ async function render() {
     } else if (page === "security") {
       const events = await api("/admin/security-events");
       if (id !== renderId) return;
+      setTimeout(() => void securityPolicyCard(id));
       const labels = {
         mock_location: "Mock location",
         emulator: "Emulator",

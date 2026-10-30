@@ -2,7 +2,7 @@ import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { openConfiguredDatabase, tokenHash } from "./db.js";
-import { HttpError, readBody } from "./http.js";
+import { HttpError, clientIp, readBody } from "./http.js";
 import { createRouter } from "./router.js";
 import { can } from "./rbac.js";
 import { loadPolicy } from "./policy.js";
@@ -42,6 +42,7 @@ import { registerDownloadLinks } from "./routes/download-links.js";
 import { registerRms } from "./routes/rms.js";
 import { registerReportBuilder } from "./routes/report-builder.js";
 import { registerPunchMap } from "./routes/punch-map.js";
+import { ipAllowed, isStaff, loadRole, outsideOffice } from "./security-policy.js";
 import {
   registerScheduledReports,
   scheduleReports,
@@ -104,6 +105,8 @@ const STATIC = {
   "/payslip.js": ["payslip.js", "text/javascript"],
   "/styles.css": ["styles.css", "text/css"],
 };
+
+const TWO_FACTOR_SETUP = new Set(["/api/me", "/api/2fa", "/api/2fa/setup", "/api/2fa/enable", "/api/logout", "/api/password"]);
 
 export function createApp({
   db,
@@ -235,23 +238,36 @@ export function createApp({
     const token = req.headers.authorization?.startsWith("Bearer ")
       ? req.headers.authorization.slice(7)
       : /(?:^|;\s*)hrms_session=([^;]+)/.exec(req.headers.cookie || "")?.[1];
-    const user =
+    const row =
       token &&
       (await db
         .prepare(
-          "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id JOIN companies c ON c.id=u.company_id WHERE s.token_hash=? AND s.expires_at>? AND u.active=1 AND c.active=1",
+          `SELECT u.*,s.native session_native,s.last_seen_at session_seen,c.staff_ip_allowlist policy_ips,
+             c.idle_minutes policy_idle,c.require_staff_2fa policy_2fa
+           FROM sessions s JOIN users u ON u.id=s.user_id JOIN companies c ON c.id=u.company_id WHERE s.token_hash=? AND s.expires_at>? AND u.active=1 AND c.active=1`,
         )
         .get(tokenHash(token), Date.now()));
-    if (!user) throw new HttpError(401, "Please sign in again.");
-    if (user.role === "custom") {
-      const role = await db
-        .prepare(
-          "SELECT name,permissions,branch_ids FROM custom_roles WHERE id=? AND company_id=?",
-        )
-        .get(user.custom_role_id, user.company_id);
-      user.custom_role_name = role?.name ?? null;
-      user.custom_permissions = role ? JSON.parse(role.permissions) : [];
-      user.branch_scope = role ? JSON.parse(role.branch_ids) : [];
+    if (!row) throw new HttpError(401, "Please sign in again.");
+    const { session_native, session_seen, policy_ips, policy_idle, policy_2fa, ...user } = row;
+    await loadRole(db, user);
+    // The company's security policy applies to browser sessions; the phone app is bound
+    // to an approved device instead.
+    if (!session_native) {
+      const now = clock();
+      const seen = Number(session_seen ?? 0);
+      if (policy_idle > 0 && seen && now - seen > policy_idle * 60000) {
+        await db.prepare("DELETE FROM sessions WHERE token_hash=?").run(tokenHash(token));
+        throw new HttpError(
+          401,
+          `You were signed out after ${policy_idle} minutes without activity. Sign in again.`,
+          "idle",
+        );
+      }
+      if (isStaff(user) && !ipAllowed(clientIp(req), JSON.parse(policy_ips || "[]")))
+        throw outsideOffice();
+      if (now - seen > 60000)
+        await db.prepare("UPDATE sessions SET last_seen_at=? WHERE token_hash=?").run(now, tokenHash(token));
+      user.needs_2fa = Boolean(policy_2fa) && isStaff(user) && !user.totp_enabled;
     }
     return { user, token };
   }
@@ -349,6 +365,13 @@ export function createApp({
           throw new HttpError(
             403,
             "Change your temporary password before continuing.",
+          );
+        // Two-factor login required: until it is on, only the steps to turn it on work.
+        if (c.user.needs_2fa && !TWO_FACTOR_SETUP.has(path))
+          throw new HttpError(
+            403,
+            "Your company requires two-factor login for HR and admin accounts. Turn it on to continue.",
+            "totp_setup_required",
           );
         c.companyId = await companyScope(c.user, req);
         if (route.options.perm && !can(c.user, route.options.perm))
