@@ -71,7 +71,7 @@ function draw() {
   const o = d.offer;
   const f = d.form;
   const s = d.sensitive;
-  let html = `<header><p class="eyebrow">${esc(d.company)}</p><h1>Welcome, ${esc(d.name)}</h1></header>${steps(d)}<p id="msg" class="muted" role="status"></p>`;
+  let html = `<header><img class="page-logo" src="/brand/logo.png" alt=""><p class="eyebrow">${esc(d.company)}</p><h1>Welcome, ${esc(d.name)}</h1></header>${steps(d)}<p id="msg" class="muted" role="status"></p>`;
   if (!o) {
     box.innerHTML =
       html +

@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -777,9 +778,12 @@ export default function Attendance() {
         >
           {!employeeView && (
             <View style={s.brand}>
-              <View style={s.logo}>
-                <Text style={s.logoText}>L</Text>
-              </View>
+              <Image
+                source={require("../../assets/logo.png")}
+                style={s.logo}
+                resizeMode="contain"
+                accessibilityIgnoresInvertColors
+              />
               <View>
                 <Text style={s.brandName}>Laxmi India</Text>
                 <Text style={s.eyebrow}>FINANCE LTD. · HRMS</Text>
@@ -790,8 +794,10 @@ export default function Attendance() {
             <ActivityIndicator size="large" color="#4e5aa8" />
           ) : !token ? (
             <>
-              <Text style={s.title}>Employee Engagement Portal</Text>
-              <Text style={s.subtitle}>Creating a great place to work.</Text>
+              <Text style={s.title}>Your workplace, in one place</Text>
+              <Text style={s.subtitle}>
+                Attendance, leave, pay and requests.
+              </Text>
               <Text style={s.subtitle}>
                 Sign in to record attendance at your assigned workplace.
               </Text>
@@ -1220,15 +1226,7 @@ const s = StyleSheet.create({
     marginTop: 14,
     marginBottom: 28,
   },
-  logo: {
-    width: 44,
-    height: 44,
-    backgroundColor: "#ac051b",
-    borderRadius: 13,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  logoText: { fontSize: 28, color: "#ffffff", fontWeight: "600" },
+  logo: { width: 96, height: 37 },
   brandName: { fontSize: 21, fontWeight: "700", color: "#2a2c3a" },
   eyebrow: { fontSize: 10, letterSpacing: 1.5, color: "#8a8c99", marginTop: 4 },
   title: {

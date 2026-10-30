@@ -48,7 +48,7 @@ async function tracker(token) {
   try {
     const t = await call(`/track/${encodeURIComponent(token)}`);
     document.title = `${t.company} · Application status`;
-    box.innerHTML = `<header><p class="eyebrow">${esc(t.company)}</p><h1>Hello, ${esc(t.name)}</h1><p class="muted">Your application${t.position ? ` for ${esc(t.position)}` : ""}, received ${fmt(t.applied_on)}.</p></header>
+    box.innerHTML = `<header><img class="page-logo" src="/brand/logo.png" alt=""><p class="eyebrow">${esc(t.company)}</p><h1>Hello, ${esc(t.name)}</h1><p class="muted">Your application${t.position ? ` for ${esc(t.position)}` : ""}, received ${fmt(t.applied_on)}.</p></header>
     <div class="card"><h2>Application progress</h2><ul class="join-steps">${t.steps.map((s) => `<li class="${s.state === "done" ? "done" : ""}">${s.state === "current" ? "● " : ""}${esc(s.label)}</li>`).join("")}</ul>${
       t.closed
         ? '<div class="join-note">Your application was not taken forward this time. Thank you for your interest.</div>'
@@ -76,7 +76,7 @@ async function jobs(companyId) {
   document.title = `${data.company} · Careers`;
   const want = Number(q.get("job")) || null;
   const list = data.jobs;
-  box.innerHTML = `<header><p class="eyebrow">${esc(data.company)}</p><h1>Join our team</h1><p class="muted">${list.length ? "Choose a role and apply in two minutes." : "There are no open positions right now. Please check back soon."}</p></header>
+  box.innerHTML = `<header><img class="page-logo" src="/brand/logo.png" alt=""><p class="eyebrow">${esc(data.company)}</p><h1>Join our team</h1><p class="muted">${list.length ? "Choose a role and apply in two minutes." : "There are no open positions right now. Please check back soon."}</p></header>
   <p id="msg" class="muted" role="status"></p>${list
     .map(
       (
@@ -175,7 +175,7 @@ async function slotPicker(token) {
     const when = (iso) =>
       new Intl.DateTimeFormat("en-IN", { weekday: "long", day: "numeric", month: "long", hour: "numeric", minute: "2-digit", timeZone: t.timezone }).format(new Date(iso));
     document.title = `${t.company} · Interview time`;
-    box.innerHTML = `<header><p class="eyebrow">${esc(t.company)}</p><h1>Hello, ${esc(t.name)}</h1><p class="muted">${esc(t.round)}${t.job ? ` for ${esc(t.job)}` : ""} · ${t.minutes} minutes · ${esc(t.mode.replace("_", " "))}</p></header>${
+    box.innerHTML = `<header><img class="page-logo" src="/brand/logo.png" alt=""><p class="eyebrow">${esc(t.company)}</p><h1>Hello, ${esc(t.name)}</h1><p class="muted">${esc(t.round)}${t.job ? ` for ${esc(t.job)}` : ""} · ${t.minutes} minutes · ${esc(t.mode.replace("_", " "))}</p></header>${
       t.status === "booked"
         ? `<div class="card"><h2>Your interview is booked</h2><p>${when(t.booked_slot)}. The details and a calendar invitation are in your email.</p></div>`
         : t.status !== "open"

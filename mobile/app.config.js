@@ -12,6 +12,8 @@ module.exports = {
     version: "1.0.0",
     orientation: "portrait",
     userInterfaceStyle: "light",
+    icon: "./assets/icon.png",
+    web: { favicon: "./assets/favicon.png" },
     ios: {
       supportsTablet: true,
       bundleIdentifier: process.env.IOS_BUNDLE_ID || "com.laxmiindia.hrms",
@@ -20,6 +22,11 @@ module.exports = {
     android: {
       ...(googleServices ? { googleServicesFile: googleServices } : {}),
       package: process.env.ANDROID_PACKAGE || "com.laxmiindia.hrms",
+      adaptiveIcon: {
+        foregroundImage: "./assets/android-icon-foreground.png",
+        backgroundColor: "#ffffff",
+        monochromeImage: "./assets/android-icon-monochrome.png",
+      },
       blockedPermissions: [
         "android.permission.ACCESS_BACKGROUND_LOCATION",
         "android.permission.RECORD_AUDIO",

@@ -120,6 +120,10 @@ const STATIC = {
   "/payslip.html": ["payslip.html", "text/html"],
   "/payslip.js": ["payslip.js", "text/javascript"],
   "/styles.css": ["styles.css", "text/css"],
+  "/brand/logo.png": ["brand/logo.png", "image/png"],
+  "/brand/favicon.png": ["brand/favicon.png", "image/png"],
+  "/brand/icon-192.png": ["brand/icon-192.png", "image/png"],
+  "/favicon.ico": ["brand/favicon.png", "image/png"],
 };
 
 const TWO_FACTOR_SETUP = new Set(["/api/me", "/api/2fa", "/api/2fa/setup", "/api/2fa/enable", "/api/logout", "/api/password"]);
@@ -341,16 +345,12 @@ export function createApp({
       }
       if (!path.startsWith("/api/")) {
         if (method !== "GET") throw new HttpError(405, "Method not allowed.");
-        if (path === "/favicon.ico") {
-          res.writeHead(204, headers);
-          return res.end();
-        }
         if (!STATIC[path]) throw new HttpError(404, "Not found.");
         const [file, type] = STATIC[path];
         const content = await readFile(new URL(file, publicDir));
         res.writeHead(200, {
           ...headers,
-          "Content-Type": `${type}; charset=utf-8`,
+          "Content-Type": type.startsWith("image/") ? type : `${type}; charset=utf-8`,
         });
         return res.end(content);
       }
