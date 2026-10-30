@@ -971,6 +971,8 @@ const ORG_TABS = {
     label: "Departments",
     noun: "department",
     columns: [["code", "Code"]],
+    // Shown in the list; set with the Head button, not the edit form.
+    shown: [["head_name", "Head"]],
   },
   designations: { label: "Designations", noun: "designation", columns: [] },
   grades: {
@@ -1038,12 +1040,48 @@ async function organizationPage(id) {
       )
       .join(
         "",
-      )}</div><div class="card">${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th>${spec.columns.map(([, l]) => `<th>${l}</th>`).join("")}<th>Employees</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.name)}</td>${spec.columns.map(([k]) => `<td>${esc(r[k] || "—")}</td>`).join("")}<td>${r.employees ?? 0}</td><td><span class="pill ${r.active ? "" : "neutral"}">${r.active ? "Active" : "Inactive"}</span></td><td>${manage ? `<button class="secondary" data-edit="${r.id}">Edit</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : empty(`No ${spec.label.toLowerCase()} yet`, "Add the first one to get started.")}</div>`;
+      )}</div><div class="card">${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th>${[...spec.columns, ...(spec.shown ?? [])].map(([, l]) => `<th>${l}</th>`).join("")}<th>Employees</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.name)}</td>${[...spec.columns, ...(spec.shown ?? [])].map(([k]) => `<td>${esc(r[k] || "—")}</td>`).join("")}<td>${r.employees ?? 0}</td><td><span class="pill ${r.active ? "" : "neutral"}">${r.active ? "Active" : "Inactive"}</span></td><td>${manage ? `<button class="secondary" data-edit="${r.id}">Edit</button>${orgTab === "departments" ? ` <button class="ghost" data-head="${r.id}">Head</button>` : ""}` : ""}</td></tr>`).join("")}</tbody></table></div>` : empty(`No ${spec.label.toLowerCase()} yet`, "Add the first one to get started.")}</div>`;
   document
     .querySelectorAll("[data-tab]")
     .forEach((b) => (b.onclick = () => ((orgTab = b.dataset.tab), render())));
   const open = (row) => orgDialog(orgTab, spec, row);
   document.querySelector("#add")?.addEventListener("click", () => open());
+  document.querySelectorAll("[data-head]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const dept = rows.find((r) => r.id === Number(b.dataset.head));
+      dialog(
+        `Head of ${dept.name}`,
+        `<p class="full muted">The head is the default reporting manager for the department: people added to it without a manager report to the head, and see them under Supervisor.</p><label class="full">Head<input id="head-q" placeholder="Type a name to search" autocomplete="off" value="${esc(dept.head_name || "")}"><input type="hidden" name="head_id" value="${dept.head_id ?? ""}"></label><div class="full" id="head-found"></div><label class="check full"><input type="checkbox" name="assign" value="1"> Also make everyone in ${esc(dept.name)} who has no manager report to the head</label>`,
+        async (f) => {
+          const r = await api(`/admin/departments/${dept.id}/head`, { head_id: f.head_id ? Number(f.head_id) : null, assign_unassigned: f.assign === "1" }, "PATCH");
+          notice(r.moved ? `Head saved. ${r.moved} people now report to them.` : "Head saved.");
+        },
+      );
+      const q = document.querySelector("dialog #head-q"),
+        found = document.querySelector("dialog #head-found"),
+        hidden = document.querySelector('dialog [name="head_id"]');
+      let timer;
+      q.oninput = () => {
+        hidden.value = "";
+        clearTimeout(timer);
+        timer = setTimeout(async () => {
+          if (q.value.trim().length < 2) return (found.innerHTML = "");
+          const r = await api(`/admin/employees?q=${encodeURIComponent(q.value.trim())}&limit=8`);
+          found.innerHTML = r.items
+            .map((p) => `<button type="button" class="ghost" data-pick="${p.id}" data-name="${esc(p.name)}">${esc(p.name)}${p.designation_name ? ` · ${esc(p.designation_name)}` : ""}</button>`)
+            .join(" ");
+          found.querySelectorAll("[data-pick]").forEach(
+            (x) =>
+              (x.onclick = () => {
+                hidden.value = x.dataset.pick;
+                q.value = x.dataset.name;
+                found.innerHTML = "";
+              }),
+          );
+        }, 250);
+      };
+    }),
+  );
   document
     .querySelectorAll("[data-edit]")
     .forEach(

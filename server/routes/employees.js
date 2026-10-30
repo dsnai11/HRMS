@@ -239,7 +239,11 @@ export function registerEmployees(router, app) {
       b.custom === undefined
         ? null
         : await cleanCustom(db, companyId, b.custom);
-    const managerId = optionalId(b.manager_id, "Reporting manager");
+    // No manager given: the department's head, if it has one.
+    let managerId = optionalId(b.manager_id, "Reporting manager");
+    if (managerId === null && b.manager_id === undefined && refs.department_id)
+      managerId =
+        (await db.prepare("SELECT head_id FROM departments WHERE id=? AND company_id=?").get(refs.department_id, companyId))?.head_id ?? null;
     await checkManager(managerId, null, companyId);
     if (await db.prepare("SELECT id FROM users WHERE email=?").get(mail))
       throw new HttpError(409, "That email is already registered.");
@@ -377,6 +381,17 @@ export function registerEmployees(router, app) {
       if (b.manager_id !== undefined) {
         set.manager_id = optionalId(b.manager_id, "Reporting manager");
         await checkManager(set.manager_id, id, companyId);
+      } else if (set.department_id && set.department_id !== target.department_id && !target.manager_id) {
+        // Moving someone with no manager into a department: its head becomes their manager.
+        const head = (await db.prepare("SELECT head_id FROM departments WHERE id=?").get(set.department_id))?.head_id;
+        if (head && head !== id) {
+          try {
+            await checkManager(head, id, companyId);
+            set.manager_id = head;
+          } catch {
+            // the head reports to this person: leave the line as it is
+          }
+        }
       }
       if (b.password !== undefined) password(b.password);
       // Moving someone who is punched in is fine: today's shift keeps the workplace it

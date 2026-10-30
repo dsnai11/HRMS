@@ -21,6 +21,7 @@ const KINDS = {
     userColumn: "department_id",
     fields: ["code"],
     max: { code: 20 },
+    extraSelect: ",(SELECT h.name FROM users h WHERE h.id=t.head_id) head_name",
   },
   designations: {
     label: "designation",
@@ -58,6 +59,49 @@ const fieldValue = (spec, f, v) =>
 export function registerOrg(router, app) {
   const { db, transaction } = app;
 
+  // ---- department head ---------------------------------------------------------------------
+  // The head is the default reporting manager for the department: new people with no manager
+  // report to them, and on request everyone in it without a manager does too. Nobody is put
+  // under the head if the head already reports (directly or not) to them.
+  router.patch(
+    "/api/admin/departments/:id/head",
+    { perm: "org.manage" },
+    async ({ params, companyId, body, send, audit }) => {
+      const dept = await requireOwned(db, "departments", integer(Number(params.id)), companyId, "department");
+      const b = await body();
+      const headId = optionalId(b.head_id, "Head");
+      if (headId) {
+        const head = await requireOwned(db, "users", headId, companyId, "head");
+        if (!head.active || head.role === "super_admin")
+          throw new HttpError(400, "Choose an active employee as the head.");
+      }
+      const moved = await transaction(async () => {
+        await db.prepare("UPDATE departments SET head_id=? WHERE id=?").run(headId, dept.id);
+        let moved = 0;
+        if (headId && b.assign_unassigned === true) {
+          // Everyone above the head in the reporting line stays where they are.
+          const above = new Set();
+          let cursor = await db.prepare("SELECT manager_id FROM users WHERE id=?").get(headId);
+          for (let i = 0; cursor?.manager_id && i < 100; i++) {
+            above.add(cursor.manager_id);
+            cursor = await db.prepare("SELECT manager_id FROM users WHERE id=?").get(cursor.manager_id);
+          }
+          const people = await db
+            .prepare("SELECT id FROM users WHERE company_id=? AND department_id=? AND active=1 AND manager_id IS NULL AND id<>? AND role<>'super_admin'")
+            .all(companyId, dept.id, headId);
+          for (const p of people)
+            if (!above.has(p.id)) {
+              await db.prepare("UPDATE users SET manager_id=? WHERE id=? AND manager_id IS NULL").run(headId, p.id);
+              moved++;
+            }
+        }
+        await audit("department_head_set", { id: dept.id, head: headId, moved });
+        return moved;
+      });
+      return send(200, { ok: true, moved });
+    },
+  );
+
   // ---- branches, departments, designations ---------------------------------
   for (const [kind, spec] of Object.entries(KINDS)) {
     router.get(
@@ -68,7 +112,7 @@ export function registerOrg(router, app) {
           200,
           await db
             .prepare(
-              `SELECT t.*,(SELECT COUNT(*) FROM users u WHERE u.${spec.userColumn}=t.id AND u.active=1) employees FROM ${kind} t WHERE t.company_id=? ORDER BY t.name`,
+              `SELECT t.*,(SELECT COUNT(*) FROM users u WHERE u.${spec.userColumn}=t.id AND u.active=1) employees${spec.extraSelect ?? ""} FROM ${kind} t WHERE t.company_id=? ORDER BY t.name`,
             )
             .all(companyId),
         ),
