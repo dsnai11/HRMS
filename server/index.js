@@ -45,6 +45,7 @@ import { registerPunchMap } from "./routes/punch-map.js";
 import { registerOdVisits } from "./routes/od-visits.js";
 import { registerCases } from "./routes/cases.js";
 import { registerSurveys } from "./routes/surveys.js";
+import { registerDelegations } from "./routes/delegations.js";
 import { ipAllowed, isStaff, loadRole, outsideOffice } from "./security-policy.js";
 import {
   registerScheduledReports,
@@ -242,6 +243,7 @@ export function createApp({
     registerOdVisits,
     registerCases,
     registerSurveys,
+    registerDelegations,
   ])
     register(router, app);
 

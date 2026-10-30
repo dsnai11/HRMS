@@ -11,6 +11,7 @@ import { permissionsOf } from "../rbac.js";
 import { ipAllowed, isStaff, loadRole, outsideOffice, policyOf } from "../security-policy.js";
 import { odAllowed } from "./od-visits.js";
 import { caseKindsHandled } from "./cases.js";
+import { delegatorsOf } from "../delegation.js";
 import { bindDevice, deviceFromHeaders } from "../devices.js";
 import { closeStaleShifts, finishedToday } from "./attendance.js";
 import { pendingApprovals } from "../approval.js";
@@ -253,6 +254,8 @@ export function registerAuth(router, app) {
         od_allowed: await odAllowed(app, user),
         // Which kinds of case (grievance, POSH, whistleblower) this person handles.
         case_kinds: await caseKindsHandled(db, user),
+        // Standing in today for a manager who handed over their approvals.
+        stands_in: (await delegatorsOf(db, user.id)).length > 0,
         device: await deviceFromHeaders(app, user, req).then((d) =>
           d ? { status: d.status } : null,
         ),

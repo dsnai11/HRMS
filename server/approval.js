@@ -1,9 +1,17 @@
 import { can } from "./rbac.js";
 import { TEAM_SQL } from "./attendance-report.js";
 import { branchScope } from "./scope.js";
+import { delegatorsOf } from "./delegation.js";
 
-// Who may decide a person's request: HR/admin, or anyone above them in the
-// reporting line. Nobody decides their own.
+const inTeamOf = async (app, managerId, personId) =>
+  Boolean(
+    await app.db
+      .prepare(`SELECT id FROM (${TEAM_SQL}) team WHERE id=?`)
+      .get(managerId, personId),
+  );
+
+// Who may decide a person's request: HR/admin, anyone above them in the reporting line,
+// or someone standing in today for such a manager (delegation). Nobody decides their own.
 export async function mayDecide(app, approver, requesterId) {
   if (approver.id === requesterId) return false;
   if (can(approver, "leave.approve")) {
@@ -14,24 +22,30 @@ export async function mayDecide(app, approver, requesterId) {
       .get(requesterId);
     if (r && approver.branch_scope.includes(r.branch_id)) return true;
   }
-  return Boolean(
-    await app.db
-      .prepare(`SELECT id FROM (${TEAM_SQL}) team WHERE id=?`)
-      .get(approver.id, requesterId),
-  );
+  if (await inTeamOf(app, approver.id, requesterId)) return true;
+  for (const away of await delegatorsOf(app.db, approver.id))
+    if (away !== requesterId && (await inTeamOf(app, away, requesterId))) return true;
+  return false;
 }
 
 // "AND r.user_id IN (…)" scoping for an approver's inbox: HR sees the company,
-// managers see their team, everyone else sees nothing.
+// managers see their team (and the teams of managers they stand in for today),
+// everyone else sees nothing.
 export async function inboxScope(app, user) {
   if (can(user, "leave.approve")) return branchScope(user, "r.user_id");
+  const owners = [];
   if (
     await app.db
       .prepare("SELECT id FROM users WHERE manager_id=? AND active=1 LIMIT 1")
       .get(user.id)
   )
-    return { sql: ` AND r.user_id IN (${TEAM_SQL})`, params: [user.id] };
-  return null;
+    owners.push(user.id);
+  owners.push(...(await delegatorsOf(app.db, user.id)));
+  if (!owners.length) return null;
+  return {
+    sql: ` AND (${owners.map(() => `r.user_id IN (${TEAM_SQL})`).join(" OR ")})`,
+    params: owners,
+  };
 }
 
 // OD trips waiting for this approver (their team, or their branches for HR).

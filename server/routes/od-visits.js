@@ -2,6 +2,7 @@ import { HttpError, integer, oneOf, optionalString } from "../http.js";
 import { inboxScope, mayDecide } from "../approval.js";
 import { staffWith } from "../scope.js";
 import { halfDayReasons } from "../policy.js";
+import { withDelegates } from "../delegation.js";
 
 // OD trips: out of the office on duty during a shift (see /api/punch, actions od_out and
 // od_in, and a punch-out while out). Each finished trip waits for the reporting manager,
@@ -16,7 +17,7 @@ export async function odAllowed(app, user) {
 
 /** Who is told about a finished trip: the reporting manager, else HR who approve requests. */
 export async function tripApprovers(app, user) {
-  if (user.manager_id) return [user.manager_id];
+  if (user.manager_id) return (await withDelegates(app.db, [user.manager_id])).filter((id) => id !== user.id);
   return (await staffWith(app.db, user.company_id, ["leave.approve"], user.id)).map((r) => r.id);
 }
 

@@ -272,7 +272,75 @@ async function approvalsPage(id) {
   await hiringApprovals(id);
   await odTripApprovals(id);
   await compOffApprovals(id);
+  await delegationCard(id);
   await bankChangeApprovals(id);
+}
+
+// Handing my approvals to someone while I am away, and the hand-overs I hold.
+async function delegationCard(id) {
+  const d = await api("/delegations");
+  const all = has("leave.manage") ? await api("/admin/delegations") : [];
+  if (id !== renderId) return;
+  if (!me.is_manager && !d.received.length && !all.length) return;
+  const state = { active: "Active", upcoming: "Upcoming", ended: "Ended", cancelled: "Cancelled" };
+  const row = (x, mine) =>
+    `<tr><td>${esc(mine ? x.delegate_name : x.delegator_name)}</td><td>${fmtDate(x.starts_on)} – ${fmtDate(x.ends_on)}</td><td>${esc(x.reason || "")}</td><td><span class="pill ${x.state === "active" ? "" : "neutral"}">${state[x.state]}</span></td><td>${mine && ["active", "upcoming"].includes(x.state) ? `<button class="ghost" data-dg-cancel="${x.id}">Cancel</button>` : ""}</td></tr>`;
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<div class="card-head"><div><h2>Hand over approvals</h2><p class="muted">While you are away, the person you choose decides your team's leave, corrections and OD trips. Your HR rights and appraisals are never handed over, and nobody can approve their own request.</p></div>${me.is_manager ? '<button class="secondary" id="dg-new">Hand over</button>' : ""}</div>${
+    d.given.length ? `<h3>Handed over by you</h3><div class="table-wrap"><table><thead><tr><th>To</th><th>Dates</th><th>Why</th><th>Status</th><th></th></tr></thead><tbody>${d.given.map((x) => row(x, true)).join("")}</tbody></table></div>` : ""
+  }${
+    d.received.length ? `<h3>You stand in for</h3><div class="table-wrap"><table><thead><tr><th>For</th><th>Dates</th><th>Why</th><th>Status</th><th></th></tr></thead><tbody>${d.received.map((x) => row(x, false)).join("")}</tbody></table></div>` : ""
+  }${
+    all.length
+      ? `<h3>All current hand-overs</h3><div class="table-wrap"><table><thead><tr><th>Manager</th><th>To</th><th>Dates</th><th>Status</th></tr></thead><tbody>${all.map((x) => `<tr><td>${esc(x.delegator_name)}</td><td>${esc(x.delegate_name)}</td><td>${fmtDate(x.starts_on)} – ${fmtDate(x.ends_on)}</td><td>${state[x.state]}</td></tr>`).join("")}</tbody></table></div>`
+      : ""
+  }`;
+  document.querySelector("#content").append(card);
+  card.querySelectorAll("[data-dg-cancel]").forEach((b) =>
+    b.addEventListener("click", () =>
+      busy(b, async () => {
+        await api(`/delegations/${b.dataset.dgCancel}/cancel`, {});
+        notice("Hand-over cancelled.");
+        render();
+      }),
+    ),
+  );
+  card.querySelector("#dg-new")?.addEventListener("click", () => {
+    dialog(
+      "Hand over my approvals",
+      `<label class="full">To<input id="dg-who" placeholder="Type a name to search" autocomplete="off" required><input type="hidden" name="delegate_id"></label><div class="full" id="dg-found"></div>${input("starts_on", "From", today(), `type="date" required min="${today()}"`)}${input("ends_on", "To", "", `type="date" required min="${today()}"`)}${input("reason", "Why (optional)", "", 'maxlength="200" placeholder="e.g. On leave"')}`,
+      async (f) => {
+        if (!f.delegate_id) throw new Error("Choose the person from the list.");
+        await api("/delegations", { delegate_id: Number(f.delegate_id), starts_on: f.starts_on, ends_on: f.ends_on, reason: f.reason || null });
+        notice("Handed over. They have been told.");
+      },
+    );
+    const who = document.querySelector("dialog #dg-who"),
+      found = document.querySelector("dialog #dg-found"),
+      hidden = document.querySelector('dialog [name="delegate_id"]');
+    let timer;
+    who.oninput = () => {
+      hidden.value = "";
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        if (who.value.trim().length < 2) return (found.innerHTML = "");
+        const people = await api(`/chat/people?q=${encodeURIComponent(who.value.trim())}`);
+        found.innerHTML = people
+          .slice(0, 8)
+          .map((p) => `<button type="button" class="ghost" data-pick="${p.id}" data-name="${esc(p.name)}">${esc(p.name)}${p.designation ? ` · ${esc(p.designation)}` : ""}</button>`)
+          .join(" ");
+        found.querySelectorAll("[data-pick]").forEach(
+          (b) =>
+            (b.onclick = () => {
+              hidden.value = b.dataset.pick;
+              who.value = b.dataset.name;
+              found.innerHTML = "";
+            }),
+        );
+      }, 250);
+    };
+  });
 }
 
 // OD trips: out of the office on duty during a shift, waiting for the manager.

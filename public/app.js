@@ -34,6 +34,7 @@ async function loadMe() {
     needs_2fa: Boolean(p.needs_2fa),
     // Kinds of case (grievance, POSH, whistleblower) this person handles.
     case_kinds: p.case_kinds ?? [],
+    stands_in: Boolean(p.stands_in),
   };
   companies = me.role === "super_admin" ? await api("/admin/companies") : [];
 }
@@ -254,7 +255,7 @@ function setup() {
 // Attendance, Leave, TDS, Employee and so on, each opening to its pages.
 function navGroups() {
   const staff = me.role !== "super_admin";
-  const approver = me.is_manager || has("leave.approve") || me.approvals_pending;
+  const approver = me.is_manager || me.stands_in || has("leave.approve") || me.approvals_pending;
   return [
     ["Home", "⌂", [staff && ["mine", "Home"]]],
     ["Overview", "◫", [has("attendance.read") && ["overview", "Overview"]]],

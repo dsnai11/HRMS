@@ -1,5 +1,6 @@
 import { can, permissionsFor } from "./rbac.js";
 import { mayDecide } from "./approval.js";
+import { withDelegates } from "./delegation.js";
 
 // Multi-level leave approval. A company lists the steps a request passes through
 // (leave_chain); each approval moves it to the next step and the last one approves
@@ -28,16 +29,17 @@ async function managerOf(db, id) {
     ?.manager_id;
 }
 
-// People who may act at a step (besides HR, who always may).
+// People who may act at a step (besides HR, who always may), with whoever stands in for
+// them today; the requester is never one of them.
 export async function stepApprovers(db, companyId, requesterId, step) {
   if (step === "manager") {
     const m = await managerOf(db, requesterId);
-    return m ? [m] : [];
+    return m ? (await withDelegates(db, [m])).filter((id) => id !== requesterId) : [];
   }
   if (step === "skip_manager") {
     const m = await managerOf(db, requesterId);
     const mm = m ? await managerOf(db, m) : null;
-    return mm && mm !== requesterId ? [mm] : [];
+    return mm && mm !== requesterId ? (await withDelegates(db, [mm])).filter((id) => id !== requesterId) : [];
   }
   return hrApprovers(db, companyId, requesterId);
 }
