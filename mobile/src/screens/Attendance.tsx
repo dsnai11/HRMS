@@ -101,7 +101,7 @@ function Button({
       onPress={onPress}
       style={[s.button, secondary && s.secondary, disabled && { opacity: 0.5 }]}
     >
-      <Text style={[s.buttonText, secondary && { color: "#4e5aa8" }]}>
+      <Text style={[s.buttonText, secondary && { color: "#c8102e" }]}>
         {title}
       </Text>
     </Pressable>
@@ -832,7 +832,7 @@ export default function Attendance() {
             </View>
           )}
           {loading ? (
-            <ActivityIndicator size="large" color="#4e5aa8" />
+            <ActivityIndicator size="large" color="#c8102e" />
           ) : !token ? (
             <>
               <Text style={s.title}>Your workplace, in one place</Text>
@@ -1320,12 +1320,12 @@ const s = StyleSheet.create({
   button: {
     paddingVertical: 17,
     paddingHorizontal: 22,
-    backgroundColor: "#4e5aa8",
+    backgroundColor: "#c8102e",
     borderRadius: 12,
     alignItems: "center",
     marginTop: 6,
   },
-  secondary: { backgroundColor: "#eceefa" },
+  secondary: { backgroundColor: "#fff1f3" },
   buttonText: { fontSize: 15, color: "#fff", fontWeight: "600" },
   note: { color: "#7a7d8c", fontSize: 12, lineHeight: 20 },
   heading: {
@@ -1372,11 +1372,11 @@ const s = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: "#e7e3f3",
+    backgroundColor: "#ffe0e5",
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarText: { color: "#4e5aa8", fontWeight: "700" },
+  avatarText: { color: "#c8102e", fontWeight: "700" },
   barCode: { color: "#fff", fontWeight: "700", fontSize: 16 },
   barSub: { color: "#d7d8df", fontSize: 11 },
   eye: {

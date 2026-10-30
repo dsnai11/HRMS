@@ -188,5 +188,5 @@ const s = StyleSheet.create({
   },
   buttonText: { color: "#ffffff", fontSize: 16, fontWeight: "600" },
   link: { padding: 10 },
-  linkText: { color: "#4e5aa8", fontSize: 14 },
+  linkText: { color: "#c8102e", fontSize: 14 },
 });

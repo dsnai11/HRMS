@@ -2550,3 +2550,551 @@ tr.selected td { background: color-mix(in srgb, var(--brand, #ac051b) 7%, transp
 .pick-list label[hidden] {
   display: none;
 }
+
+/* ---- Neo theme ------------------------------------------------------------------------------------
+   Red and white, with a futuristic finish: a faint grid and red glow behind the page, glass
+   surfaces with hairline gradient borders, glowing primary actions and a dark command bar.
+   It sits last so it refines everything above without changing any markup. */
+:root {
+  --red: #c8102e;
+  --red-hot: #ff2d4b;
+  --red-dark: #7d0313;
+  --red-ink: #4a0410;
+  --red-50: #fff1f3;
+  --red-100: #ffe0e5;
+  --indigo: #c8102e;
+  --green: #c8102e;
+  --ink: #14151c;
+  --page: #fbfbfd;
+  --line: #eeeef3;
+  --muted: #6f7180;
+  --glass: rgba(255, 255, 255, 0.9);
+  --ring: 0 0 0 4px rgba(200, 16, 46, 0.14);
+  --glow: 0 10px 30px -10px rgba(200, 16, 46, 0.55);
+  --lift: 0 1px 2px rgba(20, 21, 28, 0.04), 0 12px 32px -12px rgba(20, 21, 28, 0.14);
+  font-family: Inter, "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  color: var(--ink);
+}
+body {
+  background-color: var(--page);
+  background-image:
+    radial-gradient(900px 520px at 100% -10%, rgba(200, 16, 46, 0.09), transparent 60%),
+    radial-gradient(700px 460px at -10% 110%, rgba(200, 16, 46, 0.06), transparent 60%),
+    linear-gradient(rgba(20, 21, 28, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 21, 28, 0.035) 1px, transparent 1px);
+  background-size: auto, auto, 32px 32px, 32px 32px;
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+::selection {
+  background: rgba(200, 16, 46, 0.18);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(200, 16, 46, 0.35) transparent;
+}
+:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
+}
+h1 {
+  font-weight: 700;
+  letter-spacing: -1.2px;
+  background: linear-gradient(100deg, var(--ink) 30%, var(--red) 120%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.eyebrow {
+  color: var(--red);
+  letter-spacing: 2.4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.eyebrow::before {
+  content: "";
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--red), var(--red-hot));
+  box-shadow: 0 0 10px rgba(255, 45, 75, 0.7);
+}
+a {
+  color: var(--red);
+}
+
+/* Buttons: glowing primary actions, crisp secondary */
+button {
+  border-radius: 11px;
+  background: var(--red);
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.2s ease,
+    filter 0.2s ease;
+}
+button:not([class]),
+button[type="submit"]:not(.secondary):not(.ghost),
+a.button:not(.secondary) {
+  background: linear-gradient(135deg, var(--red-hot), var(--red) 55%, var(--red-dark));
+  color: #fff;
+  box-shadow: var(--glow), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+button:not([class]):hover,
+button[type="submit"]:not(.secondary):not(.ghost):hover,
+a.button:not(.secondary):hover {
+  filter: brightness(1.06) saturate(1.05);
+  transform: translateY(-1px);
+  box-shadow: 0 16px 34px -12px rgba(200, 16, 46, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+button:active {
+  transform: translateY(0);
+}
+button.secondary,
+a.button.secondary {
+  background: #fff;
+  color: var(--red);
+  box-shadow: inset 0 0 0 1px rgba(200, 16, 46, 0.22);
+}
+button.secondary:hover,
+a.button.secondary:hover {
+  background: var(--red-50);
+  box-shadow: inset 0 0 0 1px rgba(200, 16, 46, 0.4), 0 8px 20px -12px rgba(200, 16, 46, 0.5);
+}
+button.ghost {
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+}
+button.ghost:hover {
+  background: rgba(200, 16, 46, 0.06);
+  color: var(--red);
+  box-shadow: none;
+}
+input,
+select,
+textarea {
+  border-color: #e3e3ea;
+  border-radius: 10px;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: rgba(200, 16, 46, 0.55);
+  box-shadow: var(--ring);
+}
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--red);
+}
+
+/* Sidebar: deep red to near-black, with a lit edge and a glowing active item */
+.sidebar {
+  background:
+    radial-gradient(260px 220px at 0% 0%, rgba(255, 45, 75, 0.35), transparent 70%),
+    linear-gradient(180deg, #a3071d 0%, #6e0212 55%, #24060b 100%);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.08), 8px 0 40px -20px rgba(125, 3, 19, 0.6);
+}
+.sidebar .brand {
+  background: rgba(255, 255, 255, 0.96);
+  margin: 12px 12px 14px;
+  border-radius: 14px;
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.5);
+}
+.nav button {
+  position: relative;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 10px;
+  transform: none;
+  color: #ffe9ec;
+}
+.nav button:hover {
+  background: rgba(255, 255, 255, 0.09);
+  transform: none;
+  box-shadow: none;
+}
+.nav button.selected {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.06));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+.nav button.selected::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: #fff;
+  box-shadow: 0 0 12px 2px rgba(255, 255, 255, 0.8);
+}
+.nav-sub {
+  border-left-color: rgba(255, 255, 255, 0.16);
+}
+.nav-sub button {
+  color: #ffd2d9;
+}
+.sidebar-foot {
+  border-top-color: rgba(255, 255, 255, 0.14);
+}
+
+/* Command bar: dark glass with a red light line underneath */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: rgba(16, 17, 24, 0.86);
+  backdrop-filter: saturate(1.4) blur(14px);
+  -webkit-backdrop-filter: saturate(1.4) blur(14px);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06), 0 10px 30px -18px rgba(0, 0, 0, 0.6);
+}
+.topbar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 45, 75, 0.9) 30%, rgba(255, 45, 75, 0.9) 70%, transparent);
+  box-shadow: 0 0 12px rgba(255, 45, 75, 0.8);
+}
+.topbar button,
+.topbar .bell {
+  background: transparent;
+  box-shadow: none;
+}
+.topbar button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  transform: none;
+  box-shadow: none;
+}
+.people-search input {
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.people-search input:focus {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 45, 75, 0.7);
+  box-shadow: 0 0 0 4px rgba(255, 45, 75, 0.18);
+}
+.me-button .avatar {
+  background: linear-gradient(135deg, var(--red-hot), var(--red-dark));
+  color: #fff;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15), 0 0 16px rgba(255, 45, 75, 0.55);
+}
+.me-drop {
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  box-shadow: var(--lift);
+}
+.me-drop button {
+  box-shadow: none;
+}
+.me-drop button:hover {
+  background: var(--red-50);
+  color: var(--red);
+  transform: none;
+  box-shadow: none;
+}
+
+/* Surfaces: glass cards with hairline gradient borders */
+.card,
+.stat,
+.crumb {
+  border: 1px solid transparent;
+  border-radius: 18px;
+  background:
+    linear-gradient(var(--glass), var(--glass)) padding-box,
+    linear-gradient(140deg, rgba(200, 16, 46, 0.28), rgba(200, 16, 46, 0.04) 35%, rgba(20, 21, 28, 0.07)) border-box;
+  box-shadow: var(--lift);
+}
+.card {
+  transition:
+    box-shadow 0.25s ease,
+    transform 0.25s ease;
+}
+.card:hover {
+  box-shadow: 0 1px 2px rgba(20, 21, 28, 0.04), 0 22px 44px -20px rgba(200, 16, 46, 0.28);
+}
+.card h2 {
+  font-weight: 650;
+  letter-spacing: -0.4px;
+}
+.stat {
+  position: relative;
+  overflow: hidden;
+}
+.stat::after {
+  content: "";
+  position: absolute;
+  right: -40px;
+  top: -40px;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 45, 75, 0.18), transparent 70%);
+  pointer-events: none;
+}
+.stat-label {
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.stat-value {
+  font-weight: 700;
+  background: linear-gradient(120deg, var(--ink), var(--red) 140%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.stat.featured {
+  background:
+    linear-gradient(135deg, var(--red-hot), var(--red) 50%, var(--red-dark)) padding-box,
+    linear-gradient(135deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0)) border-box;
+  color: #fff;
+  box-shadow: var(--glow);
+}
+.stat.featured .stat-label,
+.stat.featured small {
+  color: rgba(255, 255, 255, 0.82);
+}
+.stat.featured .stat-value {
+  background: none;
+  color: #fff;
+}
+.crumb span {
+  border-bottom-color: var(--red);
+}
+.pill {
+  background: var(--red-50);
+  color: var(--red);
+  box-shadow: inset 0 0 0 1px rgba(200, 16, 46, 0.14);
+  font-weight: 600;
+}
+.pill.neutral {
+  background: #f3f3f7;
+  color: #686a78;
+  box-shadow: inset 0 0 0 1px #e6e6ee;
+}
+.callout {
+  background: linear-gradient(135deg, var(--red-50), #fff);
+  border: 1px solid var(--red-100);
+  color: #5a1520;
+}
+
+/* Tables */
+th {
+  background: rgba(248, 248, 251, 0.9);
+  color: #8b8d9a;
+  letter-spacing: 1.3px;
+}
+th:first-child {
+  border-top-left-radius: 10px;
+}
+th:last-child {
+  border-top-right-radius: 10px;
+}
+td {
+  border-bottom-color: #f1f1f5;
+}
+tbody tr {
+  transition: background 0.15s;
+}
+tbody tr:hover td {
+  background: rgba(200, 16, 46, 0.035);
+}
+td button {
+  box-shadow: none;
+}
+
+/* Tabs as a segmented control */
+.tabbar {
+  display: inline-flex;
+  padding: 5px;
+  gap: 4px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: inset 0 0 0 1px var(--line), var(--lift);
+}
+.tabbar button {
+  box-shadow: none;
+  padding: 9px 14px;
+  font-size: 13px;
+}
+.tabbar button.secondary {
+  background: transparent;
+  color: #5c5e6c;
+  box-shadow: none;
+}
+.tabbar button.secondary:hover {
+  background: var(--red-50);
+  color: var(--red);
+  transform: none;
+}
+.tabbar button:not(.secondary) {
+  box-shadow: 0 6px 18px -8px rgba(200, 16, 46, 0.7);
+}
+
+/* Dialogs and notices */
+dialog {
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 30px 80px -20px rgba(20, 21, 28, 0.45), 0 0 0 1px rgba(200, 16, 46, 0.08);
+  color: var(--ink);
+}
+dialog[open] {
+  animation: neo-rise 0.22s ease-out;
+}
+dialog::backdrop {
+  background: rgba(20, 6, 10, 0.45);
+  backdrop-filter: blur(6px);
+}
+#notice {
+  background: rgba(16, 17, 24, 0.94);
+  border-radius: 14px;
+  border-left: 3px solid var(--red-hot);
+  box-shadow: 0 20px 50px -16px rgba(0, 0, 0, 0.5), 0 0 24px -6px rgba(255, 45, 75, 0.5);
+}
+.empty-icon {
+  color: var(--red);
+  text-shadow: 0 0 18px rgba(255, 45, 75, 0.6);
+}
+.foot {
+  background: transparent;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+}
+
+/* Sign-in: a glowing red stage and a glass panel */
+.login {
+  background: transparent;
+}
+.login-story {
+  background:
+    radial-gradient(600px 400px at 85% 15%, rgba(255, 45, 75, 0.55), transparent 65%),
+    radial-gradient(500px 380px at 10% 95%, rgba(255, 255, 255, 0.12), transparent 60%),
+    linear-gradient(160deg, #b0081f, #6e0212 55%, #1d0408);
+}
+.login-story::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse at 70% 40%, #000 20%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at 70% 40%, #000 20%, transparent 75%);
+  pointer-events: none;
+  animation: neo-drift 24s linear infinite;
+}
+.login-story:after {
+  border-color: rgba(255, 255, 255, 0.35);
+  box-shadow:
+    0 0 0 60px rgba(255, 255, 255, 0.04),
+    0 0 0 61px rgba(255, 255, 255, 0.18),
+    0 0 0 120px rgba(255, 255, 255, 0.03);
+  opacity: 0.7;
+  animation: neo-orbit 30s linear infinite;
+}
+.login-story > * {
+  position: relative;
+  z-index: 1;
+}
+.login-story h1 {
+  background: linear-gradient(100deg, #fff 40%, #ffc2cc);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 650;
+}
+.login-story p {
+  color: rgba(255, 233, 236, 0.85);
+}
+.login-story .eyebrow {
+  color: #ffd2d9;
+}
+.login-story .eyebrow::before {
+  background: #fff;
+}
+.login-panel {
+  background: var(--glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: var(--lift), 0 0 0 1px rgba(200, 16, 46, 0.06);
+}
+.login-panel h2 {
+  font-weight: 700;
+  letter-spacing: -0.8px;
+}
+
+@keyframes neo-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes neo-drift {
+  to {
+    background-position: 44px 44px;
+  }
+}
+@keyframes neo-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.content > * {
+  animation: neo-rise 0.3s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-story::before,
+  .login-story:after,
+  dialog[open],
+  .content > * {
+    animation: none;
+  }
+  button,
+  .card {
+    transition: none;
+  }
+}
+@media print {
+  body {
+    background: #fff;
+  }
+  .card,
+  .stat {
+    backdrop-filter: none;
+    box-shadow: none;
+    background: #fff;
+    border: 1px solid #ddd;
+  }
+  h1,
+  .stat-value {
+    color: #000;
+    background: none;
+  }
+}
+.avatar {
+  background: linear-gradient(135deg, var(--red-50), var(--red-100));
+  color: var(--red);
+  box-shadow: inset 0 0 0 1px rgba(200, 16, 46, 0.15);
+  font-weight: 700;
+}
