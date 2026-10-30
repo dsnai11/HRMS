@@ -1,3 +1,4 @@
+import { otLabel, overtimePay, overtimeSettings } from "./overtime.js";
 import { insertMany } from "../db.js";
 import { HttpError, csvCell, integer, isoDate, number } from "../http.js";
 import { requireOwned } from "../scope.js";
@@ -72,6 +73,13 @@ export function registerPayrollRuns(router, app) {
          FROM reimbursement_claims c JOIN claim_types t ON t.id=c.claim_type_id WHERE c.company_id=? AND c.status='approved'`,
       )
       .all(companyId);
+    // Approved overtime not paid yet (from this month or earlier), paid once.
+    const otSettings = await overtimeSettings(db, companyId);
+    const dueOt = await db
+      .prepare(
+        "SELECT id,user_id,minutes_approved FROM overtime_requests WHERE company_id=? AND status='approved' AND paid_run_id IS NULL AND substr(date,1,7)<=?",
+      )
+      .all(companyId, month);
     const lwfRules = (
       await db
         .prepare("SELECT * FROM lwf_rules WHERE company_id=?")
@@ -124,6 +132,8 @@ export function registerPayrollRuns(router, app) {
       const pr = prior.get(p.id) ?? {};
       const myLoans = dueLoans.filter((l) => l.user_id === p.id);
       const myClaims = dueClaims.filter((c) => c.user_id === p.id);
+      const myOt = dueOt.filter((o) => o.user_id === p.id);
+      const otMinutes = myOt.reduce((s, o) => s + Number(o.minutes_approved), 0);
       const mine = [
         ...adjustments
           .filter((a) => a.user_id === p.id)
@@ -145,6 +155,16 @@ export function registerPayrollRuns(router, app) {
           amount: c.amount,
           taxable: Boolean(c.taxable),
         })),
+        ...(otMinutes
+          ? [
+              {
+                kind: "earning",
+                name: otLabel(otMinutes),
+                amount: overtimePay(otSettings, salary, linesOf.get(salary.id) ?? [], otMinutes),
+                taxable: true,
+              },
+            ]
+          : []),
       ];
       const slip = computePayslip({
         month,
@@ -208,6 +228,7 @@ export function registerPayrollRuns(router, app) {
         settles: {
           loan_schedule_ids: myLoans.map((l) => l.id),
           claim_ids: myClaims.map((c) => c.id),
+          overtime_ids: myOt.map((o) => o.id),
         },
       });
     }
@@ -410,8 +431,12 @@ export function registerPayrollRuns(router, app) {
         for (const r of await db
           .prepare("SELECT data FROM payroll_items WHERE run_id=?")
           .all(run.id)) {
-          const { loan_schedule_ids = [], claim_ids = [] } =
+          const { loan_schedule_ids = [], claim_ids = [], overtime_ids = [] } =
             JSON.parse(r.data).settles ?? {};
+          for (const id of overtime_ids)
+            await db
+              .prepare("UPDATE overtime_requests SET paid_run_id=? WHERE id=? AND paid_run_id IS NULL")
+              .run(run.id, id);
           for (const id of loan_schedule_ids) {
             await db
               .prepare(

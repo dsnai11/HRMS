@@ -633,6 +633,7 @@ async function render() {
         ?.addEventListener("click", () => workplaceDialog());
       await selfieSettingCard(id);
       await odPunchCard(id);
+      await overtimeSettingsCard(id);
       await shiftPolicyCard(id);
       await rosterCard(id);
       await importCard(id);
@@ -1335,6 +1336,7 @@ async function myAttendancePage(id) {
   const timer = setInterval(tick, 1000);
   tick();
   draw();
+  await overtimeCard(id);
 }
 // Start once every deferred script has run (they share this page's scope); an early
 // start could use a function from a later script before it exists.

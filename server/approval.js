@@ -48,15 +48,17 @@ export async function inboxScope(app, user) {
   };
 }
 
-// OD trips waiting for this approver (their team, or their branches for HR).
+// OD trips and overtime claims waiting for this approver (their team, or their branches for HR).
 async function pendingTrips(app, user) {
   const scope = await inboxScope(app, user);
   if (!scope) return 0;
-  const rows = await app.db
-    .prepare(`SELECT r.user_id FROM od_visits r WHERE r.company_id=? AND r.status='pending' AND r.user_id<>?${scope.sql} LIMIT 300`)
-    .all(user.company_id, user.id, ...scope.params);
   let n = 0;
-  for (const r of rows) if (await mayDecide(app, user, r.user_id)) n++;
+  for (const table of ["od_visits", "overtime_requests"]) {
+    const rows = await app.db
+      .prepare(`SELECT r.user_id FROM ${table} r WHERE r.company_id=? AND r.status='pending' AND r.user_id<>?${scope.sql} LIMIT 300`)
+      .all(user.company_id, user.id, ...scope.params);
+    for (const r of rows) if (await mayDecide(app, user, r.user_id)) n++;
+  }
   return n;
 }
 

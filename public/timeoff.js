@@ -271,6 +271,7 @@ async function approvalsPage(id) {
   await claimsApprovals(id);
   await hiringApprovals(id);
   await odTripApprovals(id);
+  await overtimeApprovals(id);
   await compOffApprovals(id);
   await delegationCard(id);
   await bankChangeApprovals(id);

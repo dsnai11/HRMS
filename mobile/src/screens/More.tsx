@@ -195,6 +195,7 @@ export const SECTIONS = [
   "Payslips",
   "Requests",
   "OD Log History",
+  "Overtime",
   "Directory",
   "Helpdesk",
   "Surveys",
@@ -214,6 +215,7 @@ export const MENU: [string, [Section | "Punch", string][]][] = [
       ["My Attendance", "My Attendance"],
       ["Requests", "Regularization"],
       ["OD Log History", "OD Log History"],
+      ["Overtime", "Overtime"],
     ],
   ],
   ["Leave", [["Leave", "My Leaves"]]],
@@ -379,6 +381,7 @@ export default function More({
       {section === "Directory" && <DirectoryScreen api={api} />}
       {section === "Helpdesk" && <HelpdeskScreen api={api} />}
       {section === "Surveys" && <SurveysScreen api={api} />}
+      {section === "Overtime" && <OvertimeScreen api={api} />}
       {section === "Raise a concern" && <ConcernsScreen api={api} />}
       {section === "Alerts" && <AlertsScreen api={api} onChange={setUnread} />}
       {section === "Profile" && (
@@ -2784,6 +2787,126 @@ function DirectoryScreen({ api }: { api: Api }) {
 }
 
 // ---- helpdesk ----------------------------------------------------------------------------------------
+// ---- overtime: claim time worked after a full day ------------------------------------------------
+type OtData = {
+  settings: { ot_enabled: boolean; ot_min_minutes: number; ot_claim_days: number };
+  suggestions: { date: string; minutes: number; out_at: string }[];
+  requests: {
+    id: number;
+    date: string;
+    minutes_claimed: number;
+    minutes_approved: number | null;
+    reason: string;
+    status: "pending" | "approved" | "rejected" | "cancelled";
+    paid_run_id: number | null;
+    decision_note: string | null;
+  }[];
+};
+const otTime = (m: number) => Math.floor(m / 60) + "h " + String(m % 60).padStart(2, "0") + "m";
+function OvertimeScreen({ api }: { api: Api }) {
+  const ot = useLoad(() => api<OtData>("/overtime"));
+  const [claiming, setClaiming] = useState<{ date: string; minutes: number } | null>(null);
+  const [minutes, setMinutes] = useState(""),
+    [reason, setReason] = useState("");
+  const [sending, setSending] = useState(false);
+  const d = ot.data;
+  return (
+    <>
+      <View style={s.card}>
+        <Text style={s.heading}>Overtime</Text>
+        <Status loading={ot.loading} error={ot.error} />
+        {d && !d.settings.ot_enabled && <Text style={s.note}>Overtime is not switched on for your company.</Text>}
+        {d?.settings.ot_enabled && (
+          <Text style={s.note}>
+            Time worked after a full day, read from your punches. Claim within {d.settings.ot_claim_days} day(s); your
+            manager approves it and it is paid with your salary.
+          </Text>
+        )}
+        {d?.settings.ot_enabled && d.suggestions.length === 0 && (
+          <Text style={s.note}>No unclaimed overtime in your recent punches.</Text>
+        )}
+        {(d?.suggestions ?? []).map((sg) => (
+          <View key={sg.date} style={s.row}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.strong}>{dateText(sg.date)}</Text>
+              <Text style={s.note}>
+                Out {clock(sg.out_at)} · {otTime(sg.minutes)}
+              </Text>
+            </View>
+            <Btn
+              title="Claim"
+              onPress={() => {
+                setClaiming(sg);
+                setMinutes(String(sg.minutes));
+                setReason("");
+              }}
+            />
+          </View>
+        ))}
+        {claiming && (
+          <View style={{ gap: 12 }}>
+            <Text style={s.strong}>Claim for {dateText(claiming.date)}</Text>
+            <Field
+              label={"Minutes (up to " + claiming.minutes + ")"}
+              value={minutes}
+              onChange={setMinutes}
+              keyboardType="numeric"
+            />
+            <Field label="What was the work?" value={reason} onChange={setReason} />
+            <Btn
+              title={sending ? "Sending…" : "Send to my manager"}
+              disabled={sending || !reason.trim() || !Number(minutes)}
+              onPress={async () => {
+                setSending(true);
+                const ok = await attempt(
+                  () => api("/overtime", { date: claiming.date, minutes: Number(minutes), reason }),
+                  "Sent to your manager.",
+                );
+                setSending(false);
+                if (ok) {
+                  setClaiming(null);
+                  void ot.reload();
+                }
+              }}
+            />
+            <Btn title="Cancel" secondary onPress={() => setClaiming(null)} />
+          </View>
+        )}
+      </View>
+      {(d?.requests ?? []).length > 0 && (
+        <View style={s.card}>
+          <Text style={s.heading}>Your claims</Text>
+          {(d?.requests ?? []).map((r) => (
+            <View key={r.id} style={s.row}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.strong}>
+                  {dateText(r.date)} · {otTime(r.minutes_approved ?? r.minutes_claimed)}
+                </Text>
+                <Text style={s.note}>
+                  {r.reason}
+                  {r.paid_run_id ? " · paid" : ""}
+                  {r.decision_note ? " · " + r.decision_note : ""}
+                </Text>
+              </View>
+              {r.status === "pending" ? (
+                <Btn
+                  title="Cancel"
+                  secondary
+                  onPress={async () => {
+                    if (await attempt(() => api("/overtime/" + r.id + "/cancel", {}))) void ot.reload();
+                  }}
+                />
+              ) : (
+                <Pill text={r.status} />
+              )}
+            </View>
+          ))}
+        </View>
+      )}
+    </>
+  );
+}
+
 // ---- surveys: anonymous answers -------------------------------------------------------------------
 type SurveyQ = { id: string; type: "enps" | "rating" | "choice" | "text"; text: string; options?: string[] };
 type Survey = { id: number; title: string; intro: string | null; closes_on: string; answered: boolean; questions: SurveyQ[] };

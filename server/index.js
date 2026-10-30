@@ -46,6 +46,7 @@ import { registerOdVisits } from "./routes/od-visits.js";
 import { registerCases } from "./routes/cases.js";
 import { registerSurveys } from "./routes/surveys.js";
 import { registerDelegations } from "./routes/delegations.js";
+import { registerOvertime } from "./routes/overtime.js";
 import { ipAllowed, isStaff, loadRole, outsideOffice } from "./security-policy.js";
 import {
   registerScheduledReports,
@@ -100,6 +101,7 @@ const STATIC = {
   "/punchmap.js": ["punchmap.js", "text/javascript"],
   "/cases.js": ["cases.js", "text/javascript"],
   "/surveys.js": ["surveys.js", "text/javascript"],
+  "/overtime.js": ["overtime.js", "text/javascript"],
   "/vendor/leaflet.js": ["../node_modules/leaflet/dist/leaflet.js", "text/javascript"],
   "/vendor/leaflet.css": ["../node_modules/leaflet/dist/leaflet.css", "text/css"],
   "/join.html": ["join.html", "text/html"],
@@ -244,6 +246,7 @@ export function createApp({
     registerCases,
     registerSurveys,
     registerDelegations,
+    registerOvertime,
   ])
     register(router, app);
 
