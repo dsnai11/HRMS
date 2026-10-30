@@ -32,6 +32,12 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import * as Notifications from "expo-notifications";
 import More, { MENU, type Section } from "./More";
+import {
+  SESSION_KEY,
+  biometricAvailable,
+  biometricLockOn,
+  setBiometricLock,
+} from "../biometric";
 type User = {
   id: number;
   name: string;
@@ -73,7 +79,7 @@ Notifications.setNotificationHandler({
   }),
 });
 const API = (process.env.EXPO_PUBLIC_API_URL || "").replace(/\/$/, "");
-const KEY = "laxmi.hrms.session";
+const KEY = SESSION_KEY;
 const DEVICE_ID_KEY = "laxmi.hrms.device-id";
 const DEVICE_SECRET_KEY = "laxmi.hrms.device-secret";
 type Identity = { id: string; secret: string | null };
@@ -121,6 +127,18 @@ export default function Attendance() {
   const [view, setView] = useState<Section | "Punch">("Home"),
     [menuOpen, setMenuOpen] = useState(false),
     [counts, setCounts] = useState({ alerts: 0, messages: 0 });
+  // Fingerprint / face unlock: offered only on phones that have it set up.
+  const [bio, setBio] = useState<{ available: boolean; on: boolean }>({
+    available: false,
+    on: false,
+  });
+  useEffect(() => {
+    void (async () =>
+      setBio({
+        available: await biometricAvailable().catch(() => false),
+        on: await biometricLockOn(),
+      }))();
+  }, []);
   const [cameraPermission, requestCamera] = useCameraPermissions();
   const selfieResolver = useRef<((photo: string | null) => void) | null>(null);
   const cameraRef = useRef<CameraView | null>(null);
@@ -143,7 +161,9 @@ export default function Attendance() {
     try {
       const [a] = await Promise.race([
         Location.reverseGeocodeAsync(position.coords),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("slow")), 5000)),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("slow")), 5000),
+        ),
       ]);
       address = [a?.name, a?.street, a?.district, a?.city, a?.postalCode]
         .filter(Boolean)
@@ -155,7 +175,9 @@ export default function Attendance() {
       action,
       address:
         address ||
-        position.coords.latitude.toFixed(5) + ", " + position.coords.longitude.toFixed(5),
+        position.coords.latitude.toFixed(5) +
+          ", " +
+          position.coords.longitude.toFixed(5),
       accuracy: Math.round(position.coords.accuracy ?? 0),
     });
     return new Promise((resolve) => {
@@ -730,6 +752,25 @@ export default function Attendance() {
                 </View>
               ))}
               <Text style={s.menuGroup}>Account</Text>
+              {bio.available && (
+                <Pressable
+                  style={s.menuItem}
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: bio.on }}
+                  onPress={() =>
+                    void (async () => {
+                      const r = await setBiometricLock(!bio.on);
+                      setBio((b) => ({ ...b, on: r.on }));
+                      if (r.error)
+                        Alert.alert("Fingerprint / face unlock", r.error);
+                    })()
+                  }
+                >
+                  <Text style={s.menuText}>
+                    Fingerprint / face unlock: {bio.on ? "On" : "Off"}
+                  </Text>
+                </Pressable>
+              )}
               <Pressable
                 style={s.menuItem}
                 onPress={() => {
@@ -824,12 +865,16 @@ export default function Attendance() {
                   />
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+                    accessibilityLabel={
+                      showPassword ? "Hide password" : "Show password"
+                    }
                     onPress={() => setShowPassword(!showPassword)}
                     style={s.eye}
                     hitSlop={10}
                   >
-                    <Text style={{ fontSize: 18 }}>{showPassword ? "🙈" : "👁"}</Text>
+                    <Text style={{ fontSize: 18 }}>
+                      {showPassword ? "🙈" : "👁"}
+                    </Text>
                   </Pressable>
                 </View>
                 <Button
@@ -953,184 +998,201 @@ export default function Attendance() {
                 <>
                   <Text style={s.crumb}>Attendance / Punch In / Out</Text>
                   <View style={s.card}>
-                  <Text style={s.badge}>
-                    {open
-                      ? "● WORKING NOW"
-                      : done
-                        ? "✓ PUNCHED OUT"
-                        : "○ NOT PUNCHED IN"}
-                  </Text>
-                  <Text style={s.heading}>
-                    {open
-                      ? "Your shift is in progress"
-                      : done
-                        ? "Today's shift is recorded"
-                        : "Ready to begin?"}
-                  </Text>
-                  <Text style={s.siteName}>
-                    {open?.workplace_name ||
-                      done?.workplace_name ||
-                      profile.workplace?.name ||
-                      "No workplace assigned"}
-                  </Text>
-                  <Text style={s.subtitle}>
-                    {odOpen
-                      ? "On duty (OD) since " +
-                        time(open.in_at) +
-                        ": " +
-                        open.od_purpose +
-                        ". Punch out from wherever you finish; no workplace boundary."
-                      : odDone
-                        ? "OD punched out at " +
-                          time(done.out_at ?? done.in_at) +
-                          ". " +
-                          (done.source === "od_punch"
-                            ? "Waiting for your manager's approval."
-                            : done.source === "on_duty"
-                              ? "Approved as a full day on duty."
-                              : "Not approved.")
-                      : open && trip
-                      ? "Out on duty since " +
-                        time(trip.out_at) +
-                        ": " +
-                        trip.purpose +
-                        ". Tap OD In when you are back, or punch out wherever you finish."
-                      : open
-                      ? "Started " +
-                        time(open.in_at) +
-                        ". End your shift at this same workplace" +
-                        (open.required_out_at
-                          ? " after " +
-                            time(open.required_out_at) +
-                            " for a full day."
-                          : ".")
-                      : done
-                        ? "Punched out at " +
-                          time(done.out_at ?? done.in_at) +
-                          (done.day_type === "half_day" ? " · half day" : "") +
-                          ". Punched out by mistake? Tap below at the workplace to replace it with the latest time."
-                        : "You must be inside your assigned " +
-                          (profile.workplace?.radius || "—") +
-                          " m boundary."}
-                  </Text>
-                  {profile.device?.status !== "approved" && (
+                    <Text style={s.badge}>
+                      {open
+                        ? "● WORKING NOW"
+                        : done
+                          ? "✓ PUNCHED OUT"
+                          : "○ NOT PUNCHED IN"}
+                    </Text>
+                    <Text style={s.heading}>
+                      {open
+                        ? "Your shift is in progress"
+                        : done
+                          ? "Today's shift is recorded"
+                          : "Ready to begin?"}
+                    </Text>
+                    <Text style={s.siteName}>
+                      {open?.workplace_name ||
+                        done?.workplace_name ||
+                        profile.workplace?.name ||
+                        "No workplace assigned"}
+                    </Text>
+                    <Text style={s.subtitle}>
+                      {odOpen
+                        ? "On duty (OD) since " +
+                          time(open.in_at) +
+                          ": " +
+                          open.od_purpose +
+                          ". Punch out from wherever you finish; no workplace boundary."
+                        : odDone
+                          ? "OD punched out at " +
+                            time(done.out_at ?? done.in_at) +
+                            ". " +
+                            (done.source === "od_punch"
+                              ? "Waiting for your manager's approval."
+                              : done.source === "on_duty"
+                                ? "Approved as a full day on duty."
+                                : "Not approved.")
+                          : open && trip
+                            ? "Out on duty since " +
+                              time(trip.out_at) +
+                              ": " +
+                              trip.purpose +
+                              ". Tap OD In when you are back, or punch out wherever you finish."
+                            : open
+                              ? "Started " +
+                                time(open.in_at) +
+                                ". End your shift at this same workplace" +
+                                (open.required_out_at
+                                  ? " after " +
+                                    time(open.required_out_at) +
+                                    " for a full day."
+                                  : ".")
+                              : done
+                                ? "Punched out at " +
+                                  time(done.out_at ?? done.in_at) +
+                                  (done.day_type === "half_day"
+                                    ? " · half day"
+                                    : "") +
+                                  ". Punched out by mistake? Tap below at the workplace to replace it with the latest time."
+                                : "You must be inside your assigned " +
+                                  (profile.workplace?.radius || "—") +
+                                  " m boundary."}
+                    </Text>
+                    {profile.device?.status !== "approved" && (
+                      <View style={s.callout}>
+                        <Text style={s.note}>
+                          {profile.device?.status === "pending"
+                            ? "This phone is waiting for your administrator to approve it. Pull down to refresh once approved."
+                            : "This phone is not registered for attendance. Sign out and sign in again, or contact your administrator."}
+                        </Text>
+                      </View>
+                    )}
                     <View style={s.callout}>
                       <Text style={s.note}>
-                        {profile.device?.status === "pending"
-                          ? "This phone is waiting for your administrator to approve it. Pull down to refresh once approved."
-                          : "This phone is not registered for attendance. Sign out and sign in again, or contact your administrator."}
+                        {odOpen || trip
+                          ? "We record a fresh GPS reading and the time when you punch out."
+                          : "We check a fresh GPS reading when you tap below. Enable precise location and stay inside the workplace boundary."}
                       </Text>
                     </View>
-                  )}
-                  <View style={s.callout}>
-                    <Text style={s.note}>
-                      {odOpen || trip
-                        ? "We record a fresh GPS reading and the time when you punch out."
-                        : "We check a fresh GPS reading when you tap below. Enable precise location and stay inside the workplace boundary."}
-                    </Text>
-                  </View>
-                  {!odDone && (
-                    <Button
-                      title={
-                        busy
-                          ? "Checking attendance…"
-                          : odOpen
-                            ? "OD punch out →"
-                            : open && trip
-                              ? "Punch out here (ends OD) →"
-                              : open
-                              ? "Punch out →"
-                              : done
-                                ? "Update punch-out →"
-                                : "Punch in →"
-                      }
-                      onPress={() => void punch()}
-                      disabled={
-                        busy ||
-                        profile.device?.status !== "approved" ||
-                        (!open && !done && !profile.workplace)
-                      }
-                    />
-                  )}
-                  {open && !odOpen && profile.od_allowed && (
-                    <View style={s.odBox}>
-                      {trip ? (
-                        <>
-                          <Text style={s.label}>Back in the office?</Text>
-                          <Button
-                            title={busy ? "Checking attendance…" : "OD In (I am back) →"}
-                            secondary
-                            onPress={() => void punch(false, undefined, { action: "od_in" })}
-                            disabled={busy || profile.device?.status !== "approved"}
-                          />
-                        </>
-                      ) : (
-                        <>
-                          <Text style={s.label}>Going out for work? (OD Out)</Text>
-                          <Text style={s.note}>
-                            Record when you leave the office on duty. Tap OD In when you
-                            are back; your manager approves the trip.
-                          </Text>
-                          <TextInput
-                            accessibilityLabel="Purpose of the OD"
-                            style={s.input}
-                            placeholder="Purpose, e.g. Bank deposit, SBI MI Road"
-                            maxLength={200}
-                            value={odPurpose}
-                            onChangeText={setOdPurpose}
-                          />
-                          <Button
-                            title={busy ? "Checking attendance…" : "OD Out →"}
-                            secondary
-                            onPress={() =>
-                              void punch(false, undefined, {
-                                action: "od_out",
-                                purpose: odPurpose.trim(),
-                              })
-                            }
-                            disabled={
-                              busy ||
-                              !odPurpose.trim() ||
-                              profile.device?.status !== "approved"
-                            }
-                          />
-                        </>
-                      )}
-                    </View>
-                  )}
-                  {!open && !done && profile.od_allowed && (
-                    <View style={s.odBox}>
-                      <Text style={s.label}>On duty outside today? (OD)</Text>
-                      <Text style={s.note}>
-                        Punch in from wherever you are. Your manager approves the
-                        day after you punch out.
-                      </Text>
-                      <TextInput
-                        accessibilityLabel="Purpose of the OD"
-                        style={s.input}
-                        placeholder="Purpose, e.g. Client visit, Kota"
-                        maxLength={200}
-                        value={odPurpose}
-                        onChangeText={setOdPurpose}
-                      />
+                    {!odDone && (
                       <Button
-                        title={busy ? "Checking attendance…" : "OD punch in →"}
-                        secondary
-                        onPress={() => void punch(false, odPurpose.trim())}
+                        title={
+                          busy
+                            ? "Checking attendance…"
+                            : odOpen
+                              ? "OD punch out →"
+                              : open && trip
+                                ? "Punch out here (ends OD) →"
+                                : open
+                                  ? "Punch out →"
+                                  : done
+                                    ? "Update punch-out →"
+                                    : "Punch in →"
+                        }
+                        onPress={() => void punch()}
                         disabled={
                           busy ||
-                          !odPurpose.trim() ||
                           profile.device?.status !== "approved" ||
-                          !profile.workplace
+                          (!open && !done && !profile.workplace)
                         }
                       />
-                    </View>
-                  )}
-                  <Button
-                    title="My Attendance"
-                    secondary
-                    onPress={() => setView("My Attendance")}
-                  />
+                    )}
+                    {open && !odOpen && profile.od_allowed && (
+                      <View style={s.odBox}>
+                        {trip ? (
+                          <>
+                            <Text style={s.label}>Back in the office?</Text>
+                            <Button
+                              title={
+                                busy
+                                  ? "Checking attendance…"
+                                  : "OD In (I am back) →"
+                              }
+                              secondary
+                              onPress={() =>
+                                void punch(false, undefined, {
+                                  action: "od_in",
+                                })
+                              }
+                              disabled={
+                                busy || profile.device?.status !== "approved"
+                              }
+                            />
+                          </>
+                        ) : (
+                          <>
+                            <Text style={s.label}>
+                              Going out for work? (OD Out)
+                            </Text>
+                            <Text style={s.note}>
+                              Record when you leave the office on duty. Tap OD
+                              In when you are back; your manager approves the
+                              trip.
+                            </Text>
+                            <TextInput
+                              accessibilityLabel="Purpose of the OD"
+                              style={s.input}
+                              placeholder="Purpose, e.g. Bank deposit, SBI MI Road"
+                              maxLength={200}
+                              value={odPurpose}
+                              onChangeText={setOdPurpose}
+                            />
+                            <Button
+                              title={busy ? "Checking attendance…" : "OD Out →"}
+                              secondary
+                              onPress={() =>
+                                void punch(false, undefined, {
+                                  action: "od_out",
+                                  purpose: odPurpose.trim(),
+                                })
+                              }
+                              disabled={
+                                busy ||
+                                !odPurpose.trim() ||
+                                profile.device?.status !== "approved"
+                              }
+                            />
+                          </>
+                        )}
+                      </View>
+                    )}
+                    {!open && !done && profile.od_allowed && (
+                      <View style={s.odBox}>
+                        <Text style={s.label}>On duty outside today? (OD)</Text>
+                        <Text style={s.note}>
+                          Punch in from wherever you are. Your manager approves
+                          the day after you punch out.
+                        </Text>
+                        <TextInput
+                          accessibilityLabel="Purpose of the OD"
+                          style={s.input}
+                          placeholder="Purpose, e.g. Client visit, Kota"
+                          maxLength={200}
+                          value={odPurpose}
+                          onChangeText={setOdPurpose}
+                        />
+                        <Button
+                          title={
+                            busy ? "Checking attendance…" : "OD punch in →"
+                          }
+                          secondary
+                          onPress={() => void punch(false, odPurpose.trim())}
+                          disabled={
+                            busy ||
+                            !odPurpose.trim() ||
+                            profile.device?.status !== "approved" ||
+                            !profile.workplace
+                          }
+                        />
+                      </View>
+                    )}
+                    <Button
+                      title="My Attendance"
+                      secondary
+                      onPress={() => setView("My Attendance")}
+                    />
                   </View>
                   <Text style={s.note}>
                     Location is captured only at punch-in and punch-out. No
@@ -1165,8 +1227,12 @@ export default function Attendance() {
               onPress={() => setView(id)}
               style={[s.tabItem, view === id && s.tabItemOn]}
             >
-              <Text style={[s.tabIcon, view === id && { color: "#ac051b" }]}>{icon}</Text>
-              <Text style={[s.tabLabel, view === id && { color: "#ac051b" }]}>{label}</Text>
+              <Text style={[s.tabIcon, view === id && { color: "#ac051b" }]}>
+                {icon}
+              </Text>
+              <Text style={[s.tabLabel, view === id && { color: "#ac051b" }]}>
+                {label}
+              </Text>
             </Pressable>
           ))}
         </View>
@@ -1198,10 +1264,7 @@ export default function Attendance() {
                 </Text>
               </View>
             </View>
-            <Button
-              title="Confirm"
-              onPress={() => answerFix(true)}
-            />
+            <Button title="Confirm" onPress={() => answerFix(true)} />
             <Button title="Cancel" secondary onPress={() => answerFix(false)} />
           </View>
         </View>
@@ -1280,7 +1343,12 @@ const s = StyleSheet.create({
   },
   siteName: { fontWeight: "600", fontSize: 15, color: "#3a3c4a" },
   callout: { backgroundColor: "#f3f2f7", borderRadius: 10, padding: 15 },
-  odBox: { gap: 8, borderTopWidth: 1, borderTopColor: "#ececf2", paddingTop: 14 },
+  odBox: {
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#ececf2",
+    paddingTop: 14,
+  },
   tabs: { flexDirection: "row", gap: 12 },
   crumb: {
     backgroundColor: "#fff",
@@ -1311,7 +1379,13 @@ const s = StyleSheet.create({
   avatarText: { color: "#4e5aa8", fontWeight: "700" },
   barCode: { color: "#fff", fontWeight: "700", fontSize: 16 },
   barSub: { color: "#d7d8df", fontSize: 11 },
-  eye: { position: "absolute", right: 14, top: 0, bottom: 0, justifyContent: "center" },
+  eye: {
+    position: "absolute",
+    right: 14,
+    top: 0,
+    bottom: 0,
+    justifyContent: "center",
+  },
   menuUser: {
     backgroundColor: "#8c0416",
     paddingTop: 48,
@@ -1338,7 +1412,12 @@ const s = StyleSheet.create({
     marginBottom: 12,
   },
   menuSub: { color: "#fbd5da", fontSize: 12 },
-  menuVersion: { color: "#fbd5da", fontSize: 11, textAlign: "center", marginTop: 18 },
+  menuVersion: {
+    color: "#fbd5da",
+    fontSize: 11,
+    textAlign: "center",
+    marginTop: 18,
+  },
   tabBar: {
     flexDirection: "row",
     backgroundColor: "#fff",
@@ -1347,11 +1426,20 @@ const s = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 8,
   },
-  tabItem: { flex: 1, alignItems: "center", paddingVertical: 6, borderRadius: 14 },
+  tabItem: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
   tabItemOn: { backgroundColor: "#fde7ea" },
   tabIcon: { fontSize: 18, color: "#7a7d8c" },
   tabLabel: { fontSize: 11, color: "#7a7d8c", fontWeight: "600" },
-  sheetWrap: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.35)" },
+  sheetWrap: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.35)",
+  },
   sheet: {
     backgroundColor: "#fff",
     borderTopLeftRadius: 24,

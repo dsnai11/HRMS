@@ -37,6 +37,13 @@ module.exports = {
       "expo-secure-store",
       "expo-notifications",
       [
+        "expo-local-authentication",
+        {
+          faceIDPermission:
+            "Face ID is used only to unlock the app on this phone, if you turn it on.",
+        },
+      ],
+      [
         "expo-camera",
         {
           cameraPermission:
