@@ -49,6 +49,7 @@ import { registerDelegations } from "./routes/delegations.js";
 import { registerOvertime } from "./routes/overtime.js";
 import { registerSso } from "./routes/sso.js";
 import { registerRmsPlus } from "./routes/rms-plus.js";
+import { registerWhatsapp } from "./routes/whatsapp.js";
 import { ipAllowed, isStaff, loadRole, outsideOffice } from "./security-policy.js";
 import {
   registerScheduledReports,
@@ -251,6 +252,7 @@ export function createApp({
     registerOvertime,
     registerSso,
     registerRmsPlus,
+    registerWhatsapp,
   ])
     register(router, app);
 
