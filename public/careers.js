@@ -90,7 +90,15 @@ async function jobs(companyId) {
     <label>Expected pay (₹ a year)<input name="expected_ctc" type="number" min="0"></label>
     <label>Notice period (days)<input name="notice_days" type="number" min="0" max="365"></label>
     <label class="full">Key skills, separated by commas<input name="skills" maxlength="600"></label>
-    <label class="full">Resume (PDF, JPG or PNG, up to 2 MB)<input name="resume" type="file" accept="application/pdf,image/jpeg,image/png"></label></div>
+    <label class="full">Resume (PDF, JPG or PNG, up to 2 MB)<input name="resume" type="file" accept="application/pdf,image/jpeg,image/png"></label>${(j.screening ?? [])
+      .map((s) =>
+        s.type === "yes_no"
+          ? `<label>${esc(s.text)}<select name="sq_${s.id}" required><option value="">Choose…</option><option value="yes">Yes</option><option value="no">No</option></select></label>`
+          : s.type === "number"
+            ? `<label>${esc(s.text)}<input name="sq_${s.id}" type="number" step="any" required></label>`
+            : `<label>${esc(s.text)}<select name="sq_${s.id}" required><option value="">Choose…</option>${s.options.map((o) => `<option>${esc(o)}</option>`).join("")}</select></label>`,
+      )
+      .join("")}</div>
     <p class="error-text" role="alert"></p><div class="actions spaced"><button type="submit">Submit application</button></div></form></div>`,
     )
     .join("")}`;
@@ -132,6 +140,11 @@ async function jobs(companyId) {
             ].includes(k)
               ? Number(f[k])
               : f[k];
+        const job = list.find((j) => j.id === id);
+        if (job?.screening?.length)
+          body.screening = Object.fromEntries(
+            job.screening.map((s) => [s.id, s.type === "number" ? Number(f[`sq_${s.id}`]) : f[`sq_${s.id}`]]),
+          );
         const file = form.elements.resume.files[0];
         if (file) {
           if (file.size > 2 * 1024 * 1024)
@@ -156,7 +169,44 @@ async function jobs(companyId) {
   });
 }
 
-if (q.get("t")) tracker(q.get("t"));
+// Choosing an interview time from the slots HR offered (a one-time link by email).
+async function slotPicker(token) {
+  const show = (t) => {
+    const when = (iso) =>
+      new Intl.DateTimeFormat("en-IN", { weekday: "long", day: "numeric", month: "long", hour: "numeric", minute: "2-digit", timeZone: t.timezone }).format(new Date(iso));
+    document.title = `${t.company} · Interview time`;
+    box.innerHTML = `<header><p class="eyebrow">${esc(t.company)}</p><h1>Hello, ${esc(t.name)}</h1><p class="muted">${esc(t.round)}${t.job ? ` for ${esc(t.job)}` : ""} · ${t.minutes} minutes · ${esc(t.mode.replace("_", " "))}</p></header>${
+      t.status === "booked"
+        ? `<div class="card"><h2>Your interview is booked</h2><p>${when(t.booked_slot)}. The details and a calendar invitation are in your email.</p></div>`
+        : t.status !== "open"
+          ? '<div class="card"><h2>This link is no longer valid</h2><p>Please reply to the email you received.</p></div>'
+          : t.slots.length
+            ? `<div class="card"><h2>Choose a time</h2><p class="muted" id="msg" role="status"></p>${t.slots.map((s) => `<p><button data-slot="${esc(s)}">${when(s)}</button></p>`).join("")}</div>`
+            : '<div class="card"><h2>No times left</h2><p>All the offered times have been taken. Please reply to the email you received and we will offer new ones.</p></div>'
+    }`;
+    box.querySelectorAll("[data-slot]").forEach(
+      (b) =>
+        (b.onclick = async () => {
+          box.querySelectorAll("[data-slot]").forEach((x) => (x.disabled = true));
+          try {
+            await call(`/slots/${encodeURIComponent(token)}`, { slot: b.dataset.slot });
+            show(await call(`/slots/${encodeURIComponent(token)}`));
+          } catch (e) {
+            box.querySelector("#msg").textContent = e.message;
+            show(await call(`/slots/${encodeURIComponent(token)}`).catch(() => t));
+          }
+        }),
+    );
+  };
+  try {
+    show(await call(`/slots/${encodeURIComponent(token)}`));
+  } catch (e) {
+    box.innerHTML = `<div class="card"><h2>Link not valid</h2><p>${esc(e.message)}</p></div>`;
+  }
+}
+
+if (q.get("slot")) slotPicker(q.get("slot"));
+else if (q.get("t")) tracker(q.get("t"));
 else if (q.get("c")) jobs(q.get("c"));
 else
   box.innerHTML =

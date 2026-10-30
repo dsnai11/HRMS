@@ -919,7 +919,7 @@ async function rmsPage(id) {
           () =>
             viewDialog(
               "Source link (shown once)",
-              `<p>Give this link to whoever connects ${esc(src.kinds[f.kind])} (a developer, the job board or an automation tool such as Zapier). It is shown only now; keep it private.</p><p><input readonly value="${esc(url)}" id="rms-url"></p><p class="muted">The connector sends a POST with JSON for each candidate:</p><pre class="callout">${esc(
+              `${f.kind === "agency" ? `<p><strong>Agency portal</strong>: send this page to the agency. They submit candidates for your open jobs and see only their own candidates' status.</p><p><input readonly value="${esc(location.origin)}/agency.html?k=${esc(r.key)}"></p><h3>For their own software (optional)</h3>` : ""}<p>Give this link to whoever connects ${esc(src.kinds[f.kind])} (a developer, the job board or an automation tool such as Zapier). It is shown only now; keep it private.</p><p><input readonly value="${esc(url)}" id="rms-url"></p><p class="muted">The connector sends a POST with JSON for each candidate:</p><pre class="callout">${esc(
                 JSON.stringify(
                   {
                     job_code: openings[0] ? `J${openings[0].id}` : "J12",
@@ -938,6 +938,7 @@ async function rmsPage(id) {
         );
       },
     );
+  await rmsExtras(id, src, openings, job).catch((e) => notice(e.message, true));
   document.querySelector("#rms-import")?.addEventListener("click", () =>
     dialog(
       `Import resumes for ${job.title}`,
