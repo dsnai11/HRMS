@@ -569,3 +569,62 @@ test("goals, review cycles and training", async (t) => {
   );
   void opt;
 });
+
+test("mid-year check-in, year-end with core competencies, and goal change history", async (t) => {
+  const w = await world(t);
+  const { call, people, db } = w;
+  const hr = people.hr.token,
+    emp = people.emp.token,
+    mgr = people.mgr.token;
+  await db.prepare("UPDATE users SET manager_id=? WHERE id=?").run(people.mgr.id, people.emp.id);
+
+  // Goal history: each changed field, with who changed it.
+  const g = (await call("/goals", { title: "Close 20 loan accounts", weight: 60, due_date: "2026-12-31" }, emp)).data.id;
+  assert.equal((await call(`/goals/${g}`, { weight: 50, title: "Close 25 loan accounts" }, mgr, "PATCH")).status, 200);
+  assert.equal((await call(`/goals/${g}`, { progress: 40 }, emp, "PATCH")).status, 200);
+  assert.equal((await call(`/goals/${g}`, { progress: 40 }, emp, "PATCH")).status, 200, "no change, no row");
+  const h = (await call(`/goals/${g}/history`, undefined, emp)).data.changes;
+  assert.deepEqual(
+    h.map((c) => [c.field, c.old_value, c.new_value, c.changed_by_name]),
+    [["progress", "0", "40", "EMP"], ["weight", "60", "50", "MGR"], ["title", "Close 20 loan accounts", "Close 25 loan accounts", "MGR"]],
+  );
+  assert.equal((await call(`/goals/${g}/history`, undefined, people.pay.token)).status, 403);
+  assert.equal((await call(`/goals/${g}/history`, undefined, hr)).status, 200);
+
+  // Mid-year: comments only.
+  const mid = await call("/admin/review-cycles", { name: "FY26 mid-year", phase: "mid_year", start_date: "2026-04-01", end_date: "2026-09-30" }, hr);
+  assert.equal(mid.status, 201, JSON.stringify(mid.data));
+  assert.equal((await call("/admin/review-cycles", { name: "x", phase: "quarterly", start_date: "2026-04-01", end_date: "2026-09-30" }, hr)).status, 400);
+  const m = (await call("/reviews/mine", undefined, emp)).data[0];
+  assert.equal(m.phase, "mid_year");
+  assert.equal((await call(`/reviews/${m.id}/self`, { comment: "On track for 25" }, emp)).status, 200);
+  assert.equal((await call(`/reviews/${m.id}/manager`, { comment: "Agreed; focus on recoveries" }, mgr)).status, 200);
+  await call(`/admin/review-cycles/${mid.data.id}/close`, {}, hr);
+
+  // Year-end: overall rating required, and competencies.
+  assert.equal((await call("/admin/competencies", { name: "Customer focus" }, emp)).status, 403);
+  const c1 = (await call("/admin/competencies", { name: "Customer focus", sort_order: 1 }, hr)).data.id;
+  const c2 = (await call("/admin/competencies", { name: "Integrity", sort_order: 2 }, hr)).data.id;
+  const c3 = (await call("/admin/competencies", { name: "Old one" }, hr)).data.id;
+  assert.equal((await call("/admin/competencies", { name: "integrity" }, hr)).status, 409);
+  assert.equal((await call(`/admin/competencies/${c3}`, { active: false }, hr, "PATCH")).status, 200);
+  const ye = (await call("/admin/review-cycles", { name: "FY26 year-end", start_date: "2026-04-01", end_date: "2027-03-31" }, hr)).data.id;
+  const r = (await call("/reviews/mine", undefined, emp)).data.find((x) => x.cycle_id === ye);
+  assert.equal(r.phase, "year_end");
+  assert.deepEqual((await call(`/reviews/${r.id}/competencies`, undefined, emp)).data.map((x) => x.name), ["Customer focus", "Integrity"]);
+  assert.equal((await call(`/reviews/${r.id}/competencies`, { ratings: [{ competency_id: c3, rating: 4 }] }, emp, "PUT")).status, 400, "retired");
+  assert.equal((await call(`/reviews/${r.id}/competencies`, { ratings: [{ competency_id: c1, rating: 4 }] }, mgr, "PUT")).status, 409, "manager waits for the self-review");
+  assert.equal((await call(`/reviews/${r.id}/competencies`, { ratings: [{ competency_id: c1, rating: 4 }, { competency_id: c2, rating: 5 }] }, emp, "PUT")).status, 200);
+  assert.equal((await call(`/reviews/${r.id}/self`, { comment: "Closed 26" }, emp)).status, 400, "rating required at year-end");
+  assert.equal((await call(`/reviews/${r.id}/self`, { rating: 4, comment: "Closed 26" }, emp)).status, 200);
+  assert.equal((await call(`/reviews/${r.id}/competencies`, { ratings: [{ competency_id: c1, rating: 5 }] }, emp, "PUT")).status, 409, "locked after submitting");
+  assert.equal((await call(`/reviews/${r.id}/competencies`, { ratings: [{ competency_id: c1, rating: 3, comment: "Slow on complaints" }, { competency_id: c2, rating: 5 }] }, mgr, "PUT")).status, 200);
+  assert.equal((await call(`/reviews/${r.id}/manager`, { rating: 4, comment: "Strong year" }, mgr)).status, 200);
+  // Hidden from the employee until released.
+  const before = (await call(`/reviews/${r.id}/competencies`, undefined, emp)).data;
+  assert.deepEqual(before.map((x) => [x.self_rating, x.manager_rating]), [[4, null], [5, null]]);
+  assert.equal((await call(`/admin/reviews/${r.id}/release`, {}, hr)).status, 200);
+  const after = (await call(`/reviews/${r.id}/competencies`, undefined, emp)).data;
+  assert.deepEqual(after.map((x) => [x.manager_rating, x.manager_comment]), [[3, "Slow on complaints"], [5, null]]);
+  assert.equal((await call(`/reviews/${r.id}/competencies`, undefined, people.pay.token)).status, 403);
+});

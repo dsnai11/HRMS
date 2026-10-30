@@ -183,6 +183,20 @@ export async function notifyFromAudit(app, actor, action, d, companyId) {
       email: true,
     });
   }
+  if (action === "separation_decided") {
+    const r = await db
+      .prepare("SELECT s.requested_by,u.name FROM separation_requests s JOIN users u ON u.id=s.user_id WHERE s.id=?")
+      .get(d.id);
+    return to([r?.requested_by], {
+      kind: "exit",
+      title:
+        d.decision === "approved"
+          ? `HR approved the separation of ${r?.name}`
+          : `HR did not approve the separation of ${r?.name}`,
+      link: "team",
+      email: true,
+    });
+  }
   if (action === "exit_decided") {
     const x = await db
       .prepare("SELECT user_id FROM exits WHERE id=?")

@@ -29,7 +29,7 @@ async function load() {
     return;
   }
   document.title = `${d.company} · ${d.agency}`;
-  box.innerHTML = `<header><p class="eyebrow">${esc(d.company)}</p><h1>${esc(d.agency)}</h1><p class="muted">Submit candidates for open jobs and follow their status. You see only the candidates you sent.</p></header>
+  box.innerHTML = `<header><img class="page-logo" src="/brand/logo.png" alt=""><p class="eyebrow">${esc(d.company)}</p><h1>${esc(d.agency)}</h1><p class="muted">Submit candidates for open jobs and follow their status. You see only the candidates you sent.</p></header>
   <div class="card"><h2>Submit a candidate</h2><form id="sub" class="form-grid">
     <label>Job<select name="job" required>${d.jobs.map((j) => `<option value="${j.id}">${esc(j.code)} · ${esc(j.title)}${j.location || j.branch_name ? ` · ${esc(j.location || j.branch_name)}` : ""}</option>`).join("")}</select></label>
     <label>Name<input name="name" maxlength="100" required></label>

@@ -32,6 +32,10 @@ Addetto HRMS (Intero Software LLP) is an Indian HRMS with an employee mobile app
 | Forgot password                                            | yes             | Yes: emailed link (needs email set up and `APP_URL`); otherwise HR resets                                     |
 | Version-gated punching                                     | yes             | Yes: set the oldest app version allowed to punch                                                              |
 | Data security: encrypted sensitive fields                  | yes             | Yes (AES-256-GCM), two-factor on the web, session controls                                                    |
+| Absconding and manager-initiated separation                | yes             | Yes: absconding list, manager asks HR to separate, HR approves into an exit; manager's view on resignations   |
+| Bill-backed salary reimbursements for TDS                  | yes             | Yes: bill-backed components, bills verified by payroll, verified amount off taxable income                    |
+| Mid-year and year-end appraisal, competencies              | yes             | Yes: cycle phases, core competencies rated self then manager, goal change history                             |
+| Classroom training sessions                                | yes             | Yes: scheduled sessions, invitations, seats, attendance completing tracked training                           |
 
 ## Still to build to match
 

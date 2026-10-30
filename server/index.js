@@ -47,6 +47,10 @@ import { registerCases } from "./routes/cases.js";
 import { registerSurveys } from "./routes/surveys.js";
 import { registerDelegations } from "./routes/delegations.js";
 import { registerOvertime } from "./routes/overtime.js";
+import { registerSeparation } from "./routes/separation.js";
+import { registerSalaryBills } from "./routes/salary-bills.js";
+import { registerCompetencies } from "./routes/competencies.js";
+import { registerTrainingSessions } from "./routes/training-sessions.js";
 import { registerSso } from "./routes/sso.js";
 import { registerRmsPlus } from "./routes/rms-plus.js";
 import { registerWhatsapp } from "./routes/whatsapp.js";
@@ -107,6 +111,10 @@ const STATIC = {
   "/surveys.js": ["surveys.js", "text/javascript"],
   "/overtime.js": ["overtime.js", "text/javascript"],
   "/rms-plus.js": ["rms-plus.js", "text/javascript"],
+  "/separation.js": ["separation.js", "text/javascript"],
+  "/salary-bills.js": ["salary-bills.js", "text/javascript"],
+  "/appraisal.js": ["appraisal.js", "text/javascript"],
+  "/sessions.js": ["sessions.js", "text/javascript"],
   "/vendor/leaflet.js": ["../node_modules/leaflet/dist/leaflet.js", "text/javascript"],
   "/vendor/leaflet.css": ["../node_modules/leaflet/dist/leaflet.css", "text/css"],
   "/join.html": ["join.html", "text/html"],
@@ -120,6 +128,10 @@ const STATIC = {
   "/payslip.html": ["payslip.html", "text/html"],
   "/payslip.js": ["payslip.js", "text/javascript"],
   "/styles.css": ["styles.css", "text/css"],
+  "/brand/logo.png": ["brand/logo.png", "image/png"],
+  "/brand/favicon.png": ["brand/favicon.png", "image/png"],
+  "/brand/icon-192.png": ["brand/icon-192.png", "image/png"],
+  "/favicon.ico": ["brand/favicon.png", "image/png"],
 };
 
 const TWO_FACTOR_SETUP = new Set(["/api/me", "/api/2fa", "/api/2fa/setup", "/api/2fa/enable", "/api/logout", "/api/password"]);
@@ -254,6 +266,10 @@ export function createApp({
     registerSurveys,
     registerDelegations,
     registerOvertime,
+    registerSeparation,
+    registerSalaryBills,
+    registerCompetencies,
+    registerTrainingSessions,
     registerSso,
     registerRmsPlus,
     registerWhatsapp,
@@ -341,16 +357,12 @@ export function createApp({
       }
       if (!path.startsWith("/api/")) {
         if (method !== "GET") throw new HttpError(405, "Method not allowed.");
-        if (path === "/favicon.ico") {
-          res.writeHead(204, headers);
-          return res.end();
-        }
         if (!STATIC[path]) throw new HttpError(404, "Not found.");
         const [file, type] = STATIC[path];
         const content = await readFile(new URL(file, publicDir));
         res.writeHead(200, {
           ...headers,
-          "Content-Type": `${type}; charset=utf-8`,
+          "Content-Type": type.startsWith("image/") ? type : `${type}; charset=utf-8`,
         });
         return res.end(content);
       }

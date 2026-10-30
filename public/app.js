@@ -129,12 +129,12 @@ async function busy(button, fn) {
   }
 }
 const brand = (name = me?.company?.name || config.company) =>
-  `<div class="brand"><span class="brand-icon">${esc(name.trim()[0]?.toUpperCase() || "H")}</span><div>${esc(name)}<small>PEOPLE & WORKPLACE</small></div></div>`;
+  `<div class="brand"><img class="brand-logo" src="/brand/logo.png" alt=""><div>${esc(name)}<small>HRMS</small></div></div>`;
 const empty = (title, description) =>
   `<div class="empty"><div class="empty-icon">◎</div><strong>${esc(title)}</strong>${esc(description)}</div>`;
 function login() {
   if (config.setupRequired) return setup();
-  app.innerHTML = `<div class="login"><section class="login-story">${brand()}<div><div class="eyebrow">${esc(config.company)}</div><h1>Employee Engagement Portal</h1><p>Creating a great place to work.</p></div><footer class="muted">© ${new Date().getFullYear()}, ${esc(config.company)}</footer></section><section class="login-panel"><h2>Sign In</h2><p class="muted">Use your company email and password.</p><form id="login"><label>Email address<input type="email" name="email" autocomplete="username" placeholder="you@company.com" required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button>Sign in →</button><a href="#" id="forgot" class="forgot">Forgot password?</a></form><div id="sso"></div><p class="login-footer">Employees: use the credentials provided by your administrator.<br>Location is requested only when you punch in or out.</p></section></div>`;
+  app.innerHTML = `<div class="login"><section class="login-story">${brand()}<div><div class="eyebrow">${esc(config.company)}</div><h1>Your workplace, in one place</h1><p>Attendance, leave, pay and requests for everyone at ${esc(config.company)}.</p></div><footer class="muted">© ${new Date().getFullYear()}, ${esc(config.company)}</footer></section><section class="login-panel"><h2>Sign In</h2><p class="muted">Use your company email and password.</p><form id="login"><label>Email address<input type="email" name="email" autocomplete="username" placeholder="you@company.com" required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button>Sign in →</button><a href="#" id="forgot" class="forgot">Forgot password?</a></form><div id="sso"></div><p class="login-footer">Employees: use the credentials provided by your administrator.<br>Location is requested only when you punch in or out.</p></section></div>`;
   document.querySelector("#forgot")?.addEventListener("click", forgotDialog);
   // Google Workspace / Microsoft 365 sign-in, when the server has it set up.
   const ssoErrors = {
@@ -1146,13 +1146,15 @@ async function profileView(id) {
 
 async function teamView(id) {
   const members = await api("/team/members");
+  const separation = await teamSeparationHtml();
   if (id !== renderId) return;
   document.querySelector("#content").innerHTML =
     heading(
       "My team",
       "People who report to you, directly or through others.",
     ) +
-    `<div class="card"><h2>Members</h2><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Relation</th><th>Status</th></tr></thead><tbody>${members.map((m) => `<tr><td>${esc(m.name)}<small>${esc(m.employee_code || "")} · ${esc(m.email)}</small></td><td>${esc(m.department_name || "—")}<small>${esc(m.designation_name || "")}</small></td><td>${m.direct ? "Direct report" : "Indirect"}</td><td><span class="pill ${m.active ? "" : "neutral"}">${m.active ? "Active" : "Inactive"}</span></td></tr>`).join("")}</tbody></table></div></div><div class="card"><form class="filters" id="filters"><label>From<input type="date" name="from" value="${today()}" required></label><label>To<input type="date" name="to" value="${today()}" required></label><button>Show attendance</button></form></div><div class="card" id="records">Loading…</div>`;
+    `<div class="card"><h2>Members</h2><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Relation</th><th>Status</th></tr></thead><tbody>${members.map((m) => `<tr><td>${esc(m.name)}<small>${esc(m.employee_code || "")} · ${esc(m.email)}</small></td><td>${esc(m.department_name || "—")}<small>${esc(m.designation_name || "")}</small></td><td>${m.direct ? "Direct report" : "Indirect"}</td><td><span class="pill ${m.active ? "" : "neutral"}">${m.active ? "Active" : "Inactive"}</span></td></tr>`).join("")}</tbody></table></div></div><div class="card"><form class="filters" id="filters"><label>From<input type="date" name="from" value="${today()}" required></label><label>To<input type="date" name="to" value="${today()}" required></label><button>Show attendance</button></form></div><div class="card" id="records">Loading…</div>${separation}`;
+  teamSeparationWire(members);
   const load = async (query) => {
     const rows = await api(`/team/attendance?${query}`);
     if (id === renderId)

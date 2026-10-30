@@ -6,13 +6,13 @@ async function learningPage(id) {
   const manage = has("performance.manage");
   const tabs = {
     mine: "My learning",
-    ...(manage ? { manage: "Manage courses" } : {}),
+    ...(manage ? { manage: "Manage courses", sessions: "Training sessions" } : {}),
   };
   if (!tabs[learnTab]) learnTab = "mine";
   const html = await learningHtml(learnTab);
   if (id !== renderId) return;
   document.querySelector("#content").innerHTML =
-    heading("Learning", "Courses, quizzes and certificates.") +
+    heading("Learning", "Courses, quizzes, certificates and training sessions.") +
     `<div class="tabbar">${Object.entries(tabs)
       .map(
         ([k, l]) =>
@@ -26,9 +26,13 @@ async function learningPage(id) {
 }
 
 async function learningHtml(tab) {
+  if (tab === "sessions") return sessionsAdminHtml();
   if (tab === "mine") {
-    const rows = await api("/trainings/mine");
-    return `<div class="card"><h2>My learning</h2>${
+    const [rows, sessions] = await Promise.all([
+      api("/trainings/mine"),
+      mySessionsHtml(),
+    ]);
+    return `${sessions}<div class="card"><h2>My learning</h2>${
       rows.length
         ? `<div class="table-wrap"><table><thead><tr><th>Course</th><th>Hours</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>${rows
             .map(
@@ -218,6 +222,7 @@ async function courseBuilder(id) {
 }
 
 function learningWire(tab) {
+  if (tab === "sessions") return sessionsAdminWire();
   const on = (s, fn) =>
     document.querySelector(s)?.addEventListener("click", fn);
   const each = (s, fn) =>

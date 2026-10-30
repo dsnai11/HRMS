@@ -96,7 +96,7 @@ function inWords(n) {
           `<tr><td>${esc(x.name)}</td><td class="num">${inr(x.amount)}</td></tr>`,
       )
       .join("");
-  slip.innerHTML = `<article class="slip"><header><div><h1>${esc(d.company || "")}</h1><p>Payslip for ${monthLabel(d.month)}</p></div><button class="no-print" id="print">Print / save as PDF</button></header>
+  slip.innerHTML = `<article class="slip"><header><div><img class="page-logo" src="/brand/logo.png" alt=""><h1>${esc(d.company || "")}</h1><p>Payslip for ${monthLabel(d.month)}</p></div><button class="no-print" id="print">Print / save as PDF</button></header>
     <table class="meta"><tr><td>Employee</td><td><strong>${esc(d.employee.name)}</strong></td><td>Employee code</td><td>${esc(d.employee.employee_code || "—")}</td></tr>
     <tr><td>Department</td><td>${esc(d.employee.department || "—")}</td><td>Designation</td><td>${esc(d.employee.designation || "—")}</td></tr>
     <tr><td>Days in month</td><td>${d.days_in_month}</td><td>Paid days</td><td>${d.paid_days}${d.lop_days ? ` (loss of pay ${d.lop_days})` : ""}</td></tr></table>

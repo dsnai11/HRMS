@@ -34,6 +34,7 @@ const EXIT_KIND = {
   termination: "Termination",
   retirement: "Retirement",
   end_of_contract: "End of contract",
+  absconding: "Absconding",
   other: "Other",
 };
 const EXIT_STATUS = {
@@ -159,7 +160,7 @@ async function hiringTabHtml(tab) {
   }
   if (tab === "changes") return await changesHtml();
   const rows = await api("/admin/exits");
-  return `<div class="card"><div class="card-head"><div><h2>Exits</h2><p class="muted">Resignations and exits, with clearance and full and final settlement.</p></div><button id="new-exit">Start an exit</button></div>${
+  return `${await separationAdminHtml()}<div class="card"><div class="card-head"><div><h2>Exits</h2><p class="muted">Resignations and exits, with clearance and full and final settlement.</p></div><button id="new-exit">Start an exit</button></div>${
     rows.length
       ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th>Notice given</th><th>Last day</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((x) => `<tr><td>${esc(x.employee_name)}<small>${esc(x.employee_code || "")} · ${esc(x.department_name || "")}</small></td><td>${EXIT_KIND[x.kind]}</td><td>${fmtDate(x.notice_given_on)}</td><td>${x.last_working_day ? fmtDate(x.last_working_day) : "—"}</td><td><span class="pill ${["rejected", "withdrawn", "completed"].includes(x.status) ? "neutral" : ""}">${EXIT_STATUS[x.status]}</span></td><td><button class="secondary" data-exit="${x.id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
       : empty(
@@ -269,6 +270,7 @@ async function hiringWire(tab) {
   } else {
     on("#new-exit", startExitDialog);
     each("[data-exit]", (b) => exitView(Number(b.dataset.exit)));
+    separationAdminWire();
   }
 }
 
@@ -727,7 +729,7 @@ async function exitView(id) {
     );
   const money = (l) =>
     `<div class="kv"><span>${esc(l.name)}${l.note ? `<small>${esc(l.note)}</small>` : ""}</span><strong>${l.kind === "deduction" ? "−" : ""}${inr(l.amount)}</strong></div>`;
-  const html = `<p class="muted">${esc(x.employee_name)} · ${EXIT_KIND[x.kind]} · notice ${fmtDate(x.notice_given_on)} (${x.notice_days} days) · last day ${x.last_working_day ? fmtDate(x.last_working_day) : "to be set"} · <span class="pill">${EXIT_STATUS[x.status]}</span></p>${x.reason ? `<p>${esc(x.reason)}${x.requested_last_day ? ` (asked to leave on ${fmtDate(x.requested_last_day)})` : ""}</p>` : ""}
+  const html = `<p class="muted">${esc(x.employee_name)} · ${EXIT_KIND[x.kind]} · notice ${fmtDate(x.notice_given_on)} (${x.notice_days} days) · last day ${x.last_working_day ? fmtDate(x.last_working_day) : "to be set"} · <span class="pill">${EXIT_STATUS[x.status]}</span></p>${x.reason ? `<p>${esc(x.reason)}${x.requested_last_day ? ` (asked to leave on ${fmtDate(x.requested_last_day)})` : ""}</p>` : ""}${exitManagerViewHtml(x)}
   ${x.status === "pending" ? '<div class="actions"><button id="accept">Accept…</button> <button class="ghost" id="decline">Do not accept</button></div>' : ""}
   ${x.status === "accepted" ? `<h3>Clearance</h3>${x.clearance.map((c) => `<label class="check"><input type="checkbox" data-clear="${c.id}" ${c.cleared ? "checked" : ""}> ${esc(c.item)} <small>${esc(c.department)}</small></label>`).join("")}` : ""}
   ${x.status === "accepted" ? `<h3>Full and final settlement</h3>${x.settlement ? `<p class="muted">Posted to the ${monthLabel(x.settlement.pay_in_month)} payroll, where tax and net pay are worked out.</p>${x.settlement.data.lines.map(money).join("")}${x.settlement.data.info.map((i) => `<p class="muted">${esc(i)}</p>`).join("")}${canPay ? '<div class="actions"><button class="ghost" id="void-settle">Void and redo</button></div>' : ""}` : preview ? `${preview.lines.map(money).join("") || '<p class="muted">No earnings or recoveries calculated.</p>'}${preview.info.map((i) => `<p class="muted">${esc(i)}</p>`).join("")}${canPay ? '<div class="actions"><button id="post-settle">Post to payroll…</button></div>' : ""}` : '<p class="muted">Payroll staff prepare the settlement.</p>'}` : ""}
