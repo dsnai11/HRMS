@@ -62,6 +62,6 @@ export function registerDownloadLinks(router, app) {
       "Content-Disposition": `inline; filename="${String(f.name).replace(/[^A-Za-z0-9._ -]/g, "_").replace(/\.(pdf|jpg|png)$/i, "")}.${ext}"`,
       "Cache-Control": "private, no-store",
     });
-    res.end(Buffer.from(f.data, "base64"));
+    res.end(await app.blobs.bytes(f.data));
   });
 }

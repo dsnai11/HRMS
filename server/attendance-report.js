@@ -1,4 +1,5 @@
 import { HttpError, csvCell, integer } from "./http.js";
+import { addDays, localToUtcMs } from "./calendar.js";
 
 const validDate = (s) =>
   /^\d{4}-\d{2}-\d{2}$/.test(s) &&
@@ -13,7 +14,7 @@ export const TEAM_SQL = `WITH RECURSIVE team(id) AS (
 
 export async function loadAttendance(
   app,
-  { companyId, query, teamOf, scope },
+  { companyId, query, teamOf, scope, page = null, pageSize = 100 },
 ) {
   const from =
     query.get("from") || app.dayOf(new Date(app.clock()).toISOString());
@@ -25,11 +26,12 @@ export async function loadAttendance(
     Date.parse(to) - Date.parse(from) > 93 * 86400000
   )
     throw new HttpError(400, "Choose a valid date range of at most 93 days.");
+  // Exact local-day bounds, so the database can page and count.
   const where = ["u.company_id=?", "s.in_at>=?", "s.in_at<?"];
   const params = [
     companyId,
-    new Date(Date.parse(from) - 86400000).toISOString(),
-    new Date(Date.parse(to) + 172800000).toISOString(),
+    new Date(localToUtcMs(from, "00:00", app.timezone)).toISOString(),
+    new Date(localToUtcMs(addDays(to, 1), "00:00", app.timezone)).toISOString(),
   ];
   for (const key of ["department_id", "branch_id", "user_id"]) {
     const v = query.get(key);
@@ -37,6 +39,11 @@ export async function loadAttendance(
       where.push(key === "user_id" ? "u.id=?" : `u.${key}=?`);
       params.push(integer(Number(v)));
     }
+  }
+  // Every word must appear in the name, code or email.
+  for (const w of String(query.get("q") ?? "").toLowerCase().split(/\s+/).filter(Boolean).slice(0, 5)) {
+    where.push("LOWER(CONCAT_WS(' ',u.name,u.employee_code,u.email)) LIKE ?");
+    params.push(`%${w}%`);
   }
   if (teamOf) {
     where.push(`u.id IN (${TEAM_SQL})`);
@@ -47,20 +54,17 @@ export async function loadAttendance(
     where.push(scope.sql.replace(/^ AND /, ""));
     params.push(...scope.params);
   }
-  return (
+  const from_ = `FROM shifts s JOIN users u ON u.id=s.user_id
+         LEFT JOIN departments d ON d.id=u.department_id LEFT JOIN branches b ON b.id=u.branch_id
+         WHERE ${where.join(" AND ")}`;
+  const rows = (
     await app.db
       .prepare(
         `SELECT s.*,(SELECT COUNT(*) FROM punch_photos p WHERE p.shift_id=s.id) selfies,u.name employee_name,u.email,u.employee_code,d.name department_name,b.name branch_name
-         FROM shifts s JOIN users u ON u.id=s.user_id
-         LEFT JOIN departments d ON d.id=u.department_id LEFT JOIN branches b ON b.id=u.branch_id
-         WHERE ${where.join(" AND ")} ORDER BY s.in_at DESC`,
+         ${from_} ORDER BY s.in_at DESC,s.id DESC${page !== null ? ` LIMIT ${pageSize} OFFSET ${page * pageSize}` : ""}`,
       )
       .all(...params)
   )
-    .filter((s) => {
-      const d = app.dayOf(s.in_at);
-      return d >= from && d <= to;
-    })
     .map((s) => ({
       ...s,
       hours:
@@ -68,6 +72,9 @@ export async function loadAttendance(
           Date.parse(s.in_at)) /
         3600000,
     }));
+  if (page === null) return rows;
+  const total = Number((await app.db.prepare(`SELECT COUNT(*) n ${from_}`).get(...params)).n);
+  return { rows, total, page, page_size: pageSize };
 }
 
 const CSV_COLUMNS = [

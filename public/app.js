@@ -445,6 +445,61 @@ function dayCell(s) {
     ? `<small>Out after ${time(s.required_out_at)} for a full day</small>`
     : "—";
 }
+// Long lists (thousands of people) are shown 100 at a time with a search box. The rows
+// are already loaded; `wire` re-attaches the row buttons after every redraw.
+function pagedList(el, rows, { head, row, text, wire, size = 100, label = "rows", placeholder = "Search name or code", state = { q: "", page: 0 } }) {
+  let { q, page } = state;
+  el.innerHTML = `<div class="pl-bar"><input type="search" class="pl-q" placeholder="${esc(placeholder)}" aria-label="Search"><span class="muted pl-info"></span><span class="spacer"></span><button type="button" class="ghost pl-prev">← Previous</button><button type="button" class="ghost pl-next">Next →</button></div><div class="pl-body"></div>`;
+  const [input_, info, prev, next, body] = [".pl-q", ".pl-info", ".pl-prev", ".pl-next", ".pl-body"].map((s) => el.querySelector(s));
+  const draw = () => {
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const shown = words.length ? rows.filter((r) => words.every((w) => text(r).toLowerCase().includes(w))) : rows;
+    const pages = Math.max(1, Math.ceil(shown.length / size));
+    page = Math.min(page, pages - 1);
+    body.innerHTML = shown.length
+      ? `<div class="table-wrap"><table><thead>${head}</thead><tbody>${shown.slice(page * size, (page + 1) * size).map(row).join("")}</tbody></table></div>`
+      : empty("Nothing found", words.length ? "No rows match the search." : "Nothing to show yet.");
+    info.textContent = `${shown.length.toLocaleString("en-IN")} ${label}${pages > 1 ? ` · page ${page + 1} of ${pages}` : ""}`;
+    prev.hidden = next.hidden = pages <= 1;
+    prev.disabled = page === 0;
+    next.disabled = page >= pages - 1;
+    Object.assign(state, { q, page });
+    wire?.(body);
+  };
+  input_.value = q;
+  let timer;
+  input_.oninput = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => ((q = input_.value), (page = 0), draw()), 200);
+  };
+  prev.onclick = () => (page--, draw());
+  next.onclick = () => (page++, draw());
+  draw();
+}
+// The same bar for lists the server pages: `load(page, q)` resolves to { rows, total, page_size }.
+async function serverPagedList(el, { load, render: draw, label = "rows", placeholder = "Search name or code" }) {
+  let q = "",
+    page = 0;
+  el.innerHTML = `<div class="pl-bar"><input type="search" class="pl-q" placeholder="${esc(placeholder)}" aria-label="Search"><span class="muted pl-info"></span><span class="spacer"></span><button type="button" class="ghost pl-prev">← Previous</button><button type="button" class="ghost pl-next">Next →</button></div><div class="pl-body">Loading…</div>`;
+  const [input_, info, prev, next, body] = [".pl-q", ".pl-info", ".pl-prev", ".pl-next", ".pl-body"].map((s) => el.querySelector(s));
+  const go = async () => {
+    const d = await load(page, q);
+    const pages = Math.max(1, Math.ceil(d.total / d.page_size));
+    body.innerHTML = draw(d.rows);
+    info.textContent = `${d.total.toLocaleString("en-IN")} ${label}${pages > 1 ? ` · page ${page + 1} of ${pages}` : ""}`;
+    prev.hidden = next.hidden = pages <= 1;
+    prev.disabled = page === 0;
+    next.disabled = page >= pages - 1;
+  };
+  let timer;
+  input_.oninput = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => ((q = input_.value), (page = 0), void go()), 300);
+  };
+  prev.onclick = () => (page--, void go());
+  next.onclick = () => (page++, void go());
+  await go();
+}
 function table(rows) {
   return rows.length
     ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Workplace</th><th>Punch in</th><th>Punch out</th><th>Hours</th><th>Status</th><th>Day</th><th>GPS records</th><th>Selfie</th></tr></thead><tbody>${rows.map((s) => `<tr><td><div class="person"><span class="avatar">${initials(s.employee_name || me.name)}</span><div>${esc(s.employee_name || me.name)}<small>${esc(s.email || me.email)}</small></div></div></td><td>${esc(s.workplace_name)}</td><td>${time(s.in_at)}</td><td>${time(s.out_at)}</td><td>${(((s.out_at ? Date.parse(s.out_at) : Date.now()) - Date.parse(s.in_at)) / 3600000).toFixed(2)}</td><td><span class="pill ${s.out_at ? "neutral" : ""}">${s.out_at ? "Completed" : "Working"}</span></td><td>${dayCell(s)}</td><td><a href="https://www.google.com/maps?q=${s.in_latitude},${s.in_longitude}" target="_blank" rel="noreferrer">In · ±${Math.round(s.in_accuracy)}m ↗</a>${s.out_at ? `<small><a href="https://www.google.com/maps?q=${s.out_latitude},${s.out_longitude}" target="_blank" rel="noreferrer">Out · ±${Math.round(s.out_accuracy)}m ↗</a></small>` : ""}</td><td>${Number(s.selfies) && has("attendance.read") && s.employee_name ? `<button class="ghost" data-selfie="${s.id}">View</button>` : "—"}</td></tr>`).join("")}</tbody></table></div>`
@@ -509,7 +564,7 @@ async function render() {
     if (page === "overview") {
       const [stats, active, sites, home] = await Promise.all([
         api("/admin/overview"),
-        api("/admin/active"),
+        api("/admin/active?limit=20"),
         api("/admin/workplaces"),
         homeData(),
       ]);
@@ -540,7 +595,7 @@ async function render() {
           )
           .join(
             "",
-          )}</div><div class="grid-two">${announcementsHtml(home.announcements)}${holidaysHtml(home.holidays)}</div><div class="card"><div class="card-head"><div><h2>Who’s working now</h2><p class="muted">Most recent punch location. No continuous tracking.</p></div><span class="pill">${stats.active} active shifts</span></div>${table(active)}</div><div class="grid-two"><div class="card"><h2>Your workplaces</h2>${sites.length ? sites.map((s) => `<div class="site"><h3>${esc(s.name)}</h3><p class="muted">${s.latitude.toFixed(5)}, ${s.longitude.toFixed(5)}</p><span class="pill neutral">${s.radius} m radius</span></div>`).join("") : empty("Set up your first workplace", "Open Workplaces to define an attendance boundary.")}</div><div class="card"><div class="eyebrow">Designed for trust</div><h2>Right place. Right record.</h2><p class="muted">Employees punch in and out inside their assigned workplace. Every punch records server time and a fresh GPS reading.</p><div class="callout">Location is captured only at attendance events. GPS uncertainty must fit inside the workplace boundary.</div></div></div>`;
+          )}</div><div class="grid-two">${announcementsHtml(home.announcements)}${holidaysHtml(home.holidays)}</div><div class="card"><div class="card-head"><div><h2>Who’s working now</h2><p class="muted">Most recent punch location. No continuous tracking.</p></div><span class="pill">${stats.active} active shifts</span></div>${table(active)}${stats.active > active.length ? `<p class="muted">Showing the latest ${active.length}. See everyone under Administration → Attendance records.</p>` : ""}</div><div class="grid-two"><div class="card"><h2>Your workplaces</h2>${sites.length ? sites.map((s) => `<div class="site"><h3>${esc(s.name)}</h3><p class="muted">${s.latitude.toFixed(5)}, ${s.longitude.toFixed(5)}</p><span class="pill neutral">${s.radius} m radius</span></div>`).join("") : empty("Set up your first workplace", "Open Workplaces to define an attendance boundary.")}</div><div class="card"><div class="eyebrow">Designed for trust</div><h2>Right place. Right record.</h2><p class="muted">Employees punch in and out inside their assigned workplace. Every punch records server time and a fresh GPS reading.</p><div class="callout">Location is captured only at attendance events. GPS uncertainty must fit inside the workplace boundary.</div></div></div>`;
       document.querySelector("#refresh").onclick = render;
       announcementsWire();
     } else if (page === "employees") {
@@ -578,11 +633,12 @@ async function render() {
       let query = new URLSearchParams(
         new FormData(document.querySelector("#filters")),
       );
-      const load = async () => {
-        const rows = await api(`/admin/attendance?${query}`);
-        if (id === renderId)
-          document.querySelector("#records").innerHTML = table(rows);
-      };
+      const load = () =>
+        serverPagedList(document.querySelector("#records"), {
+          load: (p, q) => api(`/admin/attendance?${query}&page=${p}&q=${encodeURIComponent(q)}`),
+          render: table,
+          label: "records",
+        });
       document.querySelector("#filters").onsubmit = (e) => {
         e.preventDefault();
         busy(e.submitter, async () => {
@@ -604,36 +660,25 @@ async function render() {
           "Registered phones",
           "Each employee can record attendance from one approved phone. Approve a phone only after confirming the employee just registered it.",
         ) +
-        `<div class="card"><div class="card-head"><div><h2>Phones</h2><p class="muted">Approving a new phone replaces the employee's current one.</p></div><span class="pill ${pendingCount ? "" : "neutral"}">${pendingCount} awaiting approval</span></div>${
-          devices.length
-            ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Phone</th><th>Registered</th><th>Last used</th><th>Status</th><th></th></tr></thead><tbody>${devices
-                .map(
-                  (d) =>
-                    `<tr><td>${esc(d.employee_name)}<br><small>${esc(d.email)}</small></td><td>${esc([d.platform, d.model].filter(Boolean).join(" · "))}</td><td>${time(d.registered_at)}</td><td>${time(d.last_seen_at)}</td><td><span class="pill ${d.status === "approved" ? "" : "neutral"}">${esc(d.status)}</span></td><td>${d.status !== "approved" ? `<button class="secondary" data-device="${d.id}" data-status="approved">Approve</button> ` : ""}${d.status !== "revoked" ? `<button class="ghost" data-device="${d.id}" data-status="revoked">Remove</button>` : ""}</td></tr>`,
-                )
-                .join("")}</tbody></table></div>`
-            : empty(
-                "No phones registered",
-                "Phones appear here when employees sign in to the mobile app.",
-              )
-        }</div>`;
-      document.querySelectorAll("[data-device]").forEach(
-        (b) =>
-          (b.onclick = () =>
-            busy(b, async () => {
-              await api(
-                `/admin/devices/${b.dataset.device}`,
-                { status: b.dataset.status },
-                "PATCH",
-              );
-              notice(
-                b.dataset.status === "approved"
-                  ? "Phone approved."
-                  : "Phone removed.",
-              );
-              await render();
-            })),
-      );
+        `<div class="card"><div class="card-head"><div><h2>Phones</h2><p class="muted">Approving a new phone replaces the employee's current one.</p></div><span class="pill ${pendingCount ? "" : "neutral"}">${pendingCount} awaiting approval</span></div><div id="dev-list"></div></div>`;
+      pagedList(document.querySelector("#dev-list"), devices, {
+        head: "<tr><th>Employee</th><th>Phone</th><th>Registered</th><th>Last used</th><th>Status</th><th></th></tr>",
+        row: (d) =>
+          `<tr><td>${esc(d.employee_name)}<br><small>${esc(d.employee_code || "")} · ${esc(d.email)}</small></td><td>${esc([d.platform, d.model].filter(Boolean).join(" · "))}</td><td>${time(d.registered_at)}</td><td>${time(d.last_seen_at)}</td><td><span class="pill ${d.status === "approved" ? "" : "neutral"}">${esc(d.status)}</span></td><td>${d.status !== "approved" ? `<button class="secondary" data-device="${d.id}" data-status="approved">Approve</button> ` : ""}${d.status !== "revoked" ? `<button class="ghost" data-device="${d.id}" data-status="revoked">Remove</button>` : ""}</td></tr>`,
+        text: (d) => `${d.employee_name} ${d.employee_code || ""} ${d.email} ${d.status} ${d.model || ""}`,
+        label: "phones",
+        placeholder: "Search name, code, email or status (e.g. pending)",
+        wire: (el) =>
+          el.querySelectorAll("[data-device]").forEach(
+            (b) =>
+              (b.onclick = () =>
+                busy(b, async () => {
+                  await api(`/admin/devices/${b.dataset.device}`, { status: b.dataset.status }, "PATCH");
+                  notice(b.dataset.status === "approved" ? "Phone approved." : "Phone removed.");
+                  await render();
+                })),
+          ),
+      });
     } else if (page === "security") {
       const events = await api("/admin/security-events");
       if (id !== renderId) return;

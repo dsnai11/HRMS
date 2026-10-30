@@ -69,6 +69,9 @@ const DEFAULT_TYPES = [
   },
 ];
 
+// Companies whose leave is being brought up to date in the background.
+const accruing = new Map();
+
 export function registerLeave(router, app) {
   const { db, transaction, clock, dayOf } = app;
   const today = () => dayOf(now(app));
@@ -522,13 +525,33 @@ export function registerLeave(router, app) {
   router.post(
     "/api/admin/leave/accrue",
     { perm: "leave.manage" },
-    async ({ companyId, send, audit }) => {
+    async ({ user, companyId, send, audit }) => {
+      // Balances also catch up whenever someone looks at them; this brings everyone up to
+      // date at once. With thousands of people it runs in the background.
+      if (accruing.has(companyId))
+        throw new HttpError(409, "Leave is already being brought up to date. You will get a notification when it is done.");
       const people = await db
         .prepare("SELECT * FROM users WHERE company_id=? AND active=1")
         .all(companyId);
-      for (const p of people) await ensureAccruals(app, p, today());
-      await audit("leave_accrual_run", { employees: people.length });
-      return send(200, { employees: people.length });
+      const run = (async () => {
+        for (const p of people) await ensureAccruals(app, p, today());
+      })();
+      accruing.set(companyId, run);
+      const done = run
+        .then(async () => {
+          await audit("leave_accrual_run", { employees: people.length });
+          await app.notify([user.id], {
+            companyId,
+            kind: "leave",
+            title: `Leave balances are up to date for ${people.length} people`,
+            link: "leaveadmin",
+          });
+        })
+        .catch((e) => console.error("Leave accrual failed:", e.message))
+        .finally(() => accruing.delete(companyId));
+      // Small companies finish within the request, as before.
+      const quick = await Promise.race([done.then(() => true), new Promise((r) => setTimeout(() => r(false), 8000))]);
+      return send(quick ? 200 : 202, { employees: people.length, ...(quick ? {} : { running: true }) });
     },
   );
   router.post(

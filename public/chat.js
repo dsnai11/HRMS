@@ -1,7 +1,10 @@
 // ---- internal chat ------------------------------------------------------------------------------------
 // Messages arrive by polling /chat/updates every few seconds while the portal is
 // open. Desktop alerts use the browser Notification API once the person allows it.
-const CHAT_POLL_MS = 5000;
+// Every 10 seconds while the portal is in front, every 30 while it is in a background tab:
+// with hundreds of HR and manager browsers open, polling is most of the server's traffic.
+const CHAT_POLL_MS = 10000;
+const CHAT_POLL_HIDDEN_MS = 30000;
 const chat = { latest: null, unread: 0, timer: null, room: null, oldest: null, readers: [] };
 
 function chatBadge() {
@@ -14,6 +17,8 @@ function chatBadge() {
 // sign-in screen while they are typing.
 async function chatPoll() {
   if (!me || me.role === "super_admin") return chatStop();
+  if (document.hidden && Date.now() - (chat.polledAt ?? 0) < CHAT_POLL_HIDDEN_MS) return;
+  chat.polledAt = Date.now();
   const since = chat.latest === null ? "" : `?since=${chat.latest}`;
   let data;
   try {

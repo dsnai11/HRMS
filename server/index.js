@@ -48,6 +48,7 @@ import {
   scheduleReports,
 } from "./scheduled-reports.js";
 import { scheduleRetention } from "./retention.js";
+import { createBlobStore } from "./blob-store.js";
 import {
   registerLearning,
   scheduleLearningReminders,
@@ -115,6 +116,7 @@ export function createApp({
   timezone = process.env.REPORT_TIMEZONE || "Asia/Kolkata",
   policy = loadPolicy(),
   clock = Date.now,
+  blobs = null,
 } = {}) {
   if (!db) throw new Error("createApp requires a database.");
   const formatter = new Intl.DateTimeFormat("en-CA", {
@@ -164,6 +166,7 @@ export function createApp({
   // Laxmi's free-text fallback; null unless ANTHROPIC_API_KEY is set (tests replace it).
   app.botLlm = createLlm();
   app.push = createPush(app);
+  app.blobs = blobs ?? createBlobStore();
   const writeAudit = app.audit;
   app.audit = async (
     actor,
@@ -441,10 +444,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { server, db, app } = createApp({
     db: await openConfiguredDatabase(),
   });
-  scheduleRetention(db);
+  scheduleRetention(db, app.blobs);
   scheduleProbationReminders(app);
   scheduleApprovalReminders(app);
   scheduleStaleShiftClose(app);
+  app.notify.resumeQueue().catch((e) => console.error("Mail queue:", e.message));
   scheduleReports(app);
   scheduleLearningReminders(app);
   scheduleCompOffExpiry(app);

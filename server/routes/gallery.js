@@ -33,7 +33,7 @@ export function registerGallery(router, app) {
       "Content-Type": g.mime,
       "Cache-Control": "private, max-age=86400",
     });
-    res.end(Buffer.from(g.data, "base64"));
+    res.end(await app.blobs.bytes(g.data));
   });
   router.post(
     "/api/admin/gallery",
@@ -64,7 +64,7 @@ export function registerGallery(router, app) {
               branch,
               mime,
               bytes.length,
-              data,
+              await app.blobs.put(data, "gallery"),
               user.id,
               new Date(app.clock()).toISOString(),
             )

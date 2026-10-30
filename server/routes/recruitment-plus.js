@@ -508,7 +508,7 @@ export function registerRecruitmentPlus(router, app) {
         )
         .get(c.id);
       if (!f) throw new HttpError(404, "This candidate has no resume file.");
-      const r = await applyResume(db, c.id, Buffer.from(f.data, "base64"), f.mime, {
+      const r = await applyResume(db, c.id, await app.blobs.bytes(f.data), f.mime, {
         rescore: rescoreCandidate,
         actorId: user.id,
         at: nowIso(),
@@ -549,7 +549,7 @@ export function registerRecruitmentPlus(router, app) {
         "Content-Disposition": `inline; filename="${fileName}"`,
         "Cache-Control": "private, no-store",
       });
-      res.end(Buffer.from(f.data, "base64"));
+      res.end(await app.blobs.bytes(f.data));
     },
   );
 
@@ -659,7 +659,7 @@ export function registerRecruitmentPlus(router, app) {
               ),
               file.mime,
               file.bytes.length,
-              file.data,
+              await app.blobs.put(file.data, "resumes"),
               nowIso(),
             );
         await db

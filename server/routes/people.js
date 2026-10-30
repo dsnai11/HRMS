@@ -556,19 +556,18 @@ export function registerPeople(router, app) {
   router.get(
     "/api/admin/od-punch",
     { perm: "attendance.read" },
-    async ({ user, companyId, send }) => {
+    async ({ user, companyId, query, send }) => {
       const scope = branchScope(user);
-      return send(
-        200,
-        (
-          await db
-            .prepare(
-              `SELECT u.id,u.name,u.employee_code,b.name branch_name,u.od_punch FROM users u LEFT JOIN branches b ON b.id=u.branch_id
-               WHERE u.company_id=? AND u.active=1 AND u.role<>'super_admin'${scope.sql} ORDER BY u.name,u.id`,
-            )
-            .all(companyId, ...scope.params)
-        ).map((p) => ({ ...p, od_punch: Boolean(p.od_punch) })),
-      );
+      // Without ?q: the people allowed. With ?q: up to 20 others matching, to add.
+      const words = String(query.get("q") ?? "").toLowerCase().split(/\s+/).filter(Boolean).slice(0, 5);
+      const rows = await db
+        .prepare(
+          `SELECT u.id,u.name,u.employee_code,b.name branch_name,u.od_punch FROM users u LEFT JOIN branches b ON b.id=u.branch_id
+           WHERE u.company_id=? AND u.active=1 AND u.role<>'super_admin' AND u.od_punch=?${words.map(() => " AND LOWER(CONCAT_WS(' ',u.name,u.employee_code,b.name)) LIKE ?").join("")}${scope.sql}
+           ORDER BY u.name,u.id${words.length ? " LIMIT 20" : ""}`,
+        )
+        .all(companyId, words.length ? 0 : 1, ...words.map((w) => `%${w}%`), ...scope.params);
+      return send(200, rows.map((p) => ({ ...p, od_punch: Boolean(p.od_punch) })));
     },
   );
   router.patch(
@@ -618,7 +617,7 @@ export function registerPeople(router, app) {
         "Content-Type": "image/jpeg",
         "Cache-Control": "private, no-store",
       });
-      res.end(Buffer.from(row.data, "base64"));
+      res.end(await app.blobs.bytes(row.data));
     },
   );
 

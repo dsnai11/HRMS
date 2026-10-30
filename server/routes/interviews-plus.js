@@ -461,7 +461,7 @@ export function registerInterviewsPlus(router, app) {
         "Content-Disposition": `inline; filename="${f.name}.${ext}"`,
         "Cache-Control": "private, no-store",
       });
-      res.end(Buffer.from(f.data, "base64"));
+      res.end(await app.blobs.bytes(f.data));
     },
   );
   router.get(

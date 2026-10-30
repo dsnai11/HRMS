@@ -1,3 +1,4 @@
+import { insertMany } from "../db.js";
 import {
   HttpError,
   integer,
@@ -175,12 +176,12 @@ export function registerPerformance(router, app) {
             "SELECT id,manager_id FROM users WHERE company_id=? AND active=1 AND role<>'super_admin' AND (date_of_joining IS NULL OR date_of_joining<=?)",
           )
           .all(companyId, end);
-        for (const p of people)
-          await db
-            .prepare(
-              "INSERT INTO reviews(company_id,cycle_id,user_id,manager_id) VALUES(?,?,?,?)",
-            )
-            .run(companyId, id, p.id, p.manager_id);
+        await insertMany(
+          db,
+          "reviews",
+          ["company_id", "cycle_id", "user_id", "manager_id"],
+          people.map((p) => [companyId, id, p.id, p.manager_id]),
+        );
         await audit("review_cycle_started", { id, people: people.length });
         return { id, reviews: people.length };
       });
@@ -437,7 +438,14 @@ export function registerPerformance(router, app) {
                   )
                   .all(companyId)
               ).map((r) => r.id);
-      for (const id of ids) await owned("users", id, companyId, "employee");
+      // Every chosen person must belong to this company: one query, not one each.
+      for (let i = 0; i < ids.length; i += 1000) {
+        const part = ids.slice(i, i + 1000);
+        const found = await db
+          .prepare(`SELECT COUNT(*) n FROM users WHERE company_id=? AND id IN (${part.map(() => "?").join(",")})`)
+          .get(companyId, ...part);
+        if (Number(found.n) !== part.length) throw new HttpError(404, "Employee not found.");
+      }
       const id = await transaction(async () => {
         const id = Number(
           (
@@ -458,12 +466,7 @@ export function registerPerformance(router, app) {
               )
           ).lastInsertRowid,
         );
-        for (const uid of ids)
-          await db
-            .prepare(
-              "INSERT INTO training_records(training_id,user_id) VALUES(?,?)",
-            )
-            .run(id, uid);
+        await insertMany(db, "training_records", ["training_id", "user_id"], ids.map((uid) => [id, uid]));
         await audit("training_created", { id, people: ids.length });
         return id;
       });

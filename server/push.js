@@ -77,7 +77,7 @@ export function createPush(
       if (!rows.length) return 0;
       const bearer = await accessToken();
       let sent = 0;
-      for (const row of rows) {
+      const one = async (row) => {
         const res = await fetchFn(
           `https://fcm.googleapis.com/v1/projects/${account.project_id}/messages:send`,
           {
@@ -109,7 +109,9 @@ export function createPush(
           if (/UNREGISTERED|NOT_FOUND|INVALID_ARGUMENT/.test(detail))
             await db.prepare("DELETE FROM push_tokens WHERE id=?").run(row.id);
         }
-      }
+      };
+      // Ten at a time: 5,000 phones take minutes one by one.
+      for (let i = 0; i < rows.length; i += 10) await Promise.all(rows.slice(i, i + 10).map(one));
       return sent;
     } catch (e) {
       console.error("push failed:", e.message);

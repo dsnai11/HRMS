@@ -1,5 +1,13 @@
+import { HttpError, integer } from "../http.js";
 import { loadAttendance, toCsv } from "../attendance-report.js";
 import { branchScope } from "../scope.js";
+
+// Page numbers start at 0.
+const pageNumber = (v) => {
+  const n = Number(v);
+  if (!Number.isSafeInteger(n) || n < 0 || n > 100000) throw new HttpError(400, "Invalid page.");
+  return n;
+};
 
 export function registerReports(router, app) {
   const { db, dayOf, clock } = app;
@@ -60,6 +68,8 @@ export function registerReports(router, app) {
           companyId,
           query,
           scope: branchScope(user),
+          // The web portal asks for a page at a time; without "page" every row comes back.
+          ...(query.has("page") ? { page: pageNumber(query.get("page")) } : {}),
         }),
       ),
   );
@@ -86,13 +96,15 @@ export function registerReports(router, app) {
   router.get(
     "/api/admin/active",
     { perm: "attendance.read" },
-    async ({ user, companyId, send }) => {
+    async ({ user, companyId, query, send }) => {
       const scope = branchScope(user);
+      // ?limit=20 for the Overview page: by mid-morning everyone has an open shift.
+      const limit = query.get("limit") ? Math.min(integer(Number(query.get("limit"))), 1000) : null;
       return send(
         200,
         await db
           .prepare(
-            `SELECT s.*,u.name employee_name,u.email,u.employee_code FROM shifts s JOIN users u ON u.id=s.user_id WHERE u.company_id=? AND s.out_at IS NULL${scope.sql} ORDER BY s.in_at DESC`,
+            `SELECT s.*,u.name employee_name,u.email,u.employee_code FROM shifts s JOIN users u ON u.id=s.user_id WHERE u.company_id=? AND s.out_at IS NULL${scope.sql} ORDER BY s.in_at DESC${limit ? ` LIMIT ${limit}` : ""}`,
           )
           .all(companyId, ...scope.params),
       );

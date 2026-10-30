@@ -286,6 +286,7 @@ export function registerChat(router, app) {
                 throw new HttpError(400, "Write a message.");
               })();
       const at = nowIso();
+      const stored = file ? await app.blobs.put(file.data, "chat") : null;
       const id = await transaction(async () => {
         const id = Number(
           (
@@ -301,7 +302,7 @@ export function registerChat(router, app) {
             .prepare(
               "INSERT INTO chat_files(message_id,room_id,name,mime,size,data) VALUES(?,?,?,?,?,?)",
             )
-            .run(id, m.room_id, file.name, file.mime, file.bytes.length, file.data);
+            .run(id, m.room_id, file.name, file.mime, file.bytes.length, stored);
         return id;
       });
       await db
@@ -330,7 +331,7 @@ export function registerChat(router, app) {
       "Content-Disposition": `inline; filename="${f.name.replace(/[^A-Za-z0-9._ -]/g, "_")}"`,
       "Cache-Control": "private, no-store",
     });
-    res.end(Buffer.from(f.data, "base64"));
+    res.end(await app.blobs.bytes(f.data));
   });
   router.delete("/api/chat/messages/:id", async ({ user, params, send }) => {
     const c = await db

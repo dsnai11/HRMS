@@ -2497,3 +2497,8 @@ tr.selected td { background: color-mix(in srgb, var(--brand, #ac051b) 7%, transp
 .pm-od { background: #e08a00; }
 .pm-refused { border: 2px solid #c0392b; background: #fff; }
 @media (max-width: 640px) { .pm-map { height: 380px; } }
+
+/* Long lists: search and pages */
+.pl-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
+.pl-bar .pl-q { flex: 1 1 220px; max-width: 360px; }
+.pl-bar .spacer { flex: 1; }

@@ -71,7 +71,7 @@ export function registerForm16(router, app) {
             .prepare(
               "INSERT INTO documents(company_id,user_id,kind,name,mime,size,data,uploaded_by,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
             )
-            .run(companyId, target.id, "form16", name, file.mime, file.bytes.length, file.data, user.id, nowIso())
+            .run(companyId, target.id, "form16", name, file.mime, file.bytes.length, await app.blobs.put(file.data, "documents"), user.id, nowIso())
         ).lastInsertRowid,
       );
       await audit("form16_uploaded", { id, employeeId: target.id, fy });

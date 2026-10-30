@@ -131,7 +131,7 @@ export function registerRms(router, app) {
       if (file)
         await db
           .prepare("INSERT INTO candidate_files(candidate_id,kind,name,mime,size,data,created_at) VALUES(?,?,?,?,?,?,?)")
-          .run(id, "resume", file.name, file.mime, file.size, file.data, at);
+          .run(id, "resume", file.name, file.mime, file.size, await app.blobs.put(file.data, "resumes"), at);
       if (!dup) await rescoreCandidate(db, id);
       return id;
     });

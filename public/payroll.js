@@ -173,7 +173,7 @@ async function payrollRunHtml(runId) {
       : "") +
     `<div class="actions spaced">${exports.map(([t, l]) => `<button class="secondary" data-export="${t}">↓ ${l}</button>`).join("")}</div>` +
     (items.length
-      ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Paid days</th><th>Gross</th><th>Deductions</th><th>Net pay</th><th>Notes</th><th></th></tr></thead><tbody>${items.map((i) => `<tr><td>${esc(i.name)}<small>${esc(i.employee_code || "")} · ${esc(i.department_name || "")}</small></td><td>${i.paid_days}${i.lop_days ? `<small>${i.lop_days} lost</small>` : ""}</td><td>${inr(i.gross)}</td><td>${inr(i.deductions)}</td><td><strong>${inr(i.net)}</strong></td><td>${i.warnings.map((w) => `<span class="pill">${esc(WARNINGS[w] || w)}</span>`).join(" ") || "—"}</td><td><button class="secondary" data-item="${i.user_id}">Breakdown</button></td></tr>`).join("")}</tbody></table></div>`
+      ? '<div id="pay-items"></div>'
       : empty("Nobody to pay", "Set salaries for employees, then recompute.")) +
     "</div>"
   );
@@ -260,22 +260,24 @@ async function payrollWire(tab) {
               ),
             )),
       );
-    document
-      .querySelectorAll("[data-item]")
-      .forEach(
-        (b) =>
-          (b.onclick = () =>
-            busy(b, async () =>
-              viewDialog(
-                "Pay breakdown",
-                breakdownHtml(
-                  await api(
-                    `/admin/payroll/runs/${run.id}/items/${b.dataset.item}`,
-                  ),
-                ),
-              ),
-            )),
-      );
+    const list = document.querySelector("#pay-items");
+    if (list)
+      pagedList(list, payrollCache.run.items, {
+        head: "<tr><th>Employee</th><th>Paid days</th><th>Gross</th><th>Deductions</th><th>Net pay</th><th>Notes</th><th></th></tr>",
+        row: (i) =>
+          `<tr><td>${esc(i.name)}<small>${esc(i.employee_code || "")} · ${esc(i.department_name || "")}</small></td><td>${i.paid_days}${i.lop_days ? `<small>${i.lop_days} lost</small>` : ""}</td><td>${inr(i.gross)}</td><td>${inr(i.deductions)}</td><td><strong>${inr(i.net)}</strong></td><td>${i.warnings.map((w) => `<span class="pill">${esc(WARNINGS[w] || w)}</span>`).join(" ") || "—"}</td><td><button class="secondary" data-item="${i.user_id}">Breakdown</button></td></tr>`,
+        text: (i) => `${i.name} ${i.employee_code || ""} ${i.department_name || ""} ${i.warnings.map((w) => WARNINGS[w] || w).join(" ")}`,
+        label: "employees",
+        placeholder: "Search name, code, department or a warning",
+        wire: (el) =>
+          el.querySelectorAll("[data-item]").forEach(
+            (b) =>
+              (b.onclick = () =>
+                busy(b, async () =>
+                  viewDialog("Pay breakdown", breakdownHtml(await api(`/admin/payroll/runs/${run.id}/items/${b.dataset.item}`))),
+                )),
+          ),
+      });
     return;
   }
   if (tab === "runs") {

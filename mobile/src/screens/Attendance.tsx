@@ -181,16 +181,16 @@ export default function Attendance() {
         skipProcessing: true,
         shutterSound: false,
       });
-      // A full-resolution camera photo is several MB; 480 px wide is plenty to see a face
-      // and keeps the punch small (about 30-60 KB).
+      // A full-resolution camera photo is several MB; 360 px wide is plenty to see a face
+      // and keeps the punch small (about 15-25 KB), which matters for 5,000 people a day.
       if (photo?.uri) {
         const image = await ImageManipulator.manipulate(photo.uri)
-          .resize({ width: 480 })
+          .resize({ width: 360 })
           .renderAsync();
         base64 =
           (
             await image.saveAsync({
-              compress: 0.6,
+              compress: 0.5,
               format: SaveFormat.JPEG,
               base64: true,
             })

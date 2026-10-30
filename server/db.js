@@ -148,3 +148,16 @@ export async function openConfiguredDatabase() {
   await backfillEmployeeCodes(db);
   return db;
 }
+
+// Inserts many rows in statements of up to 500 rows each, for actions that reach
+// everyone in a company (5,000 people is ten statements, not 5,000 round trips).
+export async function insertMany(db, table, columns, rows, chunk = 500) {
+  for (let i = 0; i < rows.length; i += chunk) {
+    const part = rows.slice(i, i + chunk);
+    await db
+      .prepare(
+        `INSERT INTO ${table}(${columns.join(",")}) VALUES ${part.map(() => `(${columns.map(() => "?").join(",")})`).join(",")}`,
+      )
+      .run(...part.flat());
+  }
+}

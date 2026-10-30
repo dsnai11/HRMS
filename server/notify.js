@@ -34,6 +34,40 @@ export function createNotifier(app, env = process.env) {
     }
   }
 
+  // The mail provider accepts a few messages a second (Resend: 2 by default), so mail
+  // to many people waits in a queue and goes out at that pace (MAIL_PER_SECOND).
+  const perSecond = Math.max(1, Number(env.MAIL_PER_SECOND) || 2);
+  const queue = [];
+  let windowStart = 0,
+    inWindow = 0,
+    pump = null;
+  function dispatch(row) {
+    const now = Date.now();
+    if (now - windowStart >= 1000) (windowStart = now), (inWindow = 0);
+    if (!queue.length && inWindow < perSecond) {
+      inWindow++;
+      void sendMail(row);
+      return;
+    }
+    queue.push(row);
+    pump ??= setInterval(() => {
+      for (let i = 0; i < perSecond && queue.length; i++) void sendMail(queue.shift());
+      if (!queue.length) {
+        clearInterval(pump);
+        pump = null;
+      }
+    }, 1000);
+  }
+  // After a restart, mail still waiting from the last day goes out.
+  async function resumeQueue() {
+    if (!mailConfigured()) return 0;
+    const rows = await db
+      .prepare("SELECT id,to_email,subject,body FROM email_outbox WHERE status='pending' AND created_at>? ORDER BY id LIMIT 20000")
+      .all(new Date(clock() - 86400000).toISOString());
+    for (const r of rows) dispatch(r);
+    return rows.length;
+  }
+
   /** Plain email to anyone (e.g. a candidate with no login yet); resolves false if mail is not configured. */
   async function mail(companyId, to, subject, body, attachments) {
     if (!mailConfigured() || !to) return false;
@@ -46,7 +80,7 @@ export function createNotifier(app, env = process.env) {
           .run(companyId, to, subject, body, new Date(clock()).toISOString())
       ).lastInsertRowid,
     );
-    void sendMail({ id: outbox, to_email: to, subject, body, attachments });
+    dispatch({ id: outbox, to_email: to, subject, body, attachments });
     return true;
   }
 
@@ -55,39 +89,29 @@ export function createNotifier(app, env = process.env) {
     try {
       const ids = [...new Set(userIds.filter(Boolean))];
       const at = new Date(clock()).toISOString();
-      for (const id of ids) {
+      // Written 500 at a time: an announcement to 5,000 people is ten statements, not 5,000.
+      for (let i = 0; i < ids.length; i += 500) {
+        const chunk = ids.slice(i, i + 500);
         if (n.inApp !== false)
           await db
             .prepare(
-              "INSERT INTO notifications(company_id,user_id,kind,title,body,link,created_at) VALUES(?,?,?,?,?,?,?)",
+              `INSERT INTO notifications(company_id,user_id,kind,title,body,link,created_at) VALUES ${chunk.map(() => "(?,?,?,?,?,?,?)").join(",")}`,
             )
-            .run(
-              n.companyId,
-              id,
-              n.kind,
-              n.title,
-              n.body ?? null,
-              n.link ?? null,
-              at,
-            );
+            .run(...chunk.flatMap((id) => [n.companyId, id, n.kind, n.title, n.body ?? null, n.link ?? null, at]));
         if (n.email && mailConfigured()) {
-          const u = await db
-            .prepare("SELECT email,active FROM users WHERE id=?")
-            .get(id);
-          if (!u?.active || !u.email) continue;
+          const people = await db
+            .prepare(`SELECT email FROM users WHERE active=1 AND email IS NOT NULL AND email<>'' AND id IN (${chunk.map(() => "?").join(",")})`)
+            .all(...chunk);
+          if (!people.length) continue;
           const subject = n.title;
           const body = `${n.body ?? n.title}\n\nOpen the HR portal to see more.`;
-          const outbox = Number(
-            (
-              await db
-                .prepare(
-                  "INSERT INTO email_outbox(company_id,to_email,subject,body,created_at) VALUES(?,?,?,?,?)",
-                )
-                .run(n.companyId, u.email, subject, body, at)
-            ).lastInsertRowid,
-          );
+          const rows = await db
+            .prepare(
+              `INSERT INTO email_outbox(company_id,to_email,subject,body,created_at) VALUES ${people.map(() => "(?,?,?,?,?)").join(",")} RETURNING id,to_email`,
+            )
+            .all(...people.flatMap((u) => [n.companyId, u.email, subject, body, at]));
           // Not awaited: the request should not wait on the mail provider.
-          sendMail({ id: outbox, to_email: u.email, subject, body });
+          for (const r of rows) dispatch({ id: r.id, to_email: r.to_email, subject, body });
         }
       }
       // Text messages for the alerts that matter most, when a provider is set up.
@@ -106,6 +130,7 @@ export function createNotifier(app, env = process.env) {
     }
   }
   notify.mail = mail;
+  notify.resumeQueue = resumeQueue;
   return notify;
 }
 

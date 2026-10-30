@@ -77,7 +77,7 @@ export function createPostgresStore(pool) {
 export async function openPostgres(connectionString) {
   const pool = new Pool({
     connectionString,
-    max: Number(process.env.DB_POOL_MAX) || 5,
+    max: Number(process.env.DB_POOL_MAX) || 10,
     connectionTimeoutMillis: 15000,
     idleTimeoutMillis: 30000,
   });

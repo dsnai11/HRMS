@@ -1,3 +1,4 @@
+import { insertMany } from "../db.js";
 import { HttpError, csvCell, integer, isoDate, number } from "../http.js";
 import { requireOwned } from "../scope.js";
 import { computeMuster } from "../muster.js";
@@ -211,36 +212,37 @@ export function registerPayrollRuns(router, app) {
       });
     }
     await db.prepare("DELETE FROM payroll_items WHERE run_id=?").run(run.id);
-    for (const { person, slip, settles } of items)
-      await db
-        .prepare(
-          "INSERT INTO payroll_items(run_id,company_id,user_id,gross,deductions,net,employer_cost,paid_days,lop_days,taxable_earnings,tds,pt,warnings,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        )
-        .run(
-          run.id,
-          companyId,
-          person.id,
-          slip.gross_earnings,
-          slip.total_deductions,
-          slip.net_pay,
-          slip.employer_cost,
-          slip.paid_days,
-          slip.lop_days,
-          slip.taxable_earnings,
-          slip.tds?.this_month ?? 0,
-          slip.professional_tax,
-          JSON.stringify(slip.warnings),
-          JSON.stringify({
-            employee: {
-              name: person.name,
-              employee_code: person.employee_code,
-              department: person.department_name,
-              designation: person.designation_name,
-            },
-            ...slip,
-            settles,
-          }),
-        );
+    await insertMany(
+      db,
+      "payroll_items",
+      ["run_id", "company_id", "user_id", "gross", "deductions", "net", "employer_cost", "paid_days", "lop_days", "taxable_earnings", "tds", "pt", "warnings", "data"],
+      items.map(({ person, slip, settles }) => [
+        run.id,
+        companyId,
+        person.id,
+        slip.gross_earnings,
+        slip.total_deductions,
+        slip.net_pay,
+        slip.employer_cost,
+        slip.paid_days,
+        slip.lop_days,
+        slip.taxable_earnings,
+        slip.tds?.this_month ?? 0,
+        slip.professional_tax,
+        JSON.stringify(slip.warnings),
+        JSON.stringify({
+          employee: {
+            name: person.name,
+            employee_code: person.employee_code,
+            department: person.department_name,
+            designation: person.designation_name,
+          },
+          ...slip,
+          settles,
+        }),
+      ]),
+      200,
+    );
     await db
       .prepare("UPDATE payroll_runs SET skipped=? WHERE id=?")
       .run(JSON.stringify(skipped), run.id);

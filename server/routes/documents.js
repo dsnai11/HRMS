@@ -110,7 +110,7 @@ export function registerDocuments(router, app) {
             string(b.name, "Name", 120).replace(/[\\/\r\n"]/g, "_"),
             mime,
             bytes.length,
-            data,
+            await app.blobs.put(data, "documents"),
             user.id,
             nowIso(),
           )
@@ -146,7 +146,7 @@ export function registerDocuments(router, app) {
         "Content-Disposition": `inline; filename="${d.name}.${TYPES[d.mime]}"`,
         "Cache-Control": "private, no-store",
       });
-      res.end(Buffer.from(d.data, "base64"));
+      res.end(await app.blobs.bytes(d.data));
     },
   );
   router.post(

@@ -3,7 +3,7 @@
 // the map pictures come from OpenStreetMap.
 let pmLeaflet = null,
   pmTimer = null;
-const pm = { date: null, branch: "", show: { in: true, out: true, refused: true, workplaces: true }, odOnly: false, outsideOnly: false };
+const pm = { table: { q: "", page: 0 }, date: null, branch: "", show: { in: true, out: true, refused: true, workplaces: true }, odOnly: false, outsideOnly: false };
 const PM_COLORS = { in: "#146c53", out: "#2f6fd6", od: "#e08a00", refused: "#c0392b" };
 
 function pmLoadLeaflet() {
@@ -45,7 +45,7 @@ async function punchMapPage(id) {
     </div><div id="pm-stats" class="pm-stats"></div><div id="pm-map" class="pm-map" role="region" aria-label="Map of punches"></div>
     <p class="muted" id="pm-note"></p></div><div class="card"><h2>Punches</h2><div id="pm-list"></div></div>`;
 
-  const map = L.map("pm-map", { scrollWheelZoom: false }).setView([22.5, 79], 5);
+  const map = L.map("pm-map", { scrollWheelZoom: false, preferCanvas: true }).setView([22.5, 79], 5);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors',
@@ -116,27 +116,31 @@ async function punchMapPage(id) {
       ...points.map((p) => ({ key: `p${p.shift_id}${p.kind}`, at: p.at, p })),
       ...refused.map((r) => ({ key: `r${r.id}`, at: r.at, r })),
     ].sort((a, b) => (a.at < b.at ? 1 : -1));
-    document.querySelector("#pm-list").innerHTML = rows.length
-      ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>What</th><th>Time</th><th>Where</th><th>GPS</th><th></th></tr></thead><tbody>${rows
-          .map(({ key, p, r }) => {
-            const x = p ?? r;
-            const what = p
-              ? `<span class="pill ${p.od ? "" : "neutral"}">${p.od ? "OD " : ""}${p.kind === "in" ? "In" : "Out"}</span>${p.od ? `<small>${esc(p.od_purpose || "")}</small>` : ""}`
-              : `<span class="pill">Refused</span><small>${esc(r.reason || "")}</small>`;
-            const where = p ? `${pmDistance(p.distance_m)} from ${esc(p.workplace_name)}` : "—";
-            return `<tr><td>${esc(x.name)}<small>${esc(x.employee_code || "")}${x.branch_name ? ` · ${esc(x.branch_name)}` : ""}</small></td><td>${what}</td><td>${time(x.at)}</td><td>${where}</td><td>±${Math.round(x.accuracy ?? 0)} m</td><td><button class="ghost" data-pm-show="${key}">Show on map</button> <a href="https://www.google.com/maps?q=${x.latitude},${x.longitude}" target="_blank" rel="noreferrer">Google Maps ↗</a></td></tr>`;
-          })
-          .join("")}</tbody></table></div>`
-      : empty("No punches", "Nothing matches for this day and these filters.");
-    document.querySelectorAll("[data-pm-show]").forEach((b) =>
-      b.addEventListener("click", () => {
-        const m = markers.get(b.dataset.pmShow);
-        if (!m) return;
-        document.querySelector("#pm-map").scrollIntoView({ behavior: "smooth", block: "center" });
-        map.setView(m.getLatLng(), Math.max(map.getZoom(), 15));
-        m.openPopup();
-      }),
-    );
+    pagedList(document.querySelector("#pm-list"), rows, {
+      head: "<tr><th>Employee</th><th>What</th><th>Time</th><th>Where</th><th>GPS</th><th></th></tr>",
+      row: ({ key, p, r }) => {
+        const x = p ?? r;
+        const what = p
+          ? `<span class="pill ${p.od ? "" : "neutral"}">${p.od ? "OD " : ""}${p.kind === "in" ? "In" : "Out"}</span>${p.od ? `<small>${esc(p.od_purpose || "")}</small>` : ""}`
+          : `<span class="pill">Refused</span><small>${esc(r.reason || "")}</small>`;
+        const where = p ? `${pmDistance(p.distance_m)} from ${esc(p.workplace_name)}` : "—";
+        return `<tr><td>${esc(x.name)}<small>${esc(x.employee_code || "")}${x.branch_name ? ` · ${esc(x.branch_name)}` : ""}</small></td><td>${what}</td><td>${time(x.at)}</td><td>${where}</td><td>±${Math.round(x.accuracy ?? 0)} m</td><td><button class="ghost" data-pm-show="${key}">Show on map</button> <a href="https://www.google.com/maps?q=${x.latitude},${x.longitude}" target="_blank" rel="noreferrer">Google Maps ↗</a></td></tr>`;
+      },
+      text: ({ p, r }) => `${(p ?? r).name} ${(p ?? r).employee_code || ""} ${(p ?? r).branch_name || ""} ${p?.workplace_name || ""} ${p?.od_purpose || ""}`,
+      label: "punches",
+      placeholder: "Search name, code, branch or OD purpose",
+      state: pm.table,
+      wire: (el) =>
+        el.querySelectorAll("[data-pm-show]").forEach((b) =>
+          b.addEventListener("click", () => {
+            const m = markers.get(b.dataset.pmShow);
+            if (!m) return;
+            document.querySelector("#pm-map").scrollIntoView({ behavior: "smooth", block: "center" });
+            map.setView(m.getLatLng(), Math.max(map.getZoom(), 15));
+            m.openPopup();
+          }),
+        ),
+    });
   };
   draw();
 

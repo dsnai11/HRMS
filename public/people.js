@@ -289,41 +289,57 @@ document.addEventListener("click", async (e) => {
 // ---- OD punch: who may punch in and out on duty, away from their workplace -----------------------------
 async function odPunchCard(id) {
   if (!has("attendance.read")) return;
-  const people = await api("/admin/od-punch");
+  const allowed = await api("/admin/od-punch");
   if (id !== renderId) return;
-  const allowed = people.filter((p) => p.od_punch),
-    others = people.filter((p) => !p.od_punch);
   const who = (p) => `${esc(p.name)}${p.employee_code ? ` (${esc(p.employee_code)})` : ""}`;
   const editable = has("employees.write");
   const card = document.createElement("div");
   card.className = "card";
   card.innerHTML = `<h2>OD punch (on duty)</h2><p class="muted">These people get <strong>OD Punch In</strong> and <strong>OD Punch Out</strong> in the phone app. They can punch from anywhere: the time, GPS location and selfie are kept, and the day goes to their manager for approval. Approved, it counts as a full day on duty; rejected, it does not count.</p>${
-    allowed.length
-      ? `<div class="cr-saved">${allowed.map((p) => `<span class="cr-chip">${who(p)}${p.branch_name ? `<small>${esc(p.branch_name)}</small>` : ""}${editable ? `<button type="button" class="ghost" data-od-remove="${p.id}" aria-label="Remove ${esc(p.name)}">✕</button>` : ""}</span>`).join("")}</div>`
-      : '<p class="muted">Nobody yet.</p>'
-  }${
-    editable && others.length
-      ? `<div class="actions"><label>Add a person<select id="od-person">${others.map((p) => `<option value="${p.id}">${who(p)}${p.branch_name ? ` · ${esc(p.branch_name)}` : ""}</option>`).join("")}</select></label><button class="secondary" id="od-add">Allow OD punch</button></div>`
+    editable
+      ? `<div class="actions"><label>Add people<input type="search" id="od-q" placeholder="Search name, code or branch" autocomplete="off"></label></div><div id="od-found"></div>`
       : ""
-  }`;
+  }<h3>Allowed (${allowed.length})</h3><div id="od-allowed"></div>`;
   document.querySelector("#content").append(card);
   const save = (ids, allowedNow) =>
     api("/admin/od-punch", { user_ids: ids, allowed: allowedNow }, "PATCH");
-  card.querySelector("#od-add")?.addEventListener("click", (e) =>
-    busy(e.target, async () => {
-      await save([Number(card.querySelector("#od-person").value)], true);
-      notice("OD punch allowed. They see it after refreshing the app.");
-      await render();
-    }),
-  );
-  card.querySelectorAll("[data-od-remove]").forEach((b) =>
-    b.addEventListener("click", () =>
-      busy(b, async () => {
-        await save([Number(b.dataset.odRemove)], false);
-        await render();
-      }),
-    ),
-  );
+  pagedList(card.querySelector("#od-allowed"), allowed, {
+    head: "<tr><th>Employee</th><th>Branch</th><th></th></tr>",
+    row: (p) => `<tr><td>${who(p)}</td><td>${esc(p.branch_name || "—")}</td><td>${editable ? `<button class="ghost" data-od-remove="${p.id}">Remove</button>` : ""}</td></tr>`,
+    text: (p) => `${p.name} ${p.employee_code || ""} ${p.branch_name || ""}`,
+    label: "people",
+    wire: (el) =>
+      el.querySelectorAll("[data-od-remove]").forEach((b) =>
+        b.addEventListener("click", () =>
+          busy(b, async () => {
+            await save([Number(b.dataset.odRemove)], false);
+            await render();
+          }),
+        ),
+      ),
+  });
+  const q = card.querySelector("#od-q");
+  let timer;
+  q?.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const found = card.querySelector("#od-found");
+      if (!q.value.trim()) return (found.innerHTML = "");
+      const rows = await api(`/admin/od-punch?q=${encodeURIComponent(q.value.trim())}`);
+      found.innerHTML = rows.length
+        ? `<div class="cr-saved">${rows.map((p) => `<span class="cr-chip">${who(p)}${p.branch_name ? `<small>${esc(p.branch_name)}</small>` : ""}<button type="button" class="secondary" data-od-add="${p.id}">Allow</button></span>`).join("")}</div>`
+        : '<p class="muted">Nobody else matches.</p>';
+      found.querySelectorAll("[data-od-add]").forEach((b) =>
+        b.addEventListener("click", () =>
+          busy(b, async () => {
+            await save([Number(b.dataset.odAdd)], true);
+            notice("OD punch allowed. They see it after refreshing the app.");
+            await render();
+          }),
+        ),
+      );
+    }, 250);
+  });
 }
 async function selfieSettingCard(id) {
   if (!has("org.manage")) return;

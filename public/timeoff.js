@@ -630,9 +630,18 @@ async function musterPage(id) {
     ) +
     `<div class="card"><h2>${monthLabel(m)}</h2>${
       data.people.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Present</th><th>Half days</th><th>Paid leave</th><th>Unpaid leave</th><th>Holidays</th><th>Weekly offs</th><th>Absent</th><th>Payable</th><th>Loss of pay</th></tr></thead><tbody>${data.people.map((p) => `<tr><td>${esc(p.name)}<small>${esc(p.employee_code || "")} · ${esc(p.department_name || "")}</small></td><td>${p.present}</td><td>${p.half_days}</td><td>${p.leave_paid}</td><td>${p.leave_unpaid}</td><td>${p.holidays}</td><td>${p.weekly_offs}</td><td>${p.absent}</td><td><strong>${p.payable_days}</strong></td><td>${p.lop_days}</td></tr>`).join("")}</tbody></table></div>`
+        ? '<div id="muster-list"></div>'
         : empty("No employees", "Add employees to see their muster.")
     }</div><p class="muted">Today is not counted until the day has attendance or leave. Pending leave is not counted as leave.</p>`;
+  const list = document.querySelector("#muster-list");
+  if (list)
+    pagedList(list, data.people, {
+      head: "<tr><th>Employee</th><th>Present</th><th>Half days</th><th>Paid leave</th><th>Unpaid leave</th><th>Holidays</th><th>Weekly offs</th><th>Absent</th><th>Payable</th><th>Loss of pay</th></tr>",
+      row: (p) =>
+        `<tr><td>${esc(p.name)}<small>${esc(p.employee_code || "")} · ${esc(p.department_name || "")}</small></td><td>${p.present}</td><td>${p.half_days}</td><td>${p.leave_paid}</td><td>${p.leave_unpaid}</td><td>${p.holidays}</td><td>${p.weekly_offs}</td><td>${p.absent}</td><td><strong>${p.payable_days}</strong></td><td>${p.lop_days}</td></tr>`,
+      text: (p) => `${p.name} ${p.employee_code || ""} ${p.department_name || ""}`,
+      label: "people",
+    });
   const go = (n) => () => ((musterMonth = shiftMonth(m, n)), render());
   document.querySelector("#m-prev").onclick = go(-1);
   document.querySelector("#m-next").onclick = go(1);

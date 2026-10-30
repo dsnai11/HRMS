@@ -156,7 +156,9 @@ export function registerAttendance(router, app) {
     if (!["in", "out"].includes(b.action))
       throw new HttpError(400, "Choose punch-in or punch-out.");
     const signals = parseSignals(b.signals);
-    let device = null;
+    let device = null,
+      stored = null,
+      replaced = null;
     try {
       if (!req.headers.authorization?.startsWith("Bearer "))
         throw new HttpError(
@@ -180,6 +182,8 @@ export function registerAttendance(router, app) {
           `device_${device.status}`,
         );
       await closeStaleShifts(app, user.id);
+      const selfie = await readSelfie(b.selfie, user.company_id);
+      stored = selfie ? await app.blobs.put(selfie, "selfies") : null;
       const result = await transaction(async () => {
         const nowMs = clock();
         const open = await db
@@ -244,7 +248,6 @@ export function registerAttendance(router, app) {
             e.message += " Working outside today? Use OD Punch In.";
           throw e;
         }
-        const selfie = await readSelfie(b.selfie, user.company_id);
         const { latitude, longitude, accuracy } = b.location;
         const risk = assessPunch({
           signals,
@@ -336,12 +339,16 @@ export function registerAttendance(router, app) {
             });
           }
         }
-        if (selfie)
+        if (stored) {
+          replaced = (
+            await db.prepare("SELECT data FROM punch_photos WHERE shift_id=? AND kind=?").get(id, b.action)
+          )?.data;
           await db
             .prepare(
               "INSERT INTO punch_photos(shift_id,kind,data,created_at) VALUES(?,?,?,?) ON CONFLICT (shift_id,kind) DO UPDATE SET data=EXCLUDED.data,created_at=EXCLUDED.created_at",
             )
-            .run(id, b.action, selfie, now);
+            .run(id, b.action, stored, now);
+        }
         await recordPunchEvent(app, user, {
           action: b.action,
           outcome: "accepted",
@@ -362,8 +369,11 @@ export function registerAttendance(router, app) {
         });
         return await db.prepare("SELECT * FROM shifts WHERE id=?").get(id);
       });
+      stored = null;
+      if (replaced) app.blobs.remove(replaced).catch(() => {});
       return send(200, result);
     } catch (e) {
+      if (stored) app.blobs.remove(stored).catch(() => {});
       // Keep evidence of refused attempts; conflicts are ordinary state errors.
       if (e instanceof HttpError && [400, 403, 422].includes(e.status))
         await recordPunchEvent(app, user, {

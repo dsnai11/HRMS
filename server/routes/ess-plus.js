@@ -298,7 +298,7 @@ export function registerEssPlus(router, app) {
         "Content-Disposition": `inline; filename="${doc.name}.${ext}"`,
         "Cache-Control": "private, no-store",
       });
-      res.end(Buffer.from(doc.data, "base64"));
+      res.end(await app.blobs.bytes(doc.data));
     },
   );
   router.post(
