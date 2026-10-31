@@ -333,6 +333,7 @@ function navGroups() {
       [
         staff && ["chat", 'Messages<span id="chat-n" class="nav-n"></span>'],
         (staff || has("bot.manage")) && ["laxmi", "Ask Laxmi"],
+        (me.permissions ?? []).length > 0 && ["hrguide", "HR Guide"],
         ["helpdesk", "Helpdesk"],
         staff && ["concerns", "Raise a concern"],
         staff && ["surveys", "Surveys"],
@@ -595,6 +596,7 @@ async function render() {
     if (page === "policies") return await policiesPage(id);
     if (page === "chat") return await chatPage(id);
     if (page === "laxmi") return await laxmiPage(id);
+    if (page === "hrguide") return await hrGuidePage(id);
     if (page === "hiring") return await hiringPage(id);
     if (page === "overview") {
       const [stats, active, sites, home] = await Promise.all([

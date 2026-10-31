@@ -115,6 +115,7 @@ const STATIC = {
   "/salary-bills.js": ["salary-bills.js", "text/javascript"],
   "/appraisal.js": ["appraisal.js", "text/javascript"],
   "/sessions.js": ["sessions.js", "text/javascript"],
+  "/hr-guide.js": ["hr-guide.js", "text/javascript"],
   "/vendor/leaflet.js": ["../node_modules/leaflet/dist/leaflet.js", "text/javascript"],
   "/vendor/leaflet.css": ["../node_modules/leaflet/dist/leaflet.css", "text/css"],
   "/join.html": ["join.html", "text/html"],

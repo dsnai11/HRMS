@@ -9,6 +9,7 @@ import { computeMuster } from "./muster.js";
 import { pendingApprovals } from "./approval.js";
 import { TEAM_SQL } from "./attendance-report.js";
 import { can } from "./rbac.js";
+import { GUIDE, isHrTeam } from "./hr-guide.js";
 
 const MONTHS = [
   "jan",
@@ -111,8 +112,7 @@ const stem = (w) => w.replace(/(ies|es|s|ing|ed)$/, "");
 
 /** The best knowledge-base entries and policies for a question, best first. */
 export async function searchKnowledge(db, companyId, question, limit = 3) {
-  const q = [...new Set(words(question).map(stem))];
-  if (!q.length) return [];
+  if (!words(question).length) return [];
   const entries = [
     ...(
       await db
@@ -129,6 +129,14 @@ export async function searchKnowledge(db, companyId, question, limit = 3) {
         .all(companyId)
     ).map((e) => ({ ...e, kind: "policy" })),
   ];
+  return rank(entries, question, limit);
+}
+
+// Scores entries ({title, body, keywords}) against a question: a word in the title
+// or keywords counts 3, one in the body 1.
+function rank(entries, question, limit) {
+  const q = [...new Set(words(question).map(stem))];
+  if (!q.length) return [];
   const scored = entries.map((e) => {
     const head = new Set(words(`${e.title} ${e.keywords}`).map(stem));
     const body = new Set(words(e.body).map(stem));
@@ -162,6 +170,22 @@ export function nextPayday(today, payDay) {
   const [y, m] = today.slice(0, 7).split("-").map(Number);
   return at(m === 12 ? `${y + 1}-01` : `${y}-${pad(m + 1)}`);
 }
+
+// The HR guide as searchable entries; the body is the numbered steps and tips.
+const GUIDE_ENTRIES = GUIDE.map((g) => ({
+  id: g.id,
+  kind: "guide",
+  title: g.title,
+  keywords: `${g.area} ${g.keywords}`,
+  body: [
+    `Who: ${g.who}.`,
+    ...g.steps.map((x, i) => `${i + 1}. ${x}`),
+    ...g.tips.map((x) => `Tip: ${x}`),
+  ].join("\n"),
+}));
+/** HR guide topics matching a question, best first. Callers must check isHrTeam. */
+export const searchGuide = (question, limit = 2) =>
+  rank(GUIDE_ENTRIES, question, limit);
 
 // ---- facts about the asking person ----------------------------------------------------------------
 const today = (app) => app.dayOf(new Date(app.clock()).toISOString());
@@ -536,8 +560,12 @@ const RULES = [
   [/\battendance\b|\bpunch(ed)?\b|\bpresent days?\b|\babsent\b/i, attendance],
 ];
 
-const SYSTEM = (company) =>
-  `You are Laxmi, the HR assistant for employees of ${company}.
+const SYSTEM = (company, hrTeam) =>
+  `You are Laxmi, the HR assistant for employees of ${company}.${
+    hrTeam
+      ? "\nThis person works in the HR team. Extracts titled \"HR guide\" explain how to run the HRMS; use them for how-to questions and keep the steps in order."
+      : ""
+  }
 Answer the employee's question using only the facts and knowledge-base extracts in the message. They describe this one employee and their company's published guidance.
 If the answer is not in them, say you don't know and suggest raising a ticket on the Helpdesk. Never guess numbers, dates, entitlements or policy terms.
 You cannot take actions. To apply for leave they can type, for example, "apply casual leave on 12 Nov".
@@ -547,7 +575,7 @@ Reply in at most 120 words of plain text (no markdown headings or tables), in th
 export function createLlm(env = process.env) {
   if (!env.ANTHROPIC_API_KEY) return null;
   let client;
-  return async ({ company, question, facts, extracts }) => {
+  return async ({ company, question, facts, extracts, hrTeam = false }) => {
     if (!client) {
       const { default: Anthropic } = await import("@anthropic-ai/sdk");
       // The portal gives up on a request after 20 seconds.
@@ -562,13 +590,16 @@ export function createLlm(env = process.env) {
       model,
       max_tokens: 1024,
       output_config: { effort: "low" },
-      system: SYSTEM(company),
+      system: SYSTEM(company, hrTeam),
       messages: [
         {
           role: "user",
           content: `<facts>\n${JSON.stringify(facts)}\n</facts>\n<knowledge>\n${
             extracts
-              .map((e) => `## ${e.title}\n${excerpt(e.body, 2000)}`)
+              .map(
+                (e) =>
+                  `## ${e.kind === "guide" ? "HR guide: " : ""}${e.title}\n${excerpt(e.body, 2000)}`,
+              )
               .join("\n\n") || "(nothing relevant found)"
           }\n</knowledge>\n\nEmployee's question: ${question}`,
         },
@@ -600,7 +631,14 @@ export async function answer(app, user, question) {
   for (const [match, rule] of RULES)
     if (typeof match === "function" ? match(question, app) : match.test(question))
       return { source: "rules", answered: true, ...(await rule(app, user, question)) };
+  const hrTeam = isHrTeam(user);
   const hits = await searchKnowledge(app.db, user.company_id, question);
+  // The HR team also get the HR guide; a guide topic that fits better comes first.
+  if (hrTeam) {
+    hits.push(...searchGuide(question));
+    hits.sort((a, b) => b.score - a.score);
+    hits.splice(3);
+  }
   const llm = app.botLlm;
   if (llm) {
     try {
@@ -609,6 +647,7 @@ export async function answer(app, user, question) {
         question,
         facts: await factsFor(app, user),
         extracts: hits,
+        hrTeam,
       });
       if (text)
         return {
@@ -616,7 +655,10 @@ export async function answer(app, user, question) {
           source: "ai",
           answered: true,
           text,
-          links: hits.some((h) => h.kind === "policy") ? ["policies"] : [],
+          links: [
+            ...(hits.some((h) => h.kind === "policy") ? ["policies"] : []),
+            ...(hits.some((h) => h.kind === "guide") ? ["hrguide"] : []),
+          ],
         };
     } catch (e) {
       console.error("assistant fallback failed:", e.message);
@@ -628,8 +670,13 @@ export async function answer(app, user, question) {
       intent: "knowledge",
       source: top.kind,
       answered: true,
-      text: `${top.title}\n${excerpt(top.body)}${more.length ? `\n\nRelated: ${more.map((m) => m.title).join("; ")}` : ""}`,
-      links: top.kind === "policy" ? ["policies"] : [],
+      text: `${top.kind === "guide" ? "HR guide: " : ""}${top.title}\n${excerpt(top.body, top.kind === "guide" ? 2000 : 700)}${more.length ? `\n\nRelated: ${more.map((m) => m.title).join("; ")}` : ""}`,
+      links:
+        top.kind === "policy"
+          ? ["policies"]
+          : top.kind === "guide"
+            ? ["hrguide"]
+            : [],
     };
   }
   return {
