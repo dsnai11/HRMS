@@ -1,5 +1,6 @@
 import { HttpError, integer, number, optionalString, string } from "../http.js";
 import { answer } from "../bot.js";
+import { GUIDE, isHrTeam } from "../hr-guide.js";
 
 export function registerBot(router, app) {
   const { db, clock, rateLimit } = app;
@@ -74,6 +75,13 @@ export function registerBot(router, app) {
       return send(200, { ok: true });
     },
   );
+
+  // The HR guide, for the HR team only.
+  router.get("/api/hr-guide", async ({ user, send }) => {
+    if (!isHrTeam(user))
+      throw new HttpError(403, "The HR guide is for the HR team.");
+    return send(200, GUIDE);
+  });
 
   // ---- HR: knowledge base, question log, settings ----------------------------------------------------
   const entry = (b) => ({

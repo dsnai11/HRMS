@@ -594,3 +594,65 @@ test("Laxmi: knowledge base and policies, the question log, feedback, and the gr
   );
   assert.equal((await call("/admin/bot/knowledge", undefined, hr)).data.length, 0);
 });
+
+test("HR guide: only the HR team can read it, and Laxmi answers them from it", async (t) => {
+  const w = await world(t);
+  const { call, people, owner, app } = w;
+  const ask = async (question, token) =>
+    (await call("/bot/ask", { question }, token)).data;
+
+  // Employees and managers get neither the page nor guide answers.
+  for (const key of ["emp", "mgr"]) {
+    assert.equal((await call("/hr-guide", undefined, people[key].token)).status, 403);
+    const a = await ask("How do I run monthly payroll?", people[key].token);
+    assert.notEqual(a.source, "guide");
+    assert.doesNotMatch(a.text, /HR guide/);
+  }
+
+  // HR, payroll and the owner can read it.
+  for (const token of [people.hr.token, people.pay.token, owner]) {
+    const g = await call("/hr-guide", undefined, token);
+    assert.equal(g.status, 200);
+    assert.ok(g.data.length >= 20);
+    assert.ok(g.data.every((x) => x.title && x.area && x.steps.length));
+  }
+
+  const payroll = await ask("How do I run monthly payroll?", people.hr.token);
+  assert.equal(payroll.source, "guide");
+  assert.match(payroll.text, /^HR guide: Run monthly payroll/);
+  assert.match(payroll.text, /1\. /);
+  assert.deepEqual(payroll.links, ["hrguide"]);
+  const phone = await ask("how to approve a new phone", people.pay.token);
+  assert.match(phone.text, /Approve an employee's phone/);
+  // HR's own questions still come from their own records first.
+  assert.equal((await ask("what is my leave balance", people.hr.token)).source, "rules");
+
+  // A custom role with any right counts as HR team.
+  const role = await call(
+    "/admin/roles",
+    { name: "Desk", permissions: ["helpdesk.manage"] },
+    owner,
+  );
+  assert.equal(role.status, 201, JSON.stringify(role.data));
+  await setCustomRole(app, people.other.id, role.data.id);
+  assert.equal((await call("/hr-guide", undefined, people.other.token)).status, 200);
+
+  // The guide reaches the Claude fallback only for the HR team.
+  const seen = [];
+  app.botLlm = async (x) => {
+    seen.push(x);
+    return "Use the steps.";
+  };
+  await ask("what happens with payroll runs", people.hr.token);
+  await ask("what happens with payroll runs", people.emp.token);
+  assert.equal(seen[0].hrTeam, true);
+  assert.ok(seen[0].extracts.some((e) => e.kind === "guide"));
+  assert.equal(seen[1].hrTeam, false);
+  assert.ok(!seen[1].extracts.some((e) => e.kind === "guide"));
+});
+
+async function setCustomRole(app, userId, roleId) {
+  await app.db
+    .prepare("UPDATE users SET role='custom',custom_role_id=? WHERE id=?")
+    .run(roleId, userId);
+}

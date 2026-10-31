@@ -439,7 +439,10 @@ const BOT_LINKS = {
   policies: "Policies",
   helpdesk: "Helpdesk",
   learning: "My courses",
+  hrguide: "HR Guide",
 };
+// Shown only to the HR team, whose questions Laxmi also answers from the HR guide.
+const HR_SUGGESTIONS = ["How do I run payroll?", "How do I onboard a new joiner?"];
 const BOT_SUGGESTIONS = [
   "What is my leave balance?",
   "Apply casual leave tomorrow",
@@ -552,7 +555,7 @@ async function laxmiPage(id) {
                 )
                 .join("")
             : `<div class="chat-msg bot"><small>Laxmi</small><div>Namaste! I can tell you your leave balance, apply for leave, list holidays, and answer questions about pay, attendance and company policies.</div></div>`
-        }</div><div class="actions bot-chips">${BOT_SUGGESTIONS.map((s) => `<button class="secondary chip" data-suggest="${esc(s)}">${esc(s)}</button>`).join("")}</div><form class="chat-send" id="bot-form"><input name="question" maxlength="500" placeholder="Ask about leave, holidays, pay, attendance or a policy" autocomplete="off" required><button>Ask</button></form></div>`
+        }</div><div class="actions bot-chips">${[...BOT_SUGGESTIONS, ...((me.permissions ?? []).length ? HR_SUGGESTIONS : [])].map((s) => `<button class="secondary chip" data-suggest="${esc(s)}">${esc(s)}</button>`).join("")}</div><form class="chat-send" id="bot-form"><input name="question" maxlength="500" placeholder="Ask about leave, holidays, pay, attendance or a policy" autocomplete="off" required><button>Ask</button></form></div>`
       : "") +
     (has("bot.manage") ? '<div id="bot-admin"></div>' : "");
   const log = document.querySelector("#bot-log");
