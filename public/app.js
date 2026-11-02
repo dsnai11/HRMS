@@ -358,6 +358,7 @@ function navGroups() {
         has("attendance.read") && ["muster", "Monthly muster"],
         has("leave.manage") && ["leaveadmin", "Leave & holidays"],
         has("payroll.read") && ["payroll", "Payroll"],
+        has("budget.read") && ["budgets", "Branch budgets"],
         (has("recruitment.manage") || has("exit.manage")) && [
           "hiring",
           "Hiring & exits",
@@ -655,6 +656,7 @@ async function render() {
     if (page === "chat") return await chatPage(id);
     if (page === "laxmi") return await laxmiPage(id);
     if (page === "hrguide") return await hrGuidePage(id);
+    if (page === "budgets") return await budgetsPage(id);
     if (page === "hiring") return await hiringPage(id);
     if (page === "overview") {
       await hrDashboardPage(id);
@@ -1028,6 +1030,8 @@ const ORG_TABS = {
       ["code", "Code"],
       ["city", "City"],
       ["state", "State"],
+      ["zone", "Zone"],
+      ["region", "Region"],
     ],
   },
 };
@@ -1120,6 +1124,8 @@ function orgDialog(kind, spec, row) {
     code: ["Code", 20],
     city: ["City", 80],
     state: ["State", 80],
+    zone: ["Zone", 80],
+    region: ["Region", 80],
     level: ["Level (1 is lowest)", 3],
     salary_min: ["Pay from (₹ a year)", 12],
     salary_max: ["Pay up to (₹ a year)", 12],

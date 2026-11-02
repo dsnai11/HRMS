@@ -2892,7 +2892,7 @@ input[type="radio"] {
 /* Tables */
 th {
   background: rgba(248, 248, 251, 0.9);
-  color: #8b8d9a;
+  color: #5e6070;
   letter-spacing: 1.3px;
 }
 th:first-child {
@@ -4086,4 +4086,36 @@ button.dash-todo-item:hover {
     color: #000;
     background: none;
   }
+}
+
+/* Branch budgets */
+.pill.warn {
+  background: #fff1d6;
+  color: #7a4300;
+}
+[data-theme="dark"] .pill.warn {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fcd68a;
+}
+td.num,
+th.num {
+  text-align: right;
+}
+.budget-grid td.num {
+  white-space: nowrap;
+}
+.budget-cell {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-variant-numeric: tabular-nums;
+}
+.budget-months {
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  margin-top: 8px;
+}
+.budget-kpis .stat-value {
+  font-variant-numeric: tabular-nums;
+}
+.budget-fy select {
+  min-width: 120px;
 }

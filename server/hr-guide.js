@@ -576,4 +576,27 @@ export const GUIDE = [
     ],
     tips: ["Never share your password. Administrators can reset two-factor for someone who lost their phone."],
   },
+
+  // ---- Budgets --------------------------------------------------------------------------------
+  {
+    id: "branch-budgets",
+    area: "Budgets",
+    title: "Prepare, approve and track branch budgets",
+    who: "Finance or admin (budget.manage to prepare, budget.approve to approve; budget.read to view)",
+    keywords: "budget budgets branch branches head office ho zone region plan approve variance spend spending manpower sanctioned posts cost financial year fy",
+    steps: [
+      "Administration → Branch budgets → Setup: pick the head office (Jaipur HO) and import zones and regions for all branches from the sheet. Check the budget heads (Salaries, Reimbursements, Incentives, Recruitment, Training, Welfare) and add any you need.",
+      "Budget plan tab: choose the financial year (April to March). Click “Download sheet”, fill a yearly amount (or the twelve month columns) for each branch and head, and import it. Nothing is saved until every row is right. To start from last year, use “Copy from another year” with a percentage increase.",
+      "Click any amount in the plan to change one branch and head, or split it by month.",
+      "Manpower plan tab: set sanctioned posts by designation for each branch, one by one or from the sheet. The page shows people in post, openings being hired and vacant posts.",
+      "Click “Submit for approval”. Someone else with the right to approve budgets approves it or sends it back with a note. The person who submitted cannot approve.",
+      "After approval, every change needs a reason and is kept under Revisions.",
+      "Spending tab: enter spending for heads the HRMS does not record (training, recruitment, welfare and so on). Salaries come from approved payroll and reimbursements from approved claims by themselves.",
+      "Budget vs actual tab: see the budget to date against spending by zone, region or branch, with branches over budget or past 90% marked. Download it as CSV.",
+    ],
+    tips: [
+      "People count against the branch they are in today, so transfer people in the HRMS when they move.",
+      "A role limited to some branches sees and changes only those branches' budgets.",
+    ],
+  },
 ];
