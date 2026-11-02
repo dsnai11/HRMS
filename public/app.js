@@ -629,42 +629,7 @@ async function render() {
     if (page === "hrguide") return await hrGuidePage(id);
     if (page === "hiring") return await hiringPage(id);
     if (page === "overview") {
-      const [stats, active, sites, home] = await Promise.all([
-        api("/admin/overview"),
-        api("/admin/active?limit=20"),
-        api("/admin/workplaces"),
-        homeData(),
-      ]);
-      if (id !== renderId) return;
-      document.querySelector("#content").innerHTML =
-        heading(
-          "A clear view of your workplace",
-          "Your team’s attendance, at a glance.",
-          `<button class="secondary" id="refresh">↻ Refresh</button>`,
-        ) +
-        `<div class="stats">${[
-          ["Active employees", stats.employees, "Enabled company accounts"],
-          ["Working now", stats.active, "Open shifts across all dates"],
-          [
-            "Attended today",
-            stats.attended,
-            "Distinct employees who punched in",
-          ],
-          [
-            "Hours today",
-            stats.hours.toFixed(1),
-            "Shifts started today · includes active time",
-          ],
-        ]
-          .map(
-            ([label, value, desc], i) =>
-              `<div class="stat ${i === 1 ? "featured" : ""}"><div class="stat-label">${label}</div><div class="stat-value">${value}</div><small>${desc}</small></div>`,
-          )
-          .join(
-            "",
-          )}</div><div class="grid-two">${announcementsHtml(home.announcements)}${holidaysHtml(home.holidays)}</div><div class="card"><div class="card-head"><div><h2>Who’s working now</h2><p class="muted">Most recent punch location. No continuous tracking.</p></div><span class="pill">${stats.active} active shifts</span></div>${table(active)}${stats.active > active.length ? `<p class="muted">Showing the latest ${active.length}. See everyone under Administration → Attendance records.</p>` : ""}</div><div class="grid-two"><div class="card"><h2>Your workplaces</h2>${sites.length ? sites.map((s) => `<div class="site"><h3>${esc(s.name)}</h3><p class="muted">${s.latitude.toFixed(5)}, ${s.longitude.toFixed(5)}</p><span class="pill neutral">${s.radius} m radius</span></div>`).join("") : empty("Set up your first workplace", "Open Workplaces to define an attendance boundary.")}</div><div class="card"><div class="eyebrow">Designed for trust</div><h2>Right place. Right record.</h2><p class="muted">Employees punch in and out inside their assigned workplace. Every punch records server time and a fresh GPS reading.</p><div class="callout">Location is captured only at attendance events. GPS uncertainty must fit inside the workplace boundary.</div></div></div>`;
-      document.querySelector("#refresh").onclick = render;
-      announcementsWire();
+      await hrDashboardPage(id);
     } else if (page === "employees") {
       await employeesPage(id);
       await importPeopleCard(id);

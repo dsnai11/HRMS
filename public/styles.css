@@ -3259,9 +3259,10 @@ button.link {
 }
 /* Numbers line up in tables and stat cards. */
 td,
-.stat-value,
 .kv strong,
-.bell-n {
+.bell-n,
+.chart-bar-value,
+.chart-gridline span {
   font-variant-numeric: tabular-nums;
 }
 /* Long tables keep their header in view. */
@@ -3289,5 +3290,328 @@ td,
   .table-wrap {
     max-height: none;
     overflow: visible;
+  }
+}
+
+/* ---- HR dashboard ------------------------------------------------------------------------------
+   Data-dense layout: one hero figure, compact tiles, an attention list, then the trends. */
+.dash-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 24px;
+  margin-bottom: 20px;
+}
+.dash-head h1 {
+  margin: 4px 0 2px;
+}
+.dash-head p {
+  margin: 0;
+}
+.dash-top {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 2fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.dash-hero {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  margin: 0;
+}
+.dash-hero p {
+  margin: 0;
+}
+.dash-hero-value {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.dash-big {
+  font-size: 56px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -2px;
+  color: var(--ink);
+}
+.dash-meter {
+  height: 10px;
+  border-radius: 99px;
+  background: var(--red-50);
+  overflow: hidden;
+}
+.dash-meter span {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--red-hot), var(--red));
+  transition: width 0.6s ease-out;
+}
+.dash-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.dash-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 0;
+  min-height: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+button.dash-tile {
+  cursor: pointer;
+  transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+button.dash-tile:hover {
+  transform: translateY(-2px);
+  filter: none;
+}
+.dash-tile .stat-value {
+  font-size: 28px;
+}
+.dash-go {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  color: var(--red);
+  opacity: 0.5;
+  transition: opacity 0.15s ease-out, transform 0.15s ease-out;
+}
+button.dash-tile:hover .dash-go,
+button.dash-tile:focus-visible .dash-go {
+  opacity: 1;
+  transform: translateX(2px);
+}
+.dash-row {
+  margin-bottom: 16px;
+}
+.dash-row > .card,
+section.card.dash-row {
+  margin-bottom: 0;
+}
+.dash-todo {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.dash-todo-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--red-50);
+  color: var(--ink);
+  font-weight: 500;
+  text-align: left;
+  box-shadow: inset 3px 0 0 var(--red);
+}
+button.dash-todo-item:hover {
+  background: var(--red-100);
+  transform: none;
+  filter: none;
+}
+.dash-clear {
+  padding: 14px;
+  border-radius: 12px;
+  background: #f4f7f5;
+}
+.dash-people {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.dash-people li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dash-people small {
+  display: block;
+  color: var(--muted);
+}
+/* Charts: thin marks, rounded data ends, hairline grid, recessive axes. */
+.chart {
+  margin-top: 12px;
+}
+.chart-legend {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.chart-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.chart-plot {
+  position: relative;
+  height: 180px;
+  padding-left: 28px;
+}
+.chart-grid {
+  position: absolute;
+  inset: 0 0 22px 28px;
+}
+.chart-gridline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--line);
+}
+.chart-gridline span {
+  position: absolute;
+  right: calc(100% + 6px);
+  top: -8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.chart-slots {
+  position: absolute;
+  inset: 0 0 0 28px;
+  display: flex;
+  align-items: stretch;
+}
+.chart-slot {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  padding-bottom: 22px;
+  border-radius: 6px;
+  outline-offset: -2px;
+}
+.chart-slot:hover {
+  background: rgba(200, 16, 46, 0.04);
+}
+.chart-col {
+  position: relative;
+  width: 100%;
+  max-width: 20px;
+  min-height: 0;
+  border-radius: 4px 4px 0 0;
+  transition: height 0.5s ease-out;
+}
+.chart-col b {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.chart-x {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.chart-bars {
+  display: grid;
+  gap: 8px;
+}
+.chart-bar-row {
+  display: grid;
+  grid-template-columns: minmax(80px, 34%) 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 4px;
+  border-radius: 8px;
+}
+.chart-bar-row:hover {
+  background: rgba(200, 16, 46, 0.04);
+}
+.chart-bar-label {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.chart-bar-track {
+  height: 14px;
+}
+.chart-bar {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 0 4px 4px 0;
+  background: var(--red);
+  transition: width 0.5s ease-out;
+}
+.chart-bar-value {
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 2ch;
+  text-align: right;
+}
+.chart-table {
+  margin-top: 10px;
+  font-size: 13px;
+}
+.chart-table summary {
+  color: var(--muted);
+  min-height: 24px;
+}
+#chart-tip {
+  position: fixed;
+  z-index: 1000;
+  max-width: 260px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+}
+@media (max-width: 1100px) {
+  .dash-top {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .dash-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dash-big {
+    font-size: 48px;
+  }
+  .chart-plot {
+    height: 150px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash-meter span,
+  .chart-col,
+  .chart-bar,
+  button.dash-tile {
+    transition: none;
   }
 }
