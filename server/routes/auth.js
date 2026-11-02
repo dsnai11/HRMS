@@ -210,7 +210,7 @@ export function registerAuth(router, app) {
     async ({ req, user, companyId, send }) => {
       const company = await db
         .prepare(
-          "SELECT id,name,require_selfie,labels FROM companies WHERE id=?",
+          "SELECT id,name,require_selfie,require_biometric,labels FROM companies WHERE id=?",
         )
         .get(companyId);
       const job = await db
@@ -224,6 +224,7 @@ export function registerAuth(router, app) {
         company: company && {
           ...company,
           require_selfie: Boolean(company.require_selfie),
+          require_biometric: Boolean(company.require_biometric),
           labels: JSON.parse(company.labels || "{}"),
         },
         permissions: permissionsOf(user),

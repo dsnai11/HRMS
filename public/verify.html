@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Check a certificate</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="icon" type="image/png" href="/brand/favicon.png" />
+    <script src="/verify.js" defer></script>
+  </head>
+  <body class="payslip-page">
+    <main class="verify">
+      <article class="slip">
+        <header><div><img class="page-logo" src="/brand/logo.png" alt="" /><h1>Check a certificate</h1></div></header>
+        <form id="verify-form" class="chat-send">
+          <input name="no" placeholder="Certificate number, e.g. LIFC-2026-1A2B3C4D" maxlength="40" required autocomplete="off" aria-label="Certificate number" />
+          <button>Check</button>
+        </form>
+        <div id="verify-result" role="status"></div>
+      </article>
+    </main>
+  </body>
+</html>

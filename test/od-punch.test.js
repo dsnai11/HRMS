@@ -133,3 +133,64 @@ test("OD punch in and out from anywhere, sent for approval, counted only when ap
     .get(id);
   assert.equal(Number(used.n), 2);
 });
+
+test("punching can require the phone's fingerprint or face check", async (t) => {
+  let nowMs = Date.parse("2026-10-19T09:30:00+05:30");
+  const db = await openPglite();
+  await createAdmin(db, { name: "Admin", email: "admin@example.test", password: "Admin-password-123" });
+  const { server } = createApp({ db, clock: () => nowMs });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(
+    () =>
+      new Promise((resolve) => {
+        server.close(async () => {
+          await db.close();
+          resolve();
+        });
+        server.closeAllConnections();
+      }),
+  );
+  const base = `http://127.0.0.1:${server.address().port}/api`;
+  const call = async (path, body, token, headers = {}, method) => {
+    const res = await fetch(base + path, {
+      method: method ?? (body === undefined ? "GET" : "POST"),
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+    return { status: res.status, data: await res.json() };
+  };
+  const admin = (await call("/login", { email: "admin@example.test", password: "Admin-password-123", native: true })).data.token;
+  const office = { latitude: 26.9124, longitude: 75.7873, accuracy: 10 };
+  const site = (await call("/admin/workplaces", { name: "HO", latitude: office.latitude, longitude: office.longitude, radius: 150, max_accuracy: 50 }, admin)).data.id;
+  const id = (
+    await call("/admin/employees", { name: "Desk", email: "desk@example.test", password: "Temporary-pass-123", workplace_id: site }, admin)
+  ).data.id;
+  await db.prepare("UPDATE users SET must_change_password=0 WHERE id=?").run(id);
+  const device = { id: "desk-device-000000001", platform: "android", model: "Pixel" };
+  const reg = await call("/login", { email: "desk@example.test", password: "Temporary-pass-123", native: true, device });
+  const row = (await call("/admin/devices", undefined, admin)).data[0];
+  await call(`/admin/devices/${row.id}`, { status: "approved" }, admin, {}, "PATCH");
+  const headers = { "X-Device-Id": device.id, "X-Device-Secret": reg.data.deviceSecret };
+  const punch = (action, extra = {}) =>
+    call(
+      "/punch",
+      { action, location: { ...office, timestamp: nowMs }, signals: { emulator: false, rooted: false }, ...extra },
+      reg.data.token,
+      headers,
+    );
+
+  assert.equal((await call("/admin/attendance-settings", { require_biometric: true }, admin, {}, "PATCH")).status, 200);
+  assert.equal((await call("/admin/attendance-settings", undefined, admin)).data.require_biometric, 1);
+  assert.equal((await call("/me", undefined, reg.data.token, headers)).data.company.require_biometric, true);
+  const refused = await punch("in");
+  assert.equal(refused.status, 422);
+  assert.equal(refused.data.code, "biometric_required");
+  const ok = await punch("in", { biometric: true });
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+
+  // Switched off, the check is not needed.
+  await call("/admin/attendance-settings", { require_biometric: false }, admin, {}, "PATCH");
+  nowMs = Date.parse("2026-10-19T18:45:00+05:30");
+  const out = await punch("out");
+  assert.equal(out.status, 200, JSON.stringify(out.data));
+});

@@ -12,7 +12,7 @@ Addetto HRMS (Intero Software LLP) is an Indian HRMS with an employee mobile app
 | Selfie at punch                                            | yes (app 3.1.1) | Yes, optional per company; kept 90 days                                                                       |
 | Attendance source and history in app                       | yes             | Yes (source shown for corrections and on-duty)                                                                |
 | Device locking                                             | yes             | Yes: one approved phone per employee                                                                          |
-| Biometric machine import                                   | yes             | CSV import (employee code, date, in, out) with a dry run; no live device connection                           |
+| Biometric machine import                                   | yes             | Not needed: attendance is phone-only, with an optional fingerprint/face check before each punch. CSV import kept for old machine data |
 | Customisable attendance policies, shifts                   | yes             | Yes: shift rules per company, branch or employee, plus a day-by-day roster with rest days                     |
 | On-duty, work from home, regularisation                    | yes             | Yes, with manager approval                                                                                    |
 | Leave: policies, accrual, carry-over, cancel, holiday list | yes             | Yes (phone app too)                                                                                           |
@@ -28,7 +28,7 @@ Addetto HRMS (Intero Software LLP) is an Indian HRMS with an employee mobile app
 | Documents and acknowledgement                              | yes             | Yes: upload, verify, policy acknowledgement                                                                   |
 | Helpdesk                                                   | yes             | Yes (web and phone)                                                                                           |
 | Refer a candidate                                          | yes             | Yes (web and phone)                                                                                           |
-| LMS / courses                                              | yes             | Courses with lessons, quizzes, certificates, auto-assign and reminders; videos are links, not hosted          |
+| LMS / courses                                              | yes             | Courses, categories, catalogue, quizzes, department-wise assignment, certificates with renewal and public check, department report; videos are links |
 | Forgot password                                            | yes             | Yes: emailed link (needs email set up and `APP_URL`); otherwise HR resets                                     |
 | Version-gated punching                                     | yes             | Yes: set the oldest app version allowed to punch                                                              |
 | Data security: encrypted sensitive fields                  | yes             | Yes (AES-256-GCM), two-factor on the web, session controls                                                    |
@@ -39,4 +39,4 @@ Addetto HRMS (Intero Software LLP) is an Indian HRMS with an employee mobile app
 
 ## Still to build to match
 
-a live biometric device connection.
+Nothing from the comparison. A live biometric machine link is not needed: the company records attendance only on the phone app.

@@ -36,6 +36,7 @@ import {
   SESSION_KEY,
   biometricAvailable,
   biometricLockOn,
+  confirmForPunch,
   setBiometricLock,
 } from "../biometric";
 type User = {
@@ -61,7 +62,12 @@ type Shift = {
 };
 type Profile = {
   user: User;
-  company?: { id: number; name: string; require_selfie?: boolean } | null;
+  company?: {
+    id: number;
+    name: string;
+    require_selfie?: boolean;
+    require_biometric?: boolean;
+  } | null;
   workplace: { name: string; radius: number } | null;
   openShift: Shift | null;
   // Out of the office on duty during the open shift (OD Out), if so.
@@ -504,6 +510,7 @@ export default function Attendance() {
         ))
       )
         return;
+      if (current.company?.require_biometric) await confirmForPunch();
       let selfie: string | undefined;
       if (current.company?.require_selfie && !trip) {
         const photo = await takeSelfie();
@@ -554,6 +561,7 @@ export default function Attendance() {
           ...(od ? { od: { purpose: od } } : {}),
           ...(trip?.purpose ? { purpose: trip.purpose } : {}),
           ...(selfie ? { selfie } : {}),
+          ...(current.company?.require_biometric ? { biometric: true } : {}),
           location: {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,

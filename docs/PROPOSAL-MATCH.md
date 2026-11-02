@@ -45,7 +45,7 @@ Done: 360° profile (education, experience, skills, certifications with HR verif
 
 | ID | Story | Status |
 | --- | --- | --- |
-| ATT-01 | Mark attendance by phone with geo-fencing, or by biometric device | Phone: done. Biometric: **partly**, CSV import works; a live device connection needs the device make and its SDK or API |
+| ATT-01 | Mark attendance by phone with geo-fencing, or by biometric device | Done: the company records attendance only on the phone app (decided November 2026, no biometric machines). The phone's own fingerprint or face check can be required before every punch (Workplaces → Selfie and fingerprint at punch). CSV import remains for any old machine data |
 | ATT-02 | Fixed, flexible, rotational and night shifts, by person or department | Done: ready-made templates, assignment to company, branch, department or person, day-by-day roster |
 | ATT-03 | Regularisation with approval | Done |
 | ATT-04 | CL, PL, SL, LOP, comp-off, maternity; balances and status | Done, including comp-off earned on holidays and weekly offs with an expiry |
@@ -60,6 +60,10 @@ Done: salary structures, one-run payroll from attendance and leave, PF, ESI, pro
 ## Module 08: Performance
 
 Done: goals with weights, KRAs by designation, self and manager review, release, continuous feedback, and anonymous 360° rounds (PER-05): HR opens a round, each person is rated by themselves, their manager, their team and peers; results are group averages with unsigned comments, and the peers-and-team group stays hidden below three answers.
+
+## Module 09: Learning (LMS)
+
+Done: courses with categories, lessons (text, links, video links) and quizzes with a pass mark and attempt limit; a catalogue people join themselves; assignment to everyone, one person, every new joiner, or departments, branches and designations (people who join or move into a group are assigned automatically); due dates and reminders; certificates with random numbers, an optional validity that reopens the course for renewal, a full certificate history and a public check page (`/verify.html`); classroom and online sessions with attendance; a department report with CSV. On the phone: My learning, the catalogue and certificates. Videos are links, not hosted.
 
 ## Module 10: Employee self-service
 

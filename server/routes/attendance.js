@@ -188,6 +188,21 @@ export function registerAttendance(router, app) {
             : "This phone is no longer authorised. Contact your administrator.",
           `device_${device.status}`,
         );
+      // The phone reports that its fingerprint or face check passed; like the
+      // location signals, the server can only require the report, not prove it.
+      if (
+        b.biometric !== true &&
+        (
+          await db
+            .prepare("SELECT require_biometric FROM companies WHERE id=?")
+            .get(user.company_id)
+        ).require_biometric
+      )
+        throw new HttpError(
+          422,
+          "Confirm with your fingerprint or face to punch. Update the app if it does not ask.",
+          "biometric_required",
+        );
       await closeStaleShifts(app, user.id);
       const selfie = trip ? null : await readSelfie(b.selfie, user.company_id);
       stored = selfie ? await app.blobs.put(selfie, "selfies") : null;

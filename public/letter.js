@@ -17,6 +17,8 @@ const esc = (v) =>
         ? `/api/admin/offers/${id}/letter`
         : q.get("type") === "certificate"
           ? `/api/trainings/records/${id}/certificate`
+          : q.get("type") === "cert"
+            ? `/api/certificates/${id}`
           : q.get("type") === "change"
             ? `/api/admin/changes/${id}/letter`
             : `/api/admin/exits/${id}/letter?kind=${encodeURIComponent(q.get("kind") || "experience")}`;
