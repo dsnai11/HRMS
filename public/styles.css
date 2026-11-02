@@ -3974,6 +3974,24 @@ button.dash-todo-item:hover {
   color: #fff;
 }
 
+/* Profile menu: it sits inside the dark top bar, so its items need the page's text
+   colour set explicitly (otherwise they inherit the top bar's white). */
+.topbar .me-drop button {
+  color: var(--ink);
+  background: transparent;
+  box-shadow: none;
+  filter: none;
+}
+.topbar .me-drop button:hover,
+.topbar .me-drop button:focus-visible {
+  background: var(--red-50);
+  color: var(--red);
+}
+[data-theme="dark"] .topbar .me-drop button:hover,
+[data-theme="dark"] .topbar .me-drop button:focus-visible {
+  color: #fff;
+}
+
 /* Day | Night switch: in the top bar (always dark) and on the sign-in panel */
 .theme-switch {
   display: inline-flex;
