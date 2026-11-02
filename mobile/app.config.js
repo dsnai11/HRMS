@@ -10,7 +10,8 @@ module.exports = {
     slug: "laxmi-india-hrms",
     scheme: "laxmihrms",
     version: "1.0.0",
-    orientation: "portrait",
+    // Phones and tablets may turn sideways; content stays centred at a readable width.
+    orientation: "default",
     userInterfaceStyle: "light",
     icon: "./assets/icon.png",
     web: { favicon: "./assets/favicon.png" },

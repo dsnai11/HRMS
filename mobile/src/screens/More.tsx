@@ -3485,8 +3485,10 @@ const s = StyleSheet.create({
   chipOn: { backgroundColor: "#c8102e" },
   chipText: { color: "#c8102e", fontWeight: "600", fontSize: 13 },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  // Wraps instead of overflowing on narrow phones and with large text sizes.
   row: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 10,
@@ -3580,8 +3582,8 @@ const s = StyleSheet.create({
     justifyContent: "center",
   },
   odBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
-  tiles: { flexDirection: "row", gap: 12 },
-  tile: { flex: 1, borderRadius: 14, padding: 14, gap: 2 },
+  tiles: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  tile: { flex: 1, minWidth: 130, borderRadius: 14, padding: 14, gap: 2 },
   tileLabel: { color: "#fff", fontWeight: "700", fontSize: 12 },
   tileValue: { color: "#fff", fontWeight: "800", fontSize: 22 },
   galleryCard: { backgroundColor: "#171a28", borderColor: "#2b2f45" },
@@ -3625,7 +3627,7 @@ const s = StyleSheet.create({
   albumWrap: { flex: 1, padding: 18, paddingTop: 48, gap: 12, backgroundColor: "#fff" },
   albumGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   albumThumb: { width: 104, height: 104, borderRadius: 8, backgroundColor: "#eee" },
-  tabsRow: { flexDirection: "row", gap: 10, justifyContent: "center" },
+  tabsRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "center" },
   crumb: {
     backgroundColor: "#fff",
     borderRadius: 10,

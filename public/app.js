@@ -392,6 +392,7 @@ const NAV_ICONS = {
   Reimbursement: '<path d="M6 4h12M6 9h12M9 4c6 0 6 10 0 10H6l8 7"/>',
   Connect: '<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>',
   Administration: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
@@ -428,6 +429,51 @@ const svgIcon = (name, fallback = "") =>
 let focusContent = false;
 
 let navOpen = null;
+// On phones the sidebar is a drawer opened from the top bar; it closes on a choice,
+// on the backdrop and on Escape, and hands focus back to the menu button.
+function wireMenuDrawer() {
+  const layout = document.querySelector(".layout");
+  const toggle = document.querySelector("#menu-toggle");
+  const backdrop = document.querySelector("#nav-backdrop");
+  const set = (open) => {
+    layout.classList.toggle("nav-open", open);
+    backdrop.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    document.body.classList.toggle("no-scroll", open);
+    if (open) document.querySelector("#sidebar .nav button")?.focus();
+  };
+  toggle.onclick = () => set(!layout.classList.contains("nav-open"));
+  backdrop.onclick = () => (set(false), toggle.focus());
+  document.querySelector("#sidebar").onkeydown = (e) => {
+    if (e.key === "Escape" && layout.classList.contains("nav-open")) {
+      set(false);
+      toggle.focus();
+    }
+  };
+  document.body.classList.remove("no-scroll");
+}
+// Tables become stacked cards on phones (see styles.css): each cell is labelled with its
+// column heading. Runs on every change to the page, so new tables and dialogs are covered.
+function labelTables() {
+  document.querySelectorAll("table").forEach((t) => {
+    const heads = [...(t.tHead?.rows[0]?.cells ?? [])].flatMap((th) =>
+      Array(th.colSpan || 1).fill(th.textContent.trim()),
+    );
+    if (!heads.length || t.classList.contains("table-keep")) return;
+    t.classList.add("stackable");
+    for (const body of [...t.tBodies, ...(t.tFoot ? [t.tFoot] : [])])
+      for (const row of body.rows) {
+        let i = 0;
+        for (const cell of row.cells) {
+          if (heads[i] && !cell.dataset.label) cell.dataset.label = heads[i];
+          i += cell.colSpan || 1;
+        }
+      }
+  });
+}
+// Mutation callbacks already come in batches, before the page is painted.
+new MutationObserver(labelTables).observe(document.documentElement, { childList: true, subtree: true });
 function shell() {
   const groups = navGroups();
   const current = groups.find(([, , items]) =>
@@ -443,7 +489,7 @@ function shell() {
     )
     .join("");
   const sub = [me.employee_code, me.designation].filter(Boolean);
-  app.innerHTML = `<a class="skip-link" href="#content">Skip to main content</a><div class="layout"><aside class="sidebar">${brand()}<nav class="nav">${nav}</nav><div class="sidebar-foot"><strong>${esc(me.company?.name || config.company)}</strong>${esc(config.timezone)}</div></aside><main class="main"><header class="topbar"><div class="topbar-left">${me.role === "super_admin" ? "" : '<div class="people-search"><input id="people-q" type="search" placeholder="Search people across the company" aria-label="Search people" autocomplete="off"><div id="people-out" class="people-out" hidden></div></div>'}</div><div class="user">${companies.length > 1 ? `<select id="company" aria-label="Company">${companies.map((c) => `<option value="${c.id}" ${c.id === scope ? "selected" : ""}>${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("")}</select>` : ""}${themeToggle()}<button class="ghost bell" id="bell" aria-label="Notifications">${svgIcon("bell")}<span id="bell-n" class="bell-n"></span></button><div class="me-menu"><button type="button" class="me-button" id="me-button" aria-haspopup="true" aria-expanded="false"><span class="avatar">${initials(me.name)}</span><span class="me-text"><strong>${esc(sub[0] || me.name)}</strong><small>${esc(sub[1] || (sub[0] ? me.name : ""))}</small></span><span class="chev" aria-hidden="true">⌄</span></button><div class="me-drop" id="me-drop" hidden><div class="me-name">${esc(me.name)}</div><button type="button" data-page="profile">Personal Information</button><button type="button" id="password">Change Password</button><button type="button" id="logout">Log Out</button></div></div></div></header><section class="content" id="content" tabindex="-1"><div class="loading">Loading…</div></section><footer class="foot">© ${new Date().getFullYear()}, ${esc(me.company?.name || config.company)}</footer></main></div>`;
+  app.innerHTML = `<a class="skip-link" href="#content">Skip to main content</a><div class="layout"><aside class="sidebar" id="sidebar" aria-label="Main menu">${brand()}<nav class="nav">${nav}</nav><div class="sidebar-foot"><div class="drawer-theme">${themeToggle()}</div><strong>${esc(me.company?.name || config.company)}</strong>${esc(config.timezone)}</div></aside><div class="nav-backdrop" id="nav-backdrop" hidden></div><main class="main"><header class="topbar"><div class="topbar-left"><button type="button" class="ghost menu-toggle" id="menu-toggle" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false">${svgIcon("menu")}</button>${me.role === "super_admin" ? "" : '<div class="people-search"><input id="people-q" type="search" placeholder="Search people" aria-label="Search people across the company" autocomplete="off"><div id="people-out" class="people-out" hidden></div></div>'}</div><div class="user">${companies.length > 1 ? `<select id="company" aria-label="Company">${companies.map((c) => `<option value="${c.id}" ${c.id === scope ? "selected" : ""}>${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("")}</select>` : ""}${themeToggle()}<button class="ghost bell" id="bell" aria-label="Notifications">${svgIcon("bell")}<span id="bell-n" class="bell-n"></span></button><div class="me-menu"><button type="button" class="me-button" id="me-button" aria-haspopup="true" aria-expanded="false"><span class="avatar">${initials(me.name)}</span><span class="me-text"><strong>${esc(sub[0] || me.name)}</strong><small>${esc(sub[1] || (sub[0] ? me.name : ""))}</small></span><span class="chev" aria-hidden="true">⌄</span></button><div class="me-drop" id="me-drop" hidden><div class="me-name">${esc(me.name)}</div><button type="button" data-page="profile">Personal Information</button><button type="button" id="password">Change Password</button><button type="button" id="logout">Log Out</button></div></div></div></header><section class="content" id="content" tabindex="-1"><div class="loading">Loading…</div></section><footer class="foot">© ${new Date().getFullYear()}, ${esc(me.company?.name || config.company)}</footer></main></div>`;
   document.querySelectorAll("[data-group]").forEach(
     (b) =>
       (b.onclick = () => {
@@ -457,6 +503,7 @@ function shell() {
         });
       }),
   );
+  wireMenuDrawer();
   const drop = document.querySelector("#me-drop");
   document.querySelector("#me-button").onclick = (e) => {
     e.stopPropagation();
