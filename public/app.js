@@ -374,6 +374,31 @@ function navGroups() {
     .map(([label, icon, items]) => [label, icon, items.filter(Boolean)])
     .filter(([, , items]) => items.length);
 }
+// Menu icons: one outline set (24 px grid, 1.8 stroke), drawn inline so the page needs
+// nothing from outside. Decorative beside their labels, so hidden from screen readers.
+const NAV_ICONS = {
+  Home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/>',
+  Overview: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
+  Attendance: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  Leave: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/>',
+  TDS: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+  Employee: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  Documents: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  PMR: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
+  Recruitment: '<circle cx="10" cy="8" r="4"/><path d="M2 21a8 8 0 0 1 16 0"/><path d="M19 8v6M16 11h6"/>',
+  LMS: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2 9 2 12 0v-5"/>',
+  Reimbursement: '<path d="M6 4h12M6 9h12M9 4c6 0 6 10 0 10H6l8 7"/>',
+  Connect: '<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>',
+  Administration: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
+};
+const svgIcon = (name, fallback = "") =>
+  NAV_ICONS[name]
+    ? `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${NAV_ICONS[name]}</svg>`
+    : `<span aria-hidden="true">${fallback}</span>`;
+// Set when the person picks a page from the menu, so focus moves to the new page's content.
+let focusContent = false;
+
 let navOpen = null;
 function shell() {
   const groups = navGroups();
@@ -385,12 +410,12 @@ function shell() {
   const nav = groups
     .map(([label, icon, items]) =>
       items.length === 1 && ["Home", "Overview"].includes(label)
-        ? `<button data-page="${items[0][0]}" class="${page === items[0][0] ? "selected" : ""}"><span class="nav-icon">${icon}</span>${items[0][1]}</button>`
-        : `<button type="button" class="nav-group ${label === navOpen ? "open" : ""}" data-group="${esc(label)}" aria-expanded="${label === navOpen}"><span class="nav-icon">${icon}</span>${esc(label)}<span class="chev">›</span></button><div class="nav-sub" ${label === navOpen ? "" : "hidden"}>${items.map(([id, text]) => `<button data-page="${id}" class="${page === id ? "selected" : ""}">${text}</button>`).join("")}</div>`,
+        ? `<button data-page="${items[0][0]}" class="${page === items[0][0] ? "selected" : ""}"${page === items[0][0] ? ' aria-current="page"' : ""}><span class="nav-icon">${svgIcon(label, icon)}</span>${items[0][1]}</button>`
+        : `<button type="button" class="nav-group ${label === navOpen ? "open" : ""}" data-group="${esc(label)}" aria-expanded="${label === navOpen}"><span class="nav-icon">${svgIcon(label, icon)}</span>${esc(label)}<span class="chev" aria-hidden="true">›</span></button><div class="nav-sub" ${label === navOpen ? "" : "hidden"}>${items.map(([id, text]) => `<button data-page="${id}" class="${page === id ? "selected" : ""}"${page === id ? ' aria-current="page"' : ""}>${text}</button>`).join("")}</div>`,
     )
     .join("");
   const sub = [me.employee_code, me.designation].filter(Boolean);
-  app.innerHTML = `<div class="layout"><aside class="sidebar">${brand()}<nav class="nav">${nav}</nav><div class="sidebar-foot"><strong>${esc(me.company?.name || config.company)}</strong>${esc(config.timezone)}</div></aside><main class="main"><header class="topbar"><div class="topbar-left">${me.role === "super_admin" ? "" : '<div class="people-search"><input id="people-q" type="search" placeholder="Search people across the company" aria-label="Search people" autocomplete="off"><div id="people-out" class="people-out" hidden></div></div>'}</div><div class="user">${companies.length > 1 ? `<select id="company" aria-label="Company">${companies.map((c) => `<option value="${c.id}" ${c.id === scope ? "selected" : ""}>${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("")}</select>` : ""}<button class="ghost bell" id="bell" aria-label="Notifications">🔔<span id="bell-n" class="bell-n"></span></button><div class="me-menu"><button type="button" class="me-button" id="me-button" aria-haspopup="true" aria-expanded="false"><span class="avatar">${initials(me.name)}</span><span class="me-text"><strong>${esc(sub[0] || me.name)}</strong><small>${esc(sub[1] || (sub[0] ? me.name : ""))}</small></span><span class="chev">⌄</span></button><div class="me-drop" id="me-drop" hidden><div class="me-name">${esc(me.name)}</div><button type="button" data-page="profile">Personal Information</button><button type="button" id="password">Change Password</button><button type="button" id="logout">Log Out</button></div></div></div></header><section class="content" id="content"><div class="loading">Loading…</div></section><footer class="foot">© ${new Date().getFullYear()}, ${esc(me.company?.name || config.company)}</footer></main></div>`;
+  app.innerHTML = `<a class="skip-link" href="#content">Skip to main content</a><div class="layout"><aside class="sidebar">${brand()}<nav class="nav">${nav}</nav><div class="sidebar-foot"><strong>${esc(me.company?.name || config.company)}</strong>${esc(config.timezone)}</div></aside><main class="main"><header class="topbar"><div class="topbar-left">${me.role === "super_admin" ? "" : '<div class="people-search"><input id="people-q" type="search" placeholder="Search people across the company" aria-label="Search people" autocomplete="off"><div id="people-out" class="people-out" hidden></div></div>'}</div><div class="user">${companies.length > 1 ? `<select id="company" aria-label="Company">${companies.map((c) => `<option value="${c.id}" ${c.id === scope ? "selected" : ""}>${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("")}</select>` : ""}<button class="ghost bell" id="bell" aria-label="Notifications">${svgIcon("bell")}<span id="bell-n" class="bell-n"></span></button><div class="me-menu"><button type="button" class="me-button" id="me-button" aria-haspopup="true" aria-expanded="false"><span class="avatar">${initials(me.name)}</span><span class="me-text"><strong>${esc(sub[0] || me.name)}</strong><small>${esc(sub[1] || (sub[0] ? me.name : ""))}</small></span><span class="chev" aria-hidden="true">⌄</span></button><div class="me-drop" id="me-drop" hidden><div class="me-name">${esc(me.name)}</div><button type="button" data-page="profile">Personal Information</button><button type="button" id="password">Change Password</button><button type="button" id="logout">Log Out</button></div></div></div></header><section class="content" id="content" tabindex="-1"><div class="loading">Loading…</div></section><footer class="foot">© ${new Date().getFullYear()}, ${esc(me.company?.name || config.company)}</footer></main></div>`;
   document.querySelectorAll("[data-group]").forEach(
     (b) =>
       (b.onclick = () => {
@@ -432,11 +457,16 @@ function shell() {
   });
   document.querySelectorAll("[data-page]").forEach(
     (b) =>
-      (b.onclick = () => {
+      (b.onclick = async () => {
         page = b.dataset.page;
-        render();
+        focusContent = true;
+        await render();
       }),
   );
+  if (focusContent) {
+    focusContent = false;
+    document.querySelector("#content")?.focus();
+  }
   document.querySelector("#logout").onclick = (e) =>
     busy(e.target, async () => {
       await api("/logout", {});
@@ -599,42 +629,7 @@ async function render() {
     if (page === "hrguide") return await hrGuidePage(id);
     if (page === "hiring") return await hiringPage(id);
     if (page === "overview") {
-      const [stats, active, sites, home] = await Promise.all([
-        api("/admin/overview"),
-        api("/admin/active?limit=20"),
-        api("/admin/workplaces"),
-        homeData(),
-      ]);
-      if (id !== renderId) return;
-      document.querySelector("#content").innerHTML =
-        heading(
-          "A clear view of your workplace",
-          "Your team’s attendance, at a glance.",
-          `<button class="secondary" id="refresh">↻ Refresh</button>`,
-        ) +
-        `<div class="stats">${[
-          ["Active employees", stats.employees, "Enabled company accounts"],
-          ["Working now", stats.active, "Open shifts across all dates"],
-          [
-            "Attended today",
-            stats.attended,
-            "Distinct employees who punched in",
-          ],
-          [
-            "Hours today",
-            stats.hours.toFixed(1),
-            "Shifts started today · includes active time",
-          ],
-        ]
-          .map(
-            ([label, value, desc], i) =>
-              `<div class="stat ${i === 1 ? "featured" : ""}"><div class="stat-label">${label}</div><div class="stat-value">${value}</div><small>${desc}</small></div>`,
-          )
-          .join(
-            "",
-          )}</div><div class="grid-two">${announcementsHtml(home.announcements)}${holidaysHtml(home.holidays)}</div><div class="card"><div class="card-head"><div><h2>Who’s working now</h2><p class="muted">Most recent punch location. No continuous tracking.</p></div><span class="pill">${stats.active} active shifts</span></div>${table(active)}${stats.active > active.length ? `<p class="muted">Showing the latest ${active.length}. See everyone under Administration → Attendance records.</p>` : ""}</div><div class="grid-two"><div class="card"><h2>Your workplaces</h2>${sites.length ? sites.map((s) => `<div class="site"><h3>${esc(s.name)}</h3><p class="muted">${s.latitude.toFixed(5)}, ${s.longitude.toFixed(5)}</p><span class="pill neutral">${s.radius} m radius</span></div>`).join("") : empty("Set up your first workplace", "Open Workplaces to define an attendance boundary.")}</div><div class="card"><div class="eyebrow">Designed for trust</div><h2>Right place. Right record.</h2><p class="muted">Employees punch in and out inside their assigned workplace. Every punch records server time and a fresh GPS reading.</p><div class="callout">Location is captured only at attendance events. GPS uncertainty must fit inside the workplace boundary.</div></div></div>`;
-      document.querySelector("#refresh").onclick = render;
-      announcementsWire();
+      await hrDashboardPage(id);
     } else if (page === "employees") {
       await employeesPage(id);
       await importPeopleCard(id);

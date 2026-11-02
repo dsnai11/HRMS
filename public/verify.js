@@ -19,7 +19,14 @@ const day = (d) =>
 
 async function check(no) {
   out.innerHTML = '<p class="muted">Checking…</p>';
-  const res = await fetch(`/api/certificates/verify/${encodeURIComponent(no)}`);
+  let res;
+  try {
+    res = await fetch(`/api/certificates/verify/${encodeURIComponent(no)}`);
+  } catch {
+    out.innerHTML =
+      '<p class="error-text">Could not reach the server. Check your connection and press Check again.</p>';
+    return;
+  }
   const d = await res.json().catch(() => ({}));
   if (!res.ok) {
     out.innerHTML = `<p class="error-text">${esc(d.error || "Could not check right now. Try again later.")}</p>`;

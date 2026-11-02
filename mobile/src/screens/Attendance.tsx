@@ -880,8 +880,8 @@ export default function Attendance() {
                     style={s.eye}
                     hitSlop={10}
                   >
-                    <Text style={{ fontSize: 18 }}>
-                      {showPassword ? "🙈" : "👁"}
+                    <Text style={s.eyeText}>
+                      {showPassword ? "Hide" : "Show"}
                     </Text>
                   </Pressable>
                 </View>
@@ -1389,11 +1389,14 @@ const s = StyleSheet.create({
   barSub: { color: "#d7d8df", fontSize: 11 },
   eye: {
     position: "absolute",
-    right: 14,
+    right: 6,
     top: 0,
     bottom: 0,
+    minWidth: 48,
+    alignItems: "center",
     justifyContent: "center",
   },
+  eyeText: { color: "#c8102e", fontSize: 14, fontWeight: "700" },
   menuUser: {
     backgroundColor: "#8c0416",
     paddingTop: 48,

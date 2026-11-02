@@ -122,6 +122,21 @@ export const GUIDE = [
 
   // ---- Attendance ----------------------------------------------------------------------------
   {
+    id: "dashboard",
+    area: "Attendance",
+    title: "Start the day on the HR dashboard",
+    who: "HR (attendance.read; insights.read for the trends)",
+    keywords: "dashboard overview home today summary kpi attention trend headcount",
+    steps: [
+      "Open Overview. The big number is how many people have punched in today, out of everyone active.",
+      "The tiles show who is working now, on leave, leave waiting, open positions, helpdesk tickets and people serving notice. Click a tile to open that page.",
+      "Work down “Needs your attention”: it lists what is waiting for HR, most urgent first.",
+      "Below are the trends: attendance for 14 days, headcount by department, joiners and leavers for 12 months, the hiring pipeline, and upcoming birthdays and work anniversaries.",
+      "Hover over a bar, or tab to it with the keyboard, to see its exact number. “View as table” under each chart shows all the numbers.",
+    ],
+    tips: ["Press Refresh to reload today's numbers; the page does not refresh by itself."],
+  },
+  {
     id: "attendance-daily",
     area: "Attendance",
     title: "Check daily attendance and suspicious punches",
