@@ -3188,3 +3188,106 @@ progress.meter::-moz-progress-bar {
 .verify form {
   margin: 16px 0;
 }
+
+/* ---- UI UX Pro Max pass: accessibility, targets, data readability ------------------------------
+   Data-dense enterprise dashboard rules on top of the red-and-white theme. */
+:root {
+  /* Secondary text darkened to stay above 4.5:1 on the tinted page and cards. */
+  --muted: #5e6070;
+}
+.skip-link {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 1000;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(-160%);
+  transition: transform 0.15s ease-out;
+}
+.skip-link:focus {
+  transform: none;
+}
+.content:focus {
+  outline: none;
+}
+.icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.bell .icon {
+  width: 20px;
+  height: 20px;
+}
+/* Every control looks and behaves clickable, with no tap delay on touch screens. */
+button,
+a.button,
+summary,
+select,
+label.check {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+/* Pointer targets: at least 36 px, and 32 px for the small buttons inside table rows. */
+button,
+a.button {
+  min-height: 36px;
+}
+td button,
+td a.button,
+.activity button,
+button.chip {
+  min-height: 32px;
+}
+button.link {
+  min-height: 24px;
+}
+/* Numbers line up in tables and stat cards. */
+td,
+.stat-value,
+.kv strong,
+.bell-n {
+  font-variant-numeric: tabular-nums;
+}
+/* Long tables keep their header in view. */
+.table-wrap {
+  max-height: 70vh;
+  overflow: auto;
+}
+.table-wrap thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+/* Long codes, emails and links wrap instead of pushing the page sideways. */
+td,
+.callout,
+.activity {
+  overflow-wrap: anywhere;
+}
+@media print {
+  .skip-link {
+    display: none;
+  }
+  .table-wrap {
+    max-height: none;
+    overflow: visible;
+  }
+}
