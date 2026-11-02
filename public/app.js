@@ -134,7 +134,8 @@ const empty = (title, description) =>
   `<div class="empty"><div class="empty-icon">◎</div><strong>${esc(title)}</strong>${esc(description)}</div>`;
 function login() {
   if (config.setupRequired) return setup();
-  app.innerHTML = `<div class="login"><section class="login-story">${brand()}<div><div class="eyebrow">${esc(config.company)}</div><h1>Your workplace, in one place</h1><p>Attendance, leave, pay and requests for everyone at ${esc(config.company)}.</p></div><footer class="muted">© ${new Date().getFullYear()}, ${esc(config.company)}</footer></section><section class="login-panel"><h2>Sign In</h2><p class="muted">Use your company email and password.</p><form id="login"><label>Email address<input type="email" name="email" autocomplete="username" placeholder="you@company.com" required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button>Sign in →</button><a href="#" id="forgot" class="forgot">Forgot password?</a></form><div id="sso"></div><p class="login-footer">Employees: use the credentials provided by your administrator.<br>Location is requested only when you punch in or out.</p></section></div>`;
+  app.innerHTML = `<div class="login"><section class="login-story">${brand()}<div><div class="eyebrow">${esc(config.company)}</div><h1>Your workplace, in one place</h1><p>Attendance, leave, pay and requests for everyone at ${esc(config.company)}.</p></div><footer class="muted">© ${new Date().getFullYear()}, ${esc(config.company)}</footer></section><section class="login-panel"><div class="login-theme">${themeToggle()}</div><h2>Sign In</h2><p class="muted">Use your company email and password.</p><form id="login"><label>Email address<input type="email" name="email" autocomplete="username" placeholder="you@company.com" required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button>Sign in →</button><a href="#" id="forgot" class="forgot">Forgot password?</a></form><div id="sso"></div><p class="login-footer">Employees: use the credentials provided by your administrator.<br>Location is requested only when you punch in or out.</p></section></div>`;
+  wireThemeToggle();
   document.querySelector("#forgot")?.addEventListener("click", forgotDialog);
   // Google Workspace / Microsoft 365 sign-in, when the server has it set up.
   const ssoErrors = {
@@ -391,7 +392,33 @@ const NAV_ICONS = {
   Connect: '<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>',
   Administration: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
 };
+const darkTheme = () => document.documentElement.dataset.theme !== "light";
+// Day (red and white) or Night (dark command centre). Until someone picks, it follows the
+// computer's or phone's own light/dark setting; a pick is remembered on this browser.
+function themeToggle() {
+  const dark = darkTheme();
+  return `<div class="theme-switch" role="group" aria-label="Day or night look"><button type="button" data-theme-set="light" aria-pressed="${!dark}">${svgIcon("sun")}<span>Day</span></button><button type="button" data-theme-set="dark" aria-pressed="${dark}">${svgIcon("moon")}<span>Night</span></button></div>`;
+}
+function wireThemeToggle() {
+  document.querySelectorAll("[data-theme-set]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const next = b.dataset.themeSet;
+        document.documentElement.dataset.theme = next;
+        try {
+          localStorage.setItem("hrms-theme", next);
+        } catch {
+          /* the switch still works for this visit */
+        }
+        document
+          .querySelectorAll("[data-theme-set]")
+          .forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.themeSet === next)));
+      }),
+  );
+}
 const svgIcon = (name, fallback = "") =>
   NAV_ICONS[name]
     ? `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${NAV_ICONS[name]}</svg>`
@@ -415,7 +442,7 @@ function shell() {
     )
     .join("");
   const sub = [me.employee_code, me.designation].filter(Boolean);
-  app.innerHTML = `<a class="skip-link" href="#content">Skip to main content</a><div class="layout"><aside class="sidebar">${brand()}<nav class="nav">${nav}</nav><div class="sidebar-foot"><strong>${esc(me.company?.name || config.company)}</strong>${esc(config.timezone)}</div></aside><main class="main"><header class="topbar"><div class="topbar-left">${me.role === "super_admin" ? "" : '<div class="people-search"><input id="people-q" type="search" placeholder="Search people across the company" aria-label="Search people" autocomplete="off"><div id="people-out" class="people-out" hidden></div></div>'}</div><div class="user">${companies.length > 1 ? `<select id="company" aria-label="Company">${companies.map((c) => `<option value="${c.id}" ${c.id === scope ? "selected" : ""}>${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("")}</select>` : ""}<button class="ghost bell" id="bell" aria-label="Notifications">${svgIcon("bell")}<span id="bell-n" class="bell-n"></span></button><div class="me-menu"><button type="button" class="me-button" id="me-button" aria-haspopup="true" aria-expanded="false"><span class="avatar">${initials(me.name)}</span><span class="me-text"><strong>${esc(sub[0] || me.name)}</strong><small>${esc(sub[1] || (sub[0] ? me.name : ""))}</small></span><span class="chev" aria-hidden="true">⌄</span></button><div class="me-drop" id="me-drop" hidden><div class="me-name">${esc(me.name)}</div><button type="button" data-page="profile">Personal Information</button><button type="button" id="password">Change Password</button><button type="button" id="logout">Log Out</button></div></div></div></header><section class="content" id="content" tabindex="-1"><div class="loading">Loading…</div></section><footer class="foot">© ${new Date().getFullYear()}, ${esc(me.company?.name || config.company)}</footer></main></div>`;
+  app.innerHTML = `<a class="skip-link" href="#content">Skip to main content</a><div class="layout"><aside class="sidebar">${brand()}<nav class="nav">${nav}</nav><div class="sidebar-foot"><strong>${esc(me.company?.name || config.company)}</strong>${esc(config.timezone)}</div></aside><main class="main"><header class="topbar"><div class="topbar-left">${me.role === "super_admin" ? "" : '<div class="people-search"><input id="people-q" type="search" placeholder="Search people across the company" aria-label="Search people" autocomplete="off"><div id="people-out" class="people-out" hidden></div></div>'}</div><div class="user">${companies.length > 1 ? `<select id="company" aria-label="Company">${companies.map((c) => `<option value="${c.id}" ${c.id === scope ? "selected" : ""}>${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("")}</select>` : ""}${themeToggle()}<button class="ghost bell" id="bell" aria-label="Notifications">${svgIcon("bell")}<span id="bell-n" class="bell-n"></span></button><div class="me-menu"><button type="button" class="me-button" id="me-button" aria-haspopup="true" aria-expanded="false"><span class="avatar">${initials(me.name)}</span><span class="me-text"><strong>${esc(sub[0] || me.name)}</strong><small>${esc(sub[1] || (sub[0] ? me.name : ""))}</small></span><span class="chev" aria-hidden="true">⌄</span></button><div class="me-drop" id="me-drop" hidden><div class="me-name">${esc(me.name)}</div><button type="button" data-page="profile">Personal Information</button><button type="button" id="password">Change Password</button><button type="button" id="logout">Log Out</button></div></div></div></header><section class="content" id="content" tabindex="-1"><div class="loading">Loading…</div></section><footer class="foot">© ${new Date().getFullYear()}, ${esc(me.company?.name || config.company)}</footer></main></div>`;
   document.querySelectorAll("[data-group]").forEach(
     (b) =>
       (b.onclick = () => {
@@ -443,6 +470,7 @@ function shell() {
     });
   }
   bellInit();
+  wireThemeToggle();
   chatInit();
   peopleSearch();
   document.querySelector("#company")?.addEventListener("change", async (e) => {
