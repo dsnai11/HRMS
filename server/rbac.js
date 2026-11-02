@@ -30,12 +30,15 @@ const HR = [
   "hrchat.use",
   "cases.manage",
   "surveys.manage",
+  "budget.read",
 ];
 const PAYROLL = ["payroll.manage", "payroll.read"];
 const ADMIN = [
   ...HR,
   ...PAYROLL,
   "payroll.approve",
+  "budget.manage",
+  "budget.approve",
   "workplaces.manage",
   "audit.read",
   "roles.assign",
@@ -45,7 +48,7 @@ const PERMISSIONS = {
   admin: ADMIN,
   hr: HR,
   // Payroll staff prepare pay but do not see the wider HR record or approve runs.
-  payroll: ["employees.read", "org.read", "attendance.read", ...PAYROLL],
+  payroll: ["employees.read", "org.read", "attendance.read", "budget.read", ...PAYROLL],
   employee: [],
 };
 
@@ -87,6 +90,9 @@ export const GRANTABLE = {
   "hrchat.use": ["Engagement", "HR team chat (the private HR Team room)"],
   "surveys.manage": ["Engagement", "Run engagement surveys and see their anonymous results"],
   "cases.manage": ["Engagement", "Handle grievances (POSH and whistleblower cases go only to their committees)"],
+  "budget.read": ["Budgets", "See branch budgets and spending against them"],
+  "budget.manage": ["Budgets", "Prepare branch budgets and enter spending"],
+  "budget.approve": ["Budgets", "Approve branch budgets (not ones they submitted)"],
   "insights.read": ["Reports", "Insights dashboards"],
   "security.read": ["Reports", "Security overview"],
   "audit.read": ["Reports", "Activity log"],

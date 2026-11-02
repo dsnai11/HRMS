@@ -13,8 +13,8 @@ const KINDS = {
   branches: {
     label: "branch",
     userColumn: "branch_id",
-    fields: ["code", "city", "state", "address"],
-    max: { code: 20, city: 80, state: 80, address: 300 },
+    fields: ["code", "city", "state", "zone", "region", "address"],
+    max: { code: 20, city: 80, state: 80, zone: 80, region: 80, address: 300 },
   },
   departments: {
     label: "department",
