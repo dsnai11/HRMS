@@ -134,7 +134,8 @@ const empty = (title, description) =>
   `<div class="empty"><div class="empty-icon">◎</div><strong>${esc(title)}</strong>${esc(description)}</div>`;
 function login() {
   if (config.setupRequired) return setup();
-  app.innerHTML = `<div class="login"><section class="login-story">${brand()}<div><div class="eyebrow">${esc(config.company)}</div><h1>Your workplace, in one place</h1><p>Attendance, leave, pay and requests for everyone at ${esc(config.company)}.</p></div><footer class="muted">© ${new Date().getFullYear()}, ${esc(config.company)}</footer></section><section class="login-panel"><h2>Sign In</h2><p class="muted">Use your company email and password.</p><form id="login"><label>Email address<input type="email" name="email" autocomplete="username" placeholder="you@company.com" required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button>Sign in →</button><a href="#" id="forgot" class="forgot">Forgot password?</a></form><div id="sso"></div><p class="login-footer">Employees: use the credentials provided by your administrator.<br>Location is requested only when you punch in or out.</p></section></div>`;
+  app.innerHTML = `<div class="login"><section class="login-story">${brand()}<div><div class="eyebrow">${esc(config.company)}</div><h1>Your workplace, in one place</h1><p>Attendance, leave, pay and requests for everyone at ${esc(config.company)}.</p></div><footer class="muted">© ${new Date().getFullYear()}, ${esc(config.company)}</footer></section><section class="login-panel"><div class="login-theme">${themeToggle()}</div><h2>Sign In</h2><p class="muted">Use your company email and password.</p><form id="login"><label>Email address<input type="email" name="email" autocomplete="username" placeholder="you@company.com" required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button>Sign in →</button><a href="#" id="forgot" class="forgot">Forgot password?</a></form><div id="sso"></div><p class="login-footer">Employees: use the credentials provided by your administrator.<br>Location is requested only when you punch in or out.</p></section></div>`;
+  wireThemeToggle();
   document.querySelector("#forgot")?.addEventListener("click", forgotDialog);
   // Google Workspace / Microsoft 365 sign-in, when the server has it set up.
   const ssoErrors = {
@@ -395,26 +396,28 @@ const NAV_ICONS = {
   moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
 };
 const darkTheme = () => document.documentElement.dataset.theme !== "light";
-// Futuristic dark is the default; the switch remembers the choice on this browser.
+// Day (red and white) or Night (dark command centre). Until someone picks, it follows the
+// computer's or phone's own light/dark setting; a pick is remembered on this browser.
 function themeToggle() {
   const dark = darkTheme();
-  return `<button type="button" class="ghost theme-toggle" id="theme" aria-label="${dark ? "Switch to light theme" : "Switch to futuristic dark theme"}" title="${dark ? "Light theme" : "Futuristic dark theme"}">${svgIcon("sun").replace('class="icon"', 'class="icon icon-sun"')}${svgIcon("moon").replace('class="icon"', 'class="icon icon-moon"')}</button>`;
+  return `<div class="theme-switch" role="group" aria-label="Day or night look"><button type="button" data-theme-set="light" aria-pressed="${!dark}">${svgIcon("sun")}<span>Day</span></button><button type="button" data-theme-set="dark" aria-pressed="${dark}">${svgIcon("moon")}<span>Night</span></button></div>`;
 }
 function wireThemeToggle() {
-  const b = document.querySelector("#theme");
-  if (!b) return;
-  b.onclick = () => {
-    const next = darkTheme() ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    try {
-      localStorage.setItem("hrms-theme", next);
-    } catch {
-      /* the switch still works for this visit */
-    }
-    const dark = next === "dark";
-    b.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to futuristic dark theme");
-    b.title = dark ? "Light theme" : "Futuristic dark theme";
-  };
+  document.querySelectorAll("[data-theme-set]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const next = b.dataset.themeSet;
+        document.documentElement.dataset.theme = next;
+        try {
+          localStorage.setItem("hrms-theme", next);
+        } catch {
+          /* the switch still works for this visit */
+        }
+        document
+          .querySelectorAll("[data-theme-set]")
+          .forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.themeSet === next)));
+      }),
+  );
 }
 const svgIcon = (name, fallback = "") =>
   NAV_ICONS[name]

@@ -3380,6 +3380,9 @@ button.dash-tile:hover {
 .dash-tile .stat-value {
   font-size: 28px;
 }
+.dash-tile .stat-label {
+  padding-right: 22px;
+}
 .dash-go {
   position: absolute;
   top: 14px;
@@ -3971,19 +3974,70 @@ button.dash-todo-item:hover {
   color: #fff;
 }
 
-/* Theme switch in the top bar */
-.theme-toggle .icon {
-  width: 20px;
-  height: 20px;
+/* Day | Night switch: in the top bar (always dark) and on the sign-in panel */
+.theme-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
-.theme-toggle .icon-sun {
-  display: none;
+.theme-switch button,
+.topbar .theme-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: none;
 }
-[data-theme="dark"] .theme-toggle .icon-sun {
-  display: inline;
+.theme-switch button:hover,
+.topbar .theme-switch button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  transform: none;
+  filter: none;
 }
-[data-theme="dark"] .theme-toggle .icon-moon {
-  display: none;
+.theme-switch button[aria-pressed="true"],
+.topbar .theme-switch button[aria-pressed="true"] {
+  background: linear-gradient(135deg, var(--red-hot), var(--red));
+  color: #fff;
+  box-shadow: 0 0 14px -2px rgba(255, 45, 75, 0.7);
+}
+.theme-switch .icon {
+  width: 16px;
+  height: 16px;
+}
+/* On the light sign-in panel the switch sits on white. */
+.login-theme {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+:root[data-theme="light"] .login-theme .theme-switch {
+  background: var(--red-50);
+  box-shadow: inset 0 0 0 1px var(--red-100);
+}
+:root[data-theme="light"] .login-theme .theme-switch button[aria-pressed="false"] {
+  color: #5e6070;
+}
+@media (max-width: 640px) {
+  .topbar .theme-switch span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .topbar .theme-switch button {
+    padding: 4px 8px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
