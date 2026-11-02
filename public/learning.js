@@ -1,12 +1,22 @@
-// Learning: self-paced courses (lessons, quiz, certificate) and tracked training.
+// Learning: self-paced courses (lessons, quiz, certificate), a catalogue to enrol in,
+// certificates with renewal, department-wise assignment and reports, and tracked training.
 let learnTab = "mine";
+let reportCourse = "";
 const LESSON_KIND = { text: "Text", link: "Link", video: "Video link" };
 
 async function learningPage(id) {
   const manage = has("performance.manage");
   const tabs = {
     mine: "My learning",
-    ...(manage ? { manage: "Manage courses", sessions: "Training sessions" } : {}),
+    catalogue: "Course catalogue",
+    certificates: "My certificates",
+    ...(manage
+      ? {
+          manage: "Manage courses",
+          report: "Department report",
+          sessions: "Training sessions",
+        }
+      : {}),
   };
   if (!tabs[learnTab]) learnTab = "mine";
   const html = await learningHtml(learnTab);
@@ -27,6 +37,84 @@ async function learningPage(id) {
 
 async function learningHtml(tab) {
   if (tab === "sessions") return sessionsAdminHtml();
+  if (tab === "catalogue") {
+    const rows = await api("/learning-catalogue");
+    if (!rows.length)
+      return `<div class="card">${empty("No open courses yet", "Courses HR opens to everyone appear here, and you can join them yourself.")}</div>`;
+    const cats = [...new Set(rows.map((c) => c.category || "General"))];
+    return cats
+      .map(
+        (cat) =>
+          `<div class="card"><div class="eyebrow">${esc(cat)}</div><div class="course-grid">${rows
+            .filter((c) => (c.category || "General") === cat)
+            .map(
+              (c) =>
+                `<div class="course-tile"><h3>${esc(c.title)}</h3><p class="muted">${esc(c.description || "")}</p><p><span class="pill neutral">${c.hours} h</span> <span class="pill neutral">${c.lessons} lesson${c.lessons === 1 ? "" : "s"}</span>${c.questions ? ' <span class="pill neutral">Quiz</span>' : ""}${c.valid_months ? ` <span class="pill neutral">Renew every ${c.valid_months} months</span>` : ""}</p>${
+                  c.record_id
+                    ? c.status === "completed"
+                      ? '<span class="pill">Completed</span>'
+                      : `<button class="secondary" data-open-course="${c.record_id}">Continue</button>`
+                    : `<button data-enrol="${c.id}">Join course</button>`
+                }</div>`,
+            )
+            .join("")}</div></div>`,
+      )
+      .join("");
+  }
+  if (tab === "certificates") {
+    const rows = await api("/certificates/mine");
+    return `<div class="card"><h2>My certificates</h2><p class="muted">Every certificate you have earned, including earlier ones for courses you renewed.</p>${
+      rows.length
+        ? `<div class="table-wrap"><table><thead><tr><th>Course</th><th>Completed</th><th>Score</th><th>Valid until</th><th>Number</th><th></th></tr></thead><tbody>${rows
+            .map(
+              (c) =>
+                `<tr><td>${esc(c.title)}</td><td>${fmtDate(c.completed_on)}</td><td>${c.score != null ? `${c.score}%` : "—"}</td><td>${c.expires_on ? `${fmtDate(c.expires_on)}${c.expired ? ' <span class="pill">Expired</span>' : ""}` : "No expiry"}</td><td><small>${esc(c.certificate_no)}</small></td><td><a class="button secondary" target="_blank" rel="noopener" href="/letter.html?type=cert&id=${c.id}">View</a></td></tr>`,
+            )
+            .join("")}</tbody></table></div>`
+        : empty("No certificates yet", "Finish a course to earn your first certificate.")
+    }</div>`;
+  }
+  if (tab === "report") {
+    const [courses, rows] = await Promise.all([
+      api("/admin/trainings"),
+      api(`/admin/learning-report${reportCourse ? `?training_id=${reportCourse}` : ""}`),
+    ]);
+    const total = rows.reduce(
+      (a, r) => ({
+        assigned: a.assigned + r.assigned,
+        completed: a.completed + r.completed,
+        overdue: a.overdue + r.overdue,
+        hours: a.hours + r.hours,
+      }),
+      { assigned: 0, completed: 0, overdue: 0, hours: 0 },
+    );
+    return `<div class="stats">${[
+      ["Assigned", total.assigned],
+      ["Completed", total.completed],
+      ["Completion", `${total.assigned ? Math.round((total.completed / total.assigned) * 100) : 0}%`],
+      ["Overdue", total.overdue],
+      ["Learning hours", Math.round(total.hours * 10) / 10],
+    ]
+      .map(
+        ([l, v]) =>
+          `<div class="stat"><div class="stat-label">${l}</div><div class="stat-value">${v}</div></div>`,
+      )
+      .join("")}</div><div class="card"><div class="card-head"><div><h2>By department</h2><p class="muted">Active employees only. Expiring means a certificate runs out within 30 days.</p></div><div class="actions"><select id="report-course" aria-label="Course"><option value="">All courses and training</option>${courses
+      .map(
+        (c) =>
+          `<option value="${c.id}" ${String(c.id) === reportCourse ? "selected" : ""}>${esc(c.title)}</option>`,
+      )
+      .join("")}</select><button class="secondary" id="report-csv">Download CSV</button></div></div>${
+      rows.length
+        ? `<div class="table-wrap"><table><thead><tr><th>Department</th><th>Assigned</th><th>Completed</th><th>In progress</th><th>Overdue</th><th>Expiring</th><th>Completion</th></tr></thead><tbody>${rows
+            .map(
+              (r) =>
+                `<tr><td>${esc(r.department)}</td><td>${r.assigned}</td><td>${r.completed}</td><td>${r.in_progress}</td><td>${r.overdue ? `<span class="pill">${r.overdue}</span>` : 0}</td><td>${r.expiring}</td><td><progress class="meter" max="100" value="${r.completion}" aria-label="${r.completion}% complete"></progress> ${r.completion}%</td></tr>`,
+            )
+            .join("")}</tbody></table></div>`
+        : empty("Nothing assigned yet", "Assign courses to departments to see their progress here.")
+    }</div>`;
+  }
   if (tab === "mine") {
     const [rows, sessions] = await Promise.all([
       api("/trainings/mine"),
@@ -37,7 +125,7 @@ async function learningHtml(tab) {
         ? `<div class="table-wrap"><table><thead><tr><th>Course</th><th>Hours</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>${rows
             .map(
               (t) =>
-                `<tr><td>${esc(t.title)}${t.mandatory ? ' <span class="pill">Mandatory</span>' : ""}</td><td>${t.hours}</td><td>${t.due_date ? fmtDate(t.due_date) : "—"}${t.status === "assigned" && t.due_date && t.due_date < today() ? ' <span class="pill">Overdue</span>' : ""}</td><td><span class="pill ${t.status === "completed" ? "" : "neutral"}">${t.status === "completed" ? `Done ${fmtDate(t.completed_on)}${t.score != null ? ` · ${t.score}%` : ""}` : "To do"}</span></td><td>${
+                `<tr><td>${esc(t.title)}${t.mandatory ? ' <span class="pill">Mandatory</span>' : ""}${t.category ? `<small>${esc(t.category)}</small>` : ""}${t.status === "completed" && t.expires_on ? `<small>Valid until ${fmtDate(t.expires_on)}</small>` : ""}</td><td>${t.hours}</td><td>${t.due_date ? fmtDate(t.due_date) : "—"}${t.status === "assigned" && t.due_date && t.due_date < today() ? ' <span class="pill">Overdue</span>' : ""}</td><td><span class="pill ${t.status === "completed" ? "" : "neutral"}">${t.status === "completed" ? `Done ${fmtDate(t.completed_on)}${t.score != null ? ` · ${t.score}%` : ""}` : "To do"}</span></td><td>${
                   t.kind === "course"
                     ? t.status === "completed"
                       ? `<a class="button secondary" target="_blank" rel="noopener" href="/letter.html?type=certificate&id=${t.id}">Certificate</a>`
@@ -56,7 +144,7 @@ async function learningHtml(tab) {
   const rows = await api("/admin/trainings");
   return `<div class="card"><div class="card-head"><div><h2>Courses and training</h2><p class="muted">A course has lessons and an optional quiz; people finish it themselves and get a certificate. Tracked training is confirmed by a manager or HR.</p></div><div class="actions"><button class="secondary" id="new-training">Assign tracked training</button><button id="new-course">New course</button></div></div>${
     rows.length
-      ? `<div class="table-wrap"><table><thead><tr><th>Title</th><th>Type</th><th>Due</th><th>Completed</th><th></th></tr></thead><tbody>${rows.map((t) => `<tr><td>${esc(t.title)}${t.mandatory ? ' <span class="pill">Mandatory</span>' : ""}${t.active ? "" : ' <span class="pill neutral">Off</span>'}</td><td>${t.kind === "course" ? "Course" : "Tracked"}</td><td>${t.due_date ? fmtDate(t.due_date) : "—"}</td><td>${t.completed} of ${t.assigned}</td><td><button class="secondary" data-train="${t.id}" data-name="${esc(t.title)}" data-kind="${t.kind}">Records</button>${t.kind === "course" ? ` <button class="ghost" data-edit-course="${t.id}">Edit</button> <button class="ghost" data-assign-course="${t.id}">Assign</button> <button class="ghost" data-course-settings="${t.id}">Settings</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+      ? `<div class="table-wrap"><table><thead><tr><th>Title</th><th>Type</th><th>Due</th><th>Completed</th><th></th></tr></thead><tbody>${rows.map((t) => `<tr><td>${esc(t.title)}${t.mandatory ? ' <span class="pill">Mandatory</span>' : ""}${t.open_enrol ? ' <span class="pill neutral">In catalogue</span>' : ""}${t.active ? "" : ' <span class="pill neutral">Off</span>'}${t.category ? `<small>${esc(t.category)}</small>` : ""}</td><td>${t.kind === "course" ? "Course" : "Tracked"}</td><td>${t.due_date ? fmtDate(t.due_date) : "—"}</td><td>${t.completed} of ${t.assigned}</td><td><button class="secondary" data-train="${t.id}" data-name="${esc(t.title)}" data-kind="${t.kind}">Records</button> <button class="ghost" data-audience="${t.id}" data-name="${esc(t.title)}">Departments</button>${t.kind === "course" ? ` <button class="ghost" data-edit-course="${t.id}">Edit</button> <button class="ghost" data-assign-course="${t.id}">Assign</button> <button class="ghost" data-course-settings="${t.id}">Settings</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
       : empty(
           "No courses",
           "Create a course, add lessons and a quiz, then assign it.",
@@ -221,6 +309,49 @@ async function courseBuilder(id) {
   wireRows();
 }
 
+// Who a course goes to: departments, branches and designations. People who join or move
+// into a group later get it automatically.
+async function audienceDialog(id, name) {
+  const [org, rules] = await Promise.all([
+    api("/admin/org"),
+    api(`/admin/learning/${id}/audience`),
+  ]);
+  const row = (r = {}) =>
+    `<div class="form-grid audience-row full" data-row><label>Department<select name="department_id">${options(org.departments, r.department_id, "Any department")}</select></label><label>Branch<select name="branch_id">${options(org.branches, r.branch_id, "Any branch")}</select></label><label>Designation<select name="designation_id">${options(org.designations, r.designation_id, "Any designation")}</select></label><button type="button" class="ghost" data-remove-row>Remove</button></div>`;
+  dialog(
+    `Departments · ${name}`,
+    `<p class="full muted">Each line picks a group, for example the Sales department, or Credit officers in the Jaipur branch. Everyone in a group gets the training now, and people who join or move into it later get it automatically. A line left on "Any" for all three means everyone.</p><div class="full" id="aud-rows">${rules.map(row).join("")}</div><div class="full actions"><button type="button" class="secondary" id="aud-add">Add a group</button></div>`,
+    async () => {
+      const rows = [...document.querySelectorAll("dialog [data-row]")].map((r) => {
+        const v = (n) => r.querySelector(`[name=${n}]`).value || null;
+        return {
+          department_id: v("department_id") && Number(v("department_id")),
+          branch_id: v("branch_id") && Number(v("branch_id")),
+          designation_id: v("designation_id") && Number(v("designation_id")),
+        };
+      });
+      const r = await api(`/admin/learning/${id}/audience`, { rules: rows }, "PUT");
+      notice(
+        r.rules
+          ? `Saved ${r.rules} group(s). Assigned to ${r.assigned} more ${r.assigned === 1 ? "person" : "people"}.`
+          : "Groups cleared. People already assigned keep the training.",
+      );
+    },
+  );
+  const d = document.querySelector("dialog");
+  d.classList.add("wide");
+  const wire = () =>
+    d
+      .querySelectorAll("[data-remove-row]")
+      .forEach((b) => (b.onclick = () => b.closest("[data-row]").remove()));
+  d.querySelector("#aud-add").onclick = () => {
+    d.querySelector("#aud-rows").insertAdjacentHTML("beforeend", row());
+    wire();
+  };
+  if (!rules.length) d.querySelector("#aud-add").click();
+  wire();
+}
+
 function learningWire(tab) {
   if (tab === "sessions") return sessionsAdminWire();
   const on = (s, fn) =>
@@ -228,6 +359,38 @@ function learningWire(tab) {
   const each = (s, fn) =>
     document.querySelectorAll(s).forEach((b) => (b.onclick = () => fn(b)));
   each("[data-open-course]", (b) => courseDialog(Number(b.dataset.openCourse)));
+  each("[data-enrol]", (b) =>
+    busy(b, async () => {
+      const r = await api(`/learning-catalogue/${b.dataset.enrol}/enrol`, {});
+      notice("You joined the course.");
+      await courseDialog(r.record_id);
+      render();
+    }),
+  );
+  if (tab === "report") {
+    document.querySelector("#report-course").onchange = (e) => {
+      reportCourse = e.target.value;
+      render();
+    };
+    on("#report-csv", async () => {
+      const rows = await api(
+        `/admin/learning-report${reportCourse ? `?training_id=${reportCourse}` : ""}`,
+      );
+      const cell = (v) => `"${String(v).replaceAll('"', '""')}"`;
+      const csv = [
+        ["Department", "Assigned", "Completed", "In progress", "Overdue", "Expiring", "Completion %", "Learning hours"],
+        ...rows.map((r) => [r.department, r.assigned, r.completed, r.in_progress, r.overdue, r.expiring, r.completion, r.hours]),
+      ]
+        .map((r) => r.map(cell).join(","))
+        .join("\r\n");
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+      a.download = `learning-by-department-${today()}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+    return;
+  }
   each("[data-done-train]", (b) =>
     busy(b, async () => {
       await api(`/trainings/records/${b.dataset.doneTrain}/complete`, {});
@@ -238,17 +401,18 @@ function learningWire(tab) {
   on("#new-course", () =>
     dialog(
       "New course",
-      `${input("title", "Course title", "", "required maxlength=150")}${input("hours", "Hours", 1, 'type="number" min="0.25" step="0.25"')}${input("due_date", "Company-wide due date (optional)", "", 'type="date"')}<label class="full">Description<textarea name="description" rows="3" maxlength="1000"></textarea></label><label class="check"><input type="checkbox" name="mandatory"> Mandatory</label>`,
+      `${input("title", "Course title", "", "required maxlength=150")}${input("category", "Category (optional)", "", 'maxlength="60" placeholder="e.g. Compliance, Product, Soft skills"')}${input("hours", "Hours", 1, 'type="number" min="0.25" step="0.25"')}${input("due_date", "Company-wide due date (optional)", "", 'type="date"')}<label class="full">Description<textarea name="description" rows="3" maxlength="1000"></textarea></label><label class="check"><input type="checkbox" name="mandatory"> Mandatory</label>`,
       async (b) => {
         const r = await api("/admin/trainings", {
           kind: "course",
           title: b.title,
+          category: b.category || undefined,
           hours: Number(b.hours),
           due_date: b.due_date || undefined,
           description: b.description || undefined,
           mandatory: "mandatory" in b,
         });
-        notice("Course created. Choose Edit to add lessons and a quiz.");
+        notice("Course created. Choose Edit to add lessons and a quiz, then Departments to assign it.");
         learnTab = "manage";
         return r;
       },
@@ -269,6 +433,7 @@ function learningWire(tab) {
       },
     ),
   );
+  each("[data-audience]", (b) => audienceDialog(b.dataset.audience, b.dataset.name));
   each("[data-edit-course]", (b) =>
     courseBuilder(Number(b.dataset.editCourse)),
   );
@@ -290,11 +455,14 @@ function learningWire(tab) {
     const c = await api(`/admin/learning/${b.dataset.courseSettings}`);
     dialog(
       `Settings · ${c.title}`,
-      `${input("pass_mark", "Pass mark (%)", c.pass_mark, 'type="number" min="1" max="100"')}${input("max_attempts", "Quiz attempts (0 = unlimited)", c.max_attempts, 'type="number" min="0" max="20"')}${input("due_days", "Days to finish for new joiners", c.due_days, 'type="number" min="1" max="365"')}<label class="check"><input type="checkbox" name="auto_assign" ${c.auto_assign ? "checked" : ""}> Assign to every new joiner automatically</label><label class="check"><input type="checkbox" name="mandatory" ${c.mandatory ? "checked" : ""}> Mandatory</label><label class="check"><input type="checkbox" name="active" ${c.active ? "checked" : ""}> Course is on</label>`,
+      `${input("category", "Category", c.category || "", 'maxlength="60"')}${input("valid_months", "Certificate valid for (months, blank = no expiry)", c.valid_months ?? "", 'type="number" min="1" max="120"')}${input("pass_mark", "Pass mark (%)", c.pass_mark, 'type="number" min="1" max="100"')}${input("max_attempts", "Quiz attempts (0 = unlimited)", c.max_attempts, 'type="number" min="0" max="20"')}${input("due_days", "Days to finish for new joiners", c.due_days, 'type="number" min="1" max="365"')}<label class="check"><input type="checkbox" name="open_enrol" ${c.open_enrol ? "checked" : ""}> Show in the course catalogue so anyone can join</label><label class="check"><input type="checkbox" name="auto_assign" ${c.auto_assign ? "checked" : ""}> Assign to every new joiner automatically</label><label class="check"><input type="checkbox" name="mandatory" ${c.mandatory ? "checked" : ""}> Mandatory</label><label class="check"><input type="checkbox" name="active" ${c.active ? "checked" : ""}> Course is on</label>`,
       async (f) => {
         await api(
           `/admin/learning/${c.id}`,
           {
+            category: f.category,
+            valid_months: f.valid_months ? Number(f.valid_months) : null,
+            open_enrol: "open_enrol" in f,
             pass_mark: Number(f.pass_mark),
             max_attempts: Number(f.max_attempts),
             due_days: Number(f.due_days),

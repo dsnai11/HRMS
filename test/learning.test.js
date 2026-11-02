@@ -426,3 +426,102 @@ test("classroom sessions: scheduled, invited, attended, and the training complet
   assert.deepEqual(after.past.map((x) => [x.title, x.status, x.attendance]), [["Excel basics", "cancelled", "invited"], ["Fire drill", "completed", "attended"]]);
   assert.equal((await call("/admin/training-sessions?when=past", undefined, hr)).data.length, 1);
 });
+
+test("full LMS: department audiences, catalogue, certificate expiry and renewal, public check, report", async (t) => {
+  const w = await world(t);
+  const { call, people, db, owner, app, setNow, add } = w;
+  const hr = people.hr.token;
+  const emp = people.emp.token;
+  const dept = async (name) =>
+    (await call("/admin/departments", { name }, owner)).data.id;
+  const sales = await dept("Sales");
+  const credit = await dept("Credit");
+  await db.prepare("UPDATE users SET department_id=? WHERE id=?").run(sales, people.emp.id);
+  await db.prepare("UPDATE users SET department_id=? WHERE id=?").run(credit, people.mgr.id);
+
+  const id = (
+    await call("/admin/trainings", { title: "Sales compliance", kind: "course", category: "Compliance" }, hr)
+  ).data.id;
+  assert.equal((await call(`/admin/learning/${id}/content`, COURSE, hr, "PUT")).status, 200);
+  assert.equal(
+    (await call(`/admin/learning/${id}`, { valid_months: 12, open_enrol: true }, hr, "PATCH")).status,
+    200,
+  );
+
+  // Only HR sets audiences; a rule for Sales assigns the Sales person only.
+  assert.equal(
+    (await call(`/admin/learning/${id}/audience`, { rules: [{ department_id: sales }] }, emp, "PUT")).status,
+    403,
+  );
+  const aud = await call(`/admin/learning/${id}/audience`, { rules: [{ department_id: sales }] }, hr, "PUT");
+  assert.deepEqual(aud.data, { rules: 1, assigned: 1 });
+  assert.equal((await call(`/admin/learning/${id}/audience`, undefined, hr)).data[0].department, "Sales");
+  const mine = (await call("/trainings/mine", undefined, emp)).data;
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].category, "Compliance");
+  assert.equal(mine[0].due_date, "2026-12-05");
+  assert.equal((await call("/trainings/mine", undefined, people.mgr.token)).data.length, 0);
+
+  // Someone joining Sales later gets it from the hourly sync.
+  await add("newbie");
+  await db.prepare("UPDATE users SET department_id=? WHERE id=?").run(sales, people.newbie.id);
+  const { syncTrainingAudiences, renewExpiredTraining } = await import("../server/routes/learning.js");
+  assert.equal(await syncTrainingAudiences(app), 1);
+  assert.equal(await syncTrainingAudiences(app), 0);
+
+  // The manager (Credit) is not assigned but can join from the catalogue.
+  const cat = (await call("/learning-catalogue", undefined, people.mgr.token)).data;
+  assert.equal(cat.length, 1);
+  assert.equal(cat[0].record_id, null);
+  const joined = await call(`/learning-catalogue/${id}/enrol`, {}, people.mgr.token);
+  assert.equal(joined.status, 200);
+  assert.equal((await call("/learning-catalogue", undefined, people.mgr.token)).data[0].record_id, joined.data.record_id);
+  // A course not in the catalogue cannot be joined.
+  const closed = (await call("/admin/trainings", { title: "Closed", kind: "course" }, hr)).data.id;
+  assert.equal((await call(`/learning-catalogue/${closed}/enrol`, {}, emp)).status, 404);
+
+  // Finish the course: certificate with a random number and a 12-month validity.
+  const rid = mine[0].id;
+  const course = (await call(`/learning/${rid}`, undefined, emp)).data;
+  for (const l of course.lessons) await call(`/learning/${rid}/lessons/${l.id}/done`, {}, emp);
+  assert.equal((await call(`/learning/${rid}/quiz`, { answers: [1, 0] }, emp)).data.passed, true);
+  const certs = (await call("/certificates/mine", undefined, emp)).data;
+  assert.equal(certs.length, 1);
+  assert.match(certs[0].certificate_no, /^LIFC-2026-[0-9A-F]{8}$/);
+  assert.equal(certs[0].expires_on, "2027-11-05");
+  const letter = await call(`/certificates/${certs[0].id}`, undefined, emp);
+  assert.ok(letter.data.paragraphs.some((p) => /Valid until 5 November 2027/.test(p)));
+  assert.equal((await call(`/certificates/${certs[0].id}`, undefined, people.mgr.token)).status, 404);
+
+  // Anyone can check the number without signing in; unknown or old-style numbers are not found.
+  const check = await call(`/certificates/verify/${certs[0].certificate_no}`);
+  assert.equal(check.status, 200);
+  assert.equal(check.data.found, true);
+  assert.equal(check.data.valid, true);
+  assert.equal(check.data.course, "Sales compliance");
+  assert.equal((await call("/certificates/verify/LIFC-2026-00000000")).data.found, false);
+  assert.equal((await call(`/certificates/verify/LIFC-${id}-${rid}`)).data.found, false);
+
+  // Department report.
+  const report = (await call("/admin/learning-report", undefined, hr)).data;
+  const s = report.find((r) => r.department === "Sales");
+  assert.equal(s.assigned, 2);
+  assert.equal(s.completed, 1);
+  assert.equal(s.completion, 50);
+  assert.equal((await call("/admin/learning-report", undefined, emp)).status, 403);
+
+  // A year later the certificate expires: the course opens again, the old certificate stays.
+  setNow("2027-11-06T10:00:00+05:30");
+  assert.equal(await renewExpiredTraining(app), 1);
+  const again = (await call("/trainings/mine", undefined, emp)).data[0];
+  assert.equal(again.status, "assigned");
+  assert.equal(again.due_date, "2027-12-06");
+  const history = (await call("/certificates/mine", undefined, emp)).data;
+  assert.equal(history.length, 1);
+  assert.equal(history[0].expired, true);
+  assert.equal((await call(`/certificates/verify/${certs[0].certificate_no}`)).data.valid, false);
+  const fresh = (await call(`/learning/${rid}`, undefined, emp)).data;
+  assert.ok(fresh.lessons.every((l) => !l.done));
+  assert.equal(fresh.attempts, 0);
+  assert.equal(await renewExpiredTraining(app), 0);
+});

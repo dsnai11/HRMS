@@ -116,6 +116,7 @@ export const GUIDE = [
     tips: [
       "One phone per person. Approving a new phone switches off the old one.",
       "A phone already used by one account cannot be registered to another.",
+      "Workplaces → Selfie and fingerprint at punch: switch on the fingerprint or face check so the phone confirms it is the employee before every punch. Each phone needs a fingerprint or face lock set up.",
     ],
   },
 
@@ -419,14 +420,64 @@ export const GUIDE = [
     id: "learning",
     area: "Performance & learning",
     title: "Create courses and training sessions",
-    who: "HR",
-    keywords: "course training lms learning quiz certificate session classroom induction assign",
+    who: "HR (performance.manage)",
+    keywords: "course training lms learning quiz certificate session classroom induction assign category catalogue",
     steps: [
-      "LMS → My Courses → Manage courses: build a course with lessons and an optional quiz with a pass mark.",
-      "Assign it to everyone or one person, or tick “assign to every new joiner”.",
+      "LMS → My Courses → Manage courses → New course: give it a title and a category such as Compliance or Product.",
+      "Click Edit to add lessons (text, a link or a video link) and an optional quiz with a pass mark.",
+      "Click Settings to set the pass mark and attempts, how long the certificate is valid, and whether the course shows in the catalogue for anyone to join.",
+      "Assign it with Departments (see “Assign training by department”), to one person with Assign, or tick “assign to every new joiner”.",
       "Training sessions: schedule a classroom or online session, invite people and mark attendance.",
     ],
-    tips: ["Course content locks once anyone starts it. You can reset a person's attempts."],
+    tips: [
+      "Course content locks once anyone starts it. You can reset a person's attempts.",
+      "Videos are links (YouTube, Google Drive and so on); nothing is uploaded to the HRMS.",
+    ],
+  },
+  {
+    id: "department-training",
+    area: "Performance & learning",
+    title: "Assign training by department, branch or designation",
+    who: "HR (performance.manage)",
+    keywords: "department wise training assign group branch designation audience team mandatory compliance",
+    steps: [
+      "LMS → My Courses → Manage courses: click Departments beside the course or training.",
+      "Add one line per group: a department, a branch, a designation, or a mix (for example Credit officers in the Jaipur branch).",
+      "Save. Everyone in those groups is assigned at once, with the course's days to finish as the due date.",
+      "People who join or move into a group later are assigned automatically within the hour.",
+    ],
+    tips: [
+      "Removing a group does not take the course away from people already assigned.",
+      "A line left on “Any” for all three means the whole company.",
+    ],
+  },
+  {
+    id: "certificates",
+    area: "Performance & learning",
+    title: "Certificates, renewal and checking a certificate",
+    who: "HR (performance.manage)",
+    keywords: "certificate certificates expiry expire renew renewal annual refresher verify check validity",
+    steps: [
+      "A certificate is issued when someone passes the quiz, or finishes every lesson of a course without a quiz.",
+      "In the course's Settings, set “Certificate valid for (months)” for training that must be repeated, such as yearly compliance.",
+      "When a certificate expires, the course opens again for that person with a new due date and they are told by email. The old certificate stays in their history.",
+      "Employees see all their certificates under LMS → My Courses → My certificates and print them from there.",
+      "Anyone shown a certificate can check it at the address printed on it (/verify.html) by typing the certificate number.",
+    ],
+    tips: ["Certificates issued before this feature have old-style numbers that the public check does not find."],
+  },
+  {
+    id: "learning-report",
+    area: "Performance & learning",
+    title: "See training progress by department",
+    who: "HR (performance.manage)",
+    keywords: "training report department completion overdue progress lms report export",
+    steps: [
+      "LMS → My Courses → Department report.",
+      "Choose one course or all of them. Each department shows assigned, completed, in progress, overdue and certificates expiring within 30 days.",
+      "Click Download CSV to share it.",
+    ],
+    tips: ["People with overdue training get reminders by themselves; follow up with their managers for the rest."],
   },
 
   // ---- Employee help -------------------------------------------------------------------------

@@ -35,6 +35,16 @@ const scan = async (promptMessage: string) =>
     })
   ).success;
 
+/** The check before a punch when the company asks for it; throws with a message to show. */
+export async function confirmForPunch() {
+  if (!(await biometricAvailable()))
+    throw new Error(
+      "Your company asks for a fingerprint or face check to punch. Set up a fingerprint or face unlock in your phone's settings first.",
+    );
+  if (!(await scan("Confirm it's you to punch")))
+    throw new Error("Fingerprint or face check did not pass. Try again.");
+}
+
 /** Turns the lock on (after a successful scan) or off. Returns the new state, or an error. */
 export async function setBiometricLock(
   on: boolean,

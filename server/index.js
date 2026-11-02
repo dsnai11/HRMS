@@ -126,6 +126,8 @@ const STATIC = {
   "/agency.js": ["agency.js", "text/javascript"],
   "/letter.html": ["letter.html", "text/html"],
   "/letter.js": ["letter.js", "text/javascript"],
+  "/verify.html": ["verify.html", "text/html"],
+  "/verify.js": ["verify.js", "text/javascript"],
   "/payslip.html": ["payslip.html", "text/html"],
   "/payslip.js": ["payslip.js", "text/javascript"],
   "/styles.css": ["styles.css", "text/css"],

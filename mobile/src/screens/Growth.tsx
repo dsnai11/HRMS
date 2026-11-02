@@ -442,6 +442,29 @@ type Training = {
   status: string;
   completed_on: string | null;
   score: number | null;
+  category?: string | null;
+  expires_on?: string | null;
+};
+type CatalogueCourse = {
+  id: number;
+  title: string;
+  description: string | null;
+  category: string | null;
+  hours: number;
+  lessons: number;
+  questions: number;
+  valid_months: number | null;
+  record_id: number | null;
+  status: string | null;
+};
+type Certificate = {
+  id: number;
+  title: string;
+  certificate_no: string;
+  completed_on: string;
+  score: number | null;
+  expires_on: string | null;
+  expired: boolean;
 };
 type Course = {
   id: number;
@@ -596,6 +619,123 @@ function CourseView({
 }
 
 export function LearningScreen({ api }: { api: Api }) {
+  const [tab, setTab] = useState<"mine" | "catalogue" | "certificates">(
+    "mine",
+  );
+  const [course, setCourse] = useState<number | null>(null);
+  if (course)
+    return (
+      <CourseView api={api} id={course} onBack={() => setCourse(null)} />
+    );
+  return (
+    <View style={{ gap: 14 }}>
+      <Tabs
+        tabs={[
+          ["mine", "My learning"],
+          ["catalogue", "Catalogue"],
+          ["certificates", "Certificates"],
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
+      {tab === "mine" ? (
+        <MyLearning api={api} onOpen={setCourse} />
+      ) : tab === "catalogue" ? (
+        <Catalogue api={api} onOpen={setCourse} />
+      ) : (
+        <Certificates api={api} />
+      )}
+    </View>
+  );
+}
+
+// Courses HR opened to everyone, grouped by category; joining opens the course.
+function Catalogue({ api, onOpen }: { api: Api; onOpen: (id: number) => void }) {
+  const data = useLoad(() => api<CatalogueCourse[]>("/learning-catalogue"));
+  return (
+    <View style={k.card}>
+      <Text style={k.heading}>Course catalogue</Text>
+      <Status loading={data.loading} error={data.error} />
+      {data.data?.length === 0 && (
+        <Empty text="Courses HR opens to everyone appear here." />
+      )}
+      {data.data?.map((c) => (
+        <View key={c.id} style={k.item}>
+          <View style={k.row}>
+            <Text style={[k.strong, { flex: 1 }]}>{c.title}</Text>
+            <Pill text={c.category || "General"} />
+          </View>
+          {c.description ? <Text style={k.body}>{c.description}</Text> : null}
+          <Text style={k.note}>
+            {c.hours} h · {c.lessons} lesson{c.lessons === 1 ? "" : "s"}
+            {c.questions ? " · quiz" : ""}
+            {c.valid_months ? ` · renew every ${c.valid_months} months` : ""}
+          </Text>
+          {c.status === "completed" ? (
+            <Text style={k.note}>Completed.</Text>
+          ) : c.record_id ? (
+            <Btn title="Continue" secondary onPress={() => onOpen(c.record_id!)} />
+          ) : (
+            <Btn
+              title="Join course"
+              onPress={() =>
+                void attempt(async () => {
+                  const r = await api<{ record_id: number }>(
+                    `/learning-catalogue/${c.id}/enrol`,
+                    {},
+                  );
+                  onOpen(r.record_id);
+                })
+              }
+            />
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function Certificates({ api }: { api: Api }) {
+  const data = useLoad(() => api<Certificate[]>("/certificates/mine"));
+  return (
+    <View style={k.card}>
+      <Text style={k.heading}>My certificates</Text>
+      <Status loading={data.loading} error={data.error} />
+      {data.data?.length === 0 && (
+        <Empty text="Finish a course to earn your first certificate." />
+      )}
+      {data.data?.map((c) => (
+        <View key={c.id} style={k.item}>
+          <View style={k.row}>
+            <Text style={[k.strong, { flex: 1 }]}>{c.title}</Text>
+            <Pill
+              text={
+                c.expired
+                  ? "Expired"
+                  : c.expires_on
+                    ? `Valid to ${dateText(c.expires_on)}`
+                    : "Valid"
+              }
+            />
+          </View>
+          <Text style={k.note}>
+            Completed {dateText(c.completed_on)}
+            {c.score != null ? ` · ${c.score}%` : ""}
+          </Text>
+          <Text style={k.note}>No. {c.certificate_no}</Text>
+        </View>
+      ))}
+      {data.data && data.data.length > 0 && (
+        <Text style={k.note}>
+          Print or save a certificate as PDF from Learning → My certificates in
+          the web portal.
+        </Text>
+      )}
+    </View>
+  );
+}
+
+function MyLearning({ api, onOpen }: { api: Api; onOpen: (id: number) => void }) {
   const data = useLoad(async () => {
     const [trainings, sessions] = await Promise.all([
       api<Training[]>("/trainings/mine"),
@@ -603,18 +743,6 @@ export function LearningScreen({ api }: { api: Api }) {
     ]);
     return { trainings, sessions };
   });
-  const [course, setCourse] = useState<number | null>(null);
-  if (course)
-    return (
-      <CourseView
-        api={api}
-        id={course}
-        onBack={() => {
-          setCourse(null);
-          void data.reload();
-        }}
-      />
-    );
   const s = data.data?.sessions;
   return (
     <View style={{ gap: 14 }}>
@@ -686,6 +814,10 @@ export function LearningScreen({ api }: { api: Api }) {
             </View>
             <Text style={k.note}>
               {t.kind === "course" ? "Course" : "Training"} · {t.hours} h
+              {t.category ? ` · ${t.category}` : ""}
+              {t.status === "completed" && t.expires_on
+                ? ` · valid until ${dateText(t.expires_on)}`
+                : ""}
             </Text>
             {t.kind === "course" ? (
               <Btn
@@ -693,7 +825,7 @@ export function LearningScreen({ api }: { api: Api }) {
                   t.status === "completed" ? "Review course" : "Open course"
                 }
                 secondary
-                onPress={() => setCourse(t.id)}
+                onPress={() => onOpen(t.id)}
               />
             ) : t.status === "assigned" && !t.mandatory ? (
               <Btn

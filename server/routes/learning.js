@@ -1,5 +1,7 @@
+import { randomBytes } from "node:crypto";
 import {
   HttpError,
+  clientIp,
   integer,
   isoDate,
   number,
@@ -22,6 +24,51 @@ const plusDays = (d, n) => {
   x.setUTCDate(x.getUTCDate() + n);
   return x.toISOString().slice(0, 10);
 };
+const addMonths = (d, n) => {
+  const x = new Date(`${d}T00:00:00Z`);
+  const day = x.getUTCDate();
+  x.setUTCDate(1);
+  x.setUTCMonth(x.getUTCMonth() + n);
+  const last = new Date(
+    Date.UTC(x.getUTCFullYear(), x.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  x.setUTCDate(Math.min(day, last));
+  return x.toISOString().slice(0, 10);
+};
+// New certificate numbers are random so that the public check cannot be used to list them.
+const certificateNo = (day) =>
+  `LIFC-${day.slice(0, 4)}-${randomBytes(4).toString("hex").toUpperCase()}`;
+const VERIFIABLE = /^LIFC-\d{4}-[0-9A-F]{8}$/;
+const verifyLink = (no) => {
+  const base = (process.env.APP_URL || process.env.PUBLIC_URL || "").replace(
+    /\/$/,
+    "",
+  );
+  return base ? `${base}/verify.html?no=${encodeURIComponent(no)}` : null;
+};
+/** The printable certificate, from a training_certificates row joined with the course and person. */
+function certificateLetter(c, company, today) {
+  const link = VERIFIABLE.test(c.certificate_no)
+    ? verifyLink(c.certificate_no)
+    : null;
+  return {
+    company,
+    title: "Certificate of completion",
+    date: longDate(c.completed_on),
+    to: c.person,
+    paragraphs: [
+      `This certifies that ${c.person} successfully completed the course "${c.title}" (${c.hours} hours) on ${longDate(c.completed_on)}${c.score != null ? ` with a score of ${c.score}%` : ""}.`,
+      ...(c.expires_on
+        ? [
+            `${c.expires_on < today ? "Expired" : "Valid until"} ${longDate(c.expires_on)}.`,
+          ]
+        : []),
+      `Certificate number: ${c.certificate_no}`,
+      ...(link ? [`Check this certificate at ${link}`] : []),
+    ],
+    signoff: `For ${company}`,
+  };
+}
 const url = (v, label) => {
   const s = string(v, label, 500);
   let u;
@@ -92,7 +139,7 @@ export function registerLearning(router, app) {
   async function myRecord(user, id) {
     const r = await db
       .prepare(
-        "SELECT r.*,t.company_id,t.title,t.kind,t.pass_mark,t.max_attempts,t.hours,t.description,t.due_date training_due FROM training_records r JOIN trainings t ON t.id=r.training_id WHERE r.id=?",
+        "SELECT r.*,t.company_id,t.title,t.kind,t.pass_mark,t.max_attempts,t.hours,t.description,t.valid_months,t.due_date training_due FROM training_records r JOIN trainings t ON t.id=r.training_id WHERE r.id=?",
       )
       .get(integer(Number(id)));
     if (!r || r.company_id !== user.company_id || r.user_id !== user.id)
@@ -113,12 +160,19 @@ export function registerLearning(router, app) {
       .all(tid);
 
   async function complete(r, score) {
-    const no = `LIFC-${r.training_id}-${r.id}`;
+    const day = today();
+    const no = certificateNo(day);
+    const expires = r.valid_months ? addMonths(day, r.valid_months) : null;
     await db
       .prepare(
-        "UPDATE training_records SET status='completed',completed_on=?,score=?,certificate_no=? WHERE id=?",
+        "UPDATE training_records SET status='completed',completed_on=?,score=?,certificate_no=?,expires_on=? WHERE id=?",
       )
-      .run(today(), score, no, r.id);
+      .run(day, score, no, expires, r.id);
+    await db
+      .prepare(
+        "INSERT INTO training_certificates(company_id,training_id,user_id,certificate_no,completed_on,score,expires_on,created_at) VALUES(?,?,?,?,?,?,?,?)",
+      )
+      .run(r.company_id, r.training_id, r.user_id, no, day, score, expires, nowIso());
   }
 
   // ---- learner ------------------------------------------------------------------------------
@@ -286,17 +340,110 @@ export function registerLearning(router, app) {
       const company = await db
         .prepare("SELECT name FROM companies WHERE id=?")
         .get(r.company_id);
+      return send(200, certificateLetter(r, company.name, today()));
+    },
+  );
+  // Every certificate the person has earned, including earlier ones of renewed courses.
+  router.get("/api/certificates/mine", async ({ user, send }) => {
+    const rows = await db
+      .prepare(
+        "SELECT c.id,c.certificate_no,c.completed_on,c.score,c.expires_on,t.title,t.hours,t.category FROM training_certificates c JOIN trainings t ON t.id=c.training_id WHERE c.user_id=? AND c.company_id=? ORDER BY c.completed_on DESC,c.id DESC",
+      )
+      .all(user.id, user.company_id);
+    const day = today();
+    return send(
+      200,
+      rows.map((c) => ({
+        ...c,
+        expired: Boolean(c.expires_on && c.expires_on < day),
+      })),
+    );
+  });
+  router.get("/api/certificates/:id", async ({ user, params, send }) => {
+    const c = await db
+      .prepare(
+        "SELECT c.*,t.title,t.hours,u.name person FROM training_certificates c JOIN trainings t ON t.id=c.training_id JOIN users u ON u.id=c.user_id WHERE c.id=?",
+      )
+      .get(integer(Number(params.id)));
+    if (
+      !c ||
+      c.company_id !== user.company_id ||
+      (c.user_id !== user.id && !can(user, "performance.manage"))
+    )
+      throw new HttpError(404, "Certificate not found.");
+    const company = await db
+      .prepare("SELECT name FROM companies WHERE id=?")
+      .get(c.company_id);
+    return send(200, certificateLetter(c, company.name, today()));
+  });
+  // Public check of a certificate number, for anyone shown a printed certificate.
+  router.get(
+    "/api/certificates/verify/:no",
+    { public: true },
+    async ({ req, params, send }) => {
+      app.rateLimit(`cert-verify:${clientIp(req)}`, 60);
+      const no = String(params.no || "").trim().toUpperCase();
+      const c = VERIFIABLE.test(no)
+        ? await db
+            .prepare(
+              "SELECT c.completed_on,c.expires_on,c.score,t.title,t.hours,u.name person,co.name company FROM training_certificates c JOIN trainings t ON t.id=c.training_id JOIN users u ON u.id=c.user_id JOIN companies co ON co.id=c.company_id WHERE c.certificate_no=?",
+            )
+            .get(no)
+        : null;
+      if (!c) return send(200, { found: false });
       return send(200, {
-        company: company.name,
-        title: "Certificate of completion",
-        date: longDate(r.completed_on),
-        to: r.person,
-        paragraphs: [
-          `This certifies that ${r.person} successfully completed the course "${r.title}" (${r.hours} hours) on ${longDate(r.completed_on)}${r.score != null ? ` with a score of ${r.score}%` : ""}.`,
-          `Certificate number: ${r.certificate_no}`,
-        ],
-        signoff: `For ${company.name}`,
+        found: true,
+        certificate_no: no,
+        name: c.person,
+        course: c.title,
+        hours: c.hours,
+        company: c.company,
+        completed_on: c.completed_on,
+        expires_on: c.expires_on,
+        valid: !c.expires_on || c.expires_on >= today(),
       });
+    },
+  );
+
+  // ---- catalogue: courses anyone can enrol in -------------------------------------------------
+  router.get("/api/learning-catalogue", async ({ user, send }) =>
+    send(
+      200,
+      await db
+        .prepare(
+          `SELECT t.id,t.title,t.description,t.category,t.hours,t.valid_months,
+             (SELECT COUNT(*) FROM training_lessons l WHERE l.training_id=t.id) lessons,
+             (SELECT COUNT(*) FROM training_questions q WHERE q.training_id=t.id) questions,
+             r.id record_id,r.status
+           FROM trainings t LEFT JOIN training_records r ON r.training_id=t.id AND r.user_id=?
+           WHERE t.company_id=? AND t.kind='course' AND t.active=1 AND t.open_enrol=1
+             AND EXISTS (SELECT 1 FROM training_lessons l WHERE l.training_id=t.id)
+           ORDER BY COALESCE(t.category,''),t.title`,
+        )
+        .all(user.id, user.company_id),
+    ),
+  );
+  router.post(
+    "/api/learning-catalogue/:id/enrol",
+    async ({ user, params, send, audit }) => {
+      const t = await db
+        .prepare(
+          "SELECT id,title FROM trainings WHERE id=? AND company_id=? AND kind='course' AND active=1 AND open_enrol=1",
+        )
+        .get(integer(Number(params.id)), user.company_id);
+      if (!t) throw new HttpError(404, "Course not found.");
+      await db
+        .prepare(
+          "INSERT INTO training_records(training_id,user_id) VALUES(?,?) ON CONFLICT DO NOTHING",
+        )
+        .run(t.id, user.id);
+      const r = await db
+        .prepare(
+          "SELECT id FROM training_records WHERE training_id=? AND user_id=?",
+        )
+        .get(t.id, user.id);
+      await audit("course_enrolled", { id: t.id });
+      return send(200, { record_id: r.id });
     },
   );
 
@@ -399,6 +546,14 @@ export function registerLearning(router, app) {
         );
       if (b.mandatory !== undefined) set.mandatory = b.mandatory ? 1 : 0;
       if (b.active !== undefined) set.active = b.active ? 1 : 0;
+      if (b.category !== undefined)
+        set.category = optionalString(b.category, "Category", 60) || null;
+      if (b.open_enrol !== undefined) set.open_enrol = b.open_enrol ? 1 : 0;
+      if (b.valid_months !== undefined)
+        set.valid_months =
+          b.valid_months === null || b.valid_months === "" || b.valid_months === 0
+            ? null
+            : Math.round(number(b.valid_months, "Valid for (months)", 1, 120));
       if (b.due_date !== undefined)
         set.due_date = isoDate(b.due_date, "Due date");
       const keys = Object.keys(set);
@@ -466,6 +621,109 @@ export function registerLearning(router, app) {
       return send(200, { assigned: added });
     },
   );
+  // ---- audiences: departments, branches and designations ----------------------------------------
+  router.get(
+    "/api/admin/learning/:id/audience",
+    { perm: "performance.manage" },
+    async ({ params, companyId, send }) => {
+      const t = await owned("trainings", params.id, companyId, "training");
+      return send(
+        200,
+        await db
+          .prepare(
+            `SELECT a.id,a.department_id,a.branch_id,a.designation_id,d.name department,b.name branch,g.name designation
+             FROM training_audiences a LEFT JOIN departments d ON d.id=a.department_id
+             LEFT JOIN branches b ON b.id=a.branch_id LEFT JOIN designations g ON g.id=a.designation_id
+             WHERE a.training_id=? ORDER BY a.id`,
+          )
+          .all(t.id),
+      );
+    },
+  );
+  // Replaces the rules and assigns the course at once to everyone they match.
+  router.put(
+    "/api/admin/learning/:id/audience",
+    { perm: "performance.manage" },
+    async ({ params, companyId, body, send, audit }) => {
+      const t = await owned("trainings", params.id, companyId, "training");
+      const rules = (await body()).rules;
+      if (!Array.isArray(rules) || rules.length > 50)
+        throw new HttpError(400, "Send up to 50 rules.");
+      const clean = [];
+      for (const r of rules) {
+        const one = {};
+        for (const [key, table, label] of [
+          ["department_id", "departments", "department"],
+          ["branch_id", "branches", "branch"],
+          ["designation_id", "designations", "designation"],
+        ])
+          one[key] =
+            r?.[key] == null || r[key] === ""
+              ? null
+              : (await owned(table, r[key], companyId, label)).id;
+        clean.push(one);
+      }
+      await transaction(async () => {
+        await db
+          .prepare("DELETE FROM training_audiences WHERE training_id=?")
+          .run(t.id);
+        for (const r of clean)
+          await db
+            .prepare(
+              "INSERT INTO training_audiences(training_id,department_id,branch_id,designation_id,created_at) VALUES(?,?,?,?,?)",
+            )
+            .run(t.id, r.department_id, r.branch_id, r.designation_id, nowIso());
+        await audit("training_audience_saved", { id: t.id, rules: clean.length });
+      });
+      const assigned = await syncTrainingAudiences(app, { trainingId: t.id });
+      return send(200, { rules: clean.length, assigned });
+    },
+  );
+
+  // ---- department report -------------------------------------------------------------------
+  router.get(
+    "/api/admin/learning-report",
+    { perm: "performance.manage" },
+    async ({ companyId, query, send }) => {
+      const tid = query.training_id ? integer(Number(query.training_id)) : null;
+      if (tid) await owned("trainings", tid, companyId, "training");
+      const day = today();
+      const rows = await db
+        .prepare(
+          `SELECT COALESCE(d.name,'No department') department,
+             COUNT(*) assigned,
+             SUM(CASE WHEN r.status='completed' THEN 1 ELSE 0 END) completed,
+             SUM(CASE WHEN r.status='assigned' AND r.started_at IS NOT NULL THEN 1 ELSE 0 END) in_progress,
+             SUM(CASE WHEN r.status='assigned' AND COALESCE(r.due_date,t.due_date)<? THEN 1 ELSE 0 END) overdue,
+             SUM(CASE WHEN r.status='completed' AND r.expires_on IS NOT NULL AND r.expires_on<=? THEN 1 ELSE 0 END) expiring,
+             SUM(CASE WHEN r.status='completed' THEN t.hours ELSE 0 END) hours
+           FROM training_records r JOIN trainings t ON t.id=r.training_id
+           JOIN users u ON u.id=r.user_id LEFT JOIN departments d ON d.id=u.department_id
+           WHERE t.company_id=? AND t.active=1 AND u.active=1 ${tid ? "AND t.id=?" : ""}
+           GROUP BY COALESCE(d.name,'No department') ORDER BY 1`,
+        )
+        .all(day, plusDays(day, 30), companyId, ...(tid ? [tid] : []));
+      return send(
+        200,
+        rows.map((r) => {
+          const n = (k) => Number(r[k] ?? 0);
+          return {
+            department: r.department,
+            assigned: n("assigned"),
+            completed: n("completed"),
+            in_progress: n("in_progress"),
+            overdue: n("overdue"),
+            expiring: n("expiring"),
+            hours: n("hours"),
+            completion: n("assigned")
+              ? Math.round((n("completed") / n("assigned")) * 100)
+              : 0,
+          };
+        }),
+      );
+    },
+  );
+
   router.post(
     "/api/admin/trainings/records/:id/reset",
     { perm: "performance.manage" },
@@ -499,7 +757,88 @@ export async function assignJoinerCourses(app, userId, companyId, joiningDate) {
         "INSERT INTO training_records(training_id,user_id,due_date) VALUES(?,?,?) ON CONFLICT DO NOTHING",
       )
       .run(c.id, userId, plusDays(joiningDate, c.due_days));
+  await syncTrainingAudiences(app, { userId, from: joiningDate });
   return courses.length;
+}
+
+/**
+ * Assigns courses and trainings to everyone their audience rules match who does not
+ * have them yet (new joiners, transfers, new rules). Limited to one course or one
+ * person when given. Returns how many assignments were made.
+ */
+export async function syncTrainingAudiences(app, { trainingId, userId, from } = {}) {
+  const day = from ?? app.dayOf(new Date(app.clock()).toISOString());
+  const rows = await app.db
+    .prepare(
+      `SELECT DISTINCT a.training_id,u.id user_id,t.company_id,t.title,t.due_days
+       FROM training_audiences a JOIN trainings t ON t.id=a.training_id AND t.active=1
+       JOIN users u ON u.company_id=t.company_id AND u.active=1 AND u.role<>'super_admin'
+         AND (a.department_id IS NULL OR u.department_id=a.department_id)
+         AND (a.branch_id IS NULL OR u.branch_id=a.branch_id)
+         AND (a.designation_id IS NULL OR u.designation_id=a.designation_id)
+       WHERE (t.kind<>'course' OR EXISTS (SELECT 1 FROM training_lessons l WHERE l.training_id=t.id))
+         AND NOT EXISTS (SELECT 1 FROM training_records r WHERE r.training_id=t.id AND r.user_id=u.id)
+         ${trainingId ? "AND t.id=?" : ""} ${userId ? "AND u.id=?" : ""}`,
+    )
+    .all(...(trainingId ? [trainingId] : []), ...(userId ? [userId] : []));
+  for (const r of rows) {
+    await app.db
+      .prepare(
+        "INSERT INTO training_records(training_id,user_id,due_date) VALUES(?,?,?) ON CONFLICT DO NOTHING",
+      )
+      .run(r.training_id, r.user_id, plusDays(day, r.due_days));
+    await app.notify([r.user_id], {
+      companyId: r.company_id,
+      kind: "training",
+      title: `Training assigned: ${r.title}`,
+      link: "learning",
+    });
+  }
+  return rows.length;
+}
+
+/**
+ * Opens a course again for renewal once its certificate has expired: the old
+ * certificate stays in the history and the person has the usual days to retake it.
+ */
+export async function renewExpiredTraining(app) {
+  const day = app.dayOf(new Date(app.clock()).toISOString());
+  const rows = await app.db
+    .prepare(
+      `SELECT r.id,r.user_id,r.completed_on,r.expires_on,t.company_id,t.title,t.valid_months,t.due_days
+       FROM training_records r JOIN trainings t ON t.id=r.training_id JOIN users u ON u.id=r.user_id
+       WHERE r.status='completed' AND t.active=1 AND u.active=1 AND t.valid_months IS NOT NULL AND r.completed_on IS NOT NULL`,
+    )
+    .all();
+  let renewed = 0;
+  for (const r of rows) {
+    const expires = r.expires_on ?? addMonths(r.completed_on, r.valid_months);
+    if (expires > day) {
+      if (!r.expires_on)
+        await app.db
+          .prepare("UPDATE training_records SET expires_on=? WHERE id=?")
+          .run(expires, r.id);
+      continue;
+    }
+    await app.db
+      .prepare("DELETE FROM training_progress WHERE record_id=?")
+      .run(r.id);
+    await app.db
+      .prepare(
+        "UPDATE training_records SET status='assigned',completed_on=NULL,score=NULL,certificate_no=NULL,expires_on=NULL,started_at=NULL,attempts=0,reminded_on=NULL,due_date=? WHERE id=?",
+      )
+      .run(plusDays(day, r.due_days), r.id);
+    await app.notify([r.user_id], {
+      companyId: r.company_id,
+      kind: "training",
+      title: `Time to renew: ${r.title}`,
+      body: `Your certificate expired on ${expires}. Please complete the course again.`,
+      link: "learning",
+      email: true,
+    });
+    renewed++;
+  }
+  return renewed;
 }
 
 /** Nudges people with training due within 3 days or overdue, at most once a week each. */
@@ -528,10 +867,16 @@ export async function sendTrainingReminders(app) {
   return rows.length;
 }
 export function scheduleLearningReminders(app) {
-  const run = () =>
-    sendTrainingReminders(app).catch((e) =>
-      console.error("Training reminders failed:", e.message),
-    );
+  const run = async () => {
+    try {
+      await syncTrainingAudiences(app);
+      await renewExpiredTraining(app);
+      await sendTrainingReminders(app);
+    } catch (e) {
+      console.error("Learning jobs failed:", e.message);
+    }
+  };
   void run();
-  setInterval(run, 6 * 3600000).unref();
+  // Hourly, so new joiners and transfers get their department's training the same day.
+  setInterval(run, 3600000).unref();
 }

@@ -411,7 +411,7 @@ export function registerPerformance(router, app) {
       200,
       await db
         .prepare(
-          "SELECT r.id,r.status,r.completed_on,r.score,r.attempts,r.certificate_no,t.title,t.kind,t.hours,t.mandatory,COALESCE(r.due_date,t.due_date) due_date FROM training_records r JOIN trainings t ON t.id=r.training_id WHERE r.user_id=? AND t.active=1 ORDER BY (r.status='assigned') DESC,COALESCE(r.due_date,t.due_date),r.id",
+          "SELECT r.id,r.status,r.completed_on,r.score,r.attempts,r.certificate_no,r.expires_on,t.title,t.kind,t.hours,t.mandatory,t.category,COALESCE(r.due_date,t.due_date) due_date FROM training_records r JOIN trainings t ON t.id=r.training_id WHERE r.user_id=? AND t.active=1 ORDER BY (r.status='assigned') DESC,COALESCE(r.due_date,t.due_date),r.id",
         )
         .all(user.id),
     ),
@@ -479,7 +479,7 @@ export function registerPerformance(router, app) {
           (
             await db
               .prepare(
-                "INSERT INTO trainings(company_id,title,hours,mandatory,due_date,created_by,created_at,kind,description) VALUES(?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO trainings(company_id,title,hours,mandatory,due_date,created_by,created_at,kind,description,category) VALUES(?,?,?,?,?,?,?,?,?,?)",
               )
               .run(
                 companyId,
@@ -491,6 +491,7 @@ export function registerPerformance(router, app) {
                 nowIso(),
                 kind,
                 optionalString(b.description, "Description", 1000) || null,
+                optionalString(b.category, "Category", 60) || null,
               )
           ).lastInsertRowid,
         );

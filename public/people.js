@@ -355,7 +355,7 @@ async function selfieSettingCard(id) {
   if (id !== renderId) return;
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = `<h2>Selfie at punch</h2><p class="muted">When on, the phone app asks for a selfie with every punch, and HR can see it in Attendance records. It helps against someone punching for a colleague.</p><label class="check"><input type="checkbox" id="selfie-on" ${s.require_selfie ? "checked" : ""}> Require a selfie to punch in and out</label><div class="actions"><label>Oldest app version allowed to punch<input id="min-version" value="${esc(s.min_app_version || "")}" placeholder="e.g. 1.2.0 (blank = any)" maxlength="12"></label><button class="secondary" id="min-save">Save</button></div>`;
+  card.innerHTML = `<h2>Selfie and fingerprint at punch</h2><p class="muted">When on, the phone app asks for a selfie with every punch, and HR can see it in Attendance records. It helps against someone punching for a colleague.</p><label class="check"><input type="checkbox" id="selfie-on" ${s.require_selfie ? "checked" : ""}> Require a selfie to punch in and out</label><label class="check"><input type="checkbox" id="bio-on" ${s.require_biometric ? "checked" : ""}> Require the phone's fingerprint or face check before every punch</label><div class="actions"><label>Oldest app version allowed to punch<input id="min-version" value="${esc(s.min_app_version || "")}" placeholder="e.g. 1.2.0 (blank = any)" maxlength="12"></label><button class="secondary" id="min-save">Save</button></div>`;
   document.querySelector("#content").append(card);
   card.querySelector("#min-save").onclick = () =>
     busy(card.querySelector("#min-save"), async () => {
@@ -369,6 +369,18 @@ async function selfieSettingCard(id) {
       );
       notice("Saved. Phones on an older version can no longer punch.");
     });
+  card.querySelector("#bio-on").onchange = async (e) => {
+    await api(
+      "/admin/attendance-settings",
+      { require_biometric: e.target.checked },
+      "PATCH",
+    );
+    notice(
+      e.target.checked
+        ? "Fingerprint or face check is now required to punch. Phones need the latest app and a fingerprint or face lock set up."
+        : "Fingerprint or face check is no longer required to punch.",
+    );
+  };
   card.querySelector("#selfie-on").onchange = async (e) => {
     await api(
       "/admin/attendance-settings",
