@@ -19,6 +19,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -114,6 +115,8 @@ function Button({
   );
 }
 export default function Attendance() {
+  // Narrow phones (320–360 points wide) get less side padding.
+  const narrow = useWindowDimensions().width < 380;
   const [token, setToken] = useState<string | null>(null),
     sessionRef = useRef<string | null>(null),
     locked = useRef(false),
@@ -814,7 +817,7 @@ export default function Attendance() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
-          contentContainerStyle={s.scroll}
+          contentContainerStyle={[s.scroll, narrow && s.scrollNarrow]}
           keyboardShouldPersistTaps="handled"
           refreshControl={
             token ? (
@@ -1238,7 +1241,10 @@ export default function Attendance() {
               <Text style={[s.tabIcon, view === id && { color: "#ac051b" }]}>
                 {icon}
               </Text>
-              <Text style={[s.tabLabel, view === id && { color: "#ac051b" }]}>
+              <Text
+                numberOfLines={1}
+                style={[s.tabLabel, view === id && { color: "#ac051b" }]}
+              >
                 {label}
               </Text>
             </Pressable>
@@ -1282,6 +1288,7 @@ export default function Attendance() {
 }
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#f8f7fa" },
+  scrollNarrow: { padding: 16 },
   scroll: {
     flexGrow: 1,
     padding: 26,
@@ -1357,7 +1364,7 @@ const s = StyleSheet.create({
     borderTopColor: "#ececf2",
     paddingTop: 14,
   },
-  tabs: { flexDirection: "row", gap: 12 },
+  tabs: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   crumb: {
     backgroundColor: "#fff",
     borderRadius: 10,
@@ -1451,7 +1458,11 @@ const s = StyleSheet.create({
     justifyContent: "flex-end",
     backgroundColor: "rgba(0,0,0,0.35)",
   },
+  // On tablets the sheet stays the width of the content, not the whole screen.
   sheet: {
+    width: "100%",
+    maxWidth: 600,
+    alignSelf: "center",
     backgroundColor: "#fff",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -1467,7 +1478,7 @@ const s = StyleSheet.create({
     flexDirection: "row",
     backgroundColor: "rgba(0,0,0,0.35)",
   },
-  menu: { width: 280, backgroundColor: "#ac051b", paddingBottom: 30 },
+  menu: { width: "84%", maxWidth: 320, backgroundColor: "#ac051b", paddingBottom: 30 },
   menuGroup: {
     color: "#fbd5da",
     fontSize: 11,

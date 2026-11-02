@@ -283,8 +283,10 @@ export const k = StyleSheet.create({
   chipOn: { backgroundColor: "#c8102e" },
   chipText: { color: "#c8102e", fontWeight: "600", fontSize: 13 },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  // Wraps instead of overflowing on narrow phones and with large text sizes.
   row: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 10,
