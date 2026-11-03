@@ -1618,7 +1618,8 @@ test("an import can update existing people, changing only the columns it fills",
       .sort(),
     [
       "Employee code and email belong to different people",
-      "No existing employee matches this code or email",
+      // A row matching nobody is treated as a new person, and this one has no name.
+      "Name is missing",
       "This person appears twice in the file",
     ],
   );

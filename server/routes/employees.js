@@ -1,4 +1,5 @@
 import { passwordHash, passwordHashAsync } from "../db.js";
+import { tempPassword } from "./bulk.js";
 import { cleanCustom } from "./people-plus.js";
 import {
   HttpError,
@@ -81,6 +82,44 @@ function canManage(caller, target) {
 
 export function registerEmployees(router, app) {
   const { db, transaction } = app;
+
+  // People who have not signed in and set their own password yet, for handing out passwords.
+  router.get("/api/admin/employees/not-signed-in", { perm: "employees.write" }, async ({ user, companyId, send }) =>
+    send(
+      200,
+      (
+        await db
+          .prepare(
+            "SELECT id,name,email,employee_code,role FROM users WHERE company_id=? AND active=1 AND must_change_password=1 ORDER BY name",
+          )
+          .all(companyId)
+      ).filter((p) => p.id !== user.id && canManage(user, p)),
+    ),
+  );
+  // New temporary passwords for the chosen people. They are returned once, here, to hand out;
+  // only their scrambled form is kept. Each person must choose their own at first sign-in.
+  router.post("/api/admin/employees/temp-passwords", { perm: "employees.write" }, async ({ user, companyId, body, send, audit }) => {
+    const ids = (await body()).ids;
+    if (!Array.isArray(ids) || !ids.length || ids.length > 200) throw new HttpError(400, "Choose between 1 and 200 people.");
+    const out = [];
+    for (const raw of ids) {
+      const p = await db
+        .prepare("SELECT id,name,email,employee_code,role,active FROM users WHERE id=? AND company_id=?")
+        .get(Number(raw), companyId);
+      if (!p || !p.active) throw new HttpError(400, "Choose active people from your company.");
+      if (p.id === user.id || !canManage(user, p)) throw new HttpError(403, `You cannot reset the password of ${p.name}.`);
+      out.push({ ...p, temporary_password: tempPassword() });
+    }
+    const hashes = await Promise.all(out.map((p) => passwordHashAsync(p.temporary_password)));
+    await transaction(async () => {
+      for (const [i, p] of out.entries()) {
+        await db.prepare("UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?").run(hashes[i], p.id);
+        await db.prepare("DELETE FROM sessions WHERE user_id=?").run(p.id);
+      }
+      await audit("temp_passwords_issued", { count: out.length, ids: out.map((p) => p.id) });
+    });
+    return send(200, out.map(({ id, name, email, employee_code, temporary_password }) => ({ id, name, email, employee_code, temporary_password })));
+  });
 
   // A custom role must be one of this company's; any other role clears it.
   const customRoleId = async (role, b, companyId) => {

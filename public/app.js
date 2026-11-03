@@ -911,6 +911,44 @@ const options = (items, selected, blank = "— None —") =>
 const input = (name, label, value = "", extra = "") =>
   `<label>${label}<input name="${name}" value="${esc(value)}" ${extra}></label>`;
 
+// Temporary passwords for people who have not signed in yet: made new, shown once, downloadable.
+async function tempPasswordsDialog() {
+  const people = await api("/admin/employees/not-signed-in");
+  if (!people.length) return notice("Everyone has signed in and chosen their own password.");
+  dialog(
+    "New temporary passwords",
+    `<p class="full muted">For people who have not signed in yet. Each chosen person gets a new password, shown once on the next screen; their old one stops working. They sign in with their email and must choose their own password straight away.</p><div class="full check-grid">${people
+      .map((p) => `<label class="check"><input type="checkbox" name="p" value="${p.id}" checked> ${esc(p.name)}<small>${esc(p.email)}${p.employee_code ? ` · ${esc(p.employee_code)}` : ""}</small></label>`)
+      .join("")}</div>`,
+    async () => {
+      const ids = [...document.querySelectorAll('dialog [name="p"]')].filter((c) => c.checked).map((c) => Number(c.value));
+      if (!ids.length) throw new Error("Choose at least one person.");
+      const rows = await api("/admin/employees/temp-passwords", { ids });
+      // After the dialog closes: the passwords, once, with a download.
+      setTimeout(() => {
+        viewDialog(
+          "Temporary passwords",
+          `<div class="callout">Shown only now. Download them and give each person their own privately.</div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email (username)</th><th>Temporary password</th></tr></thead><tbody>${rows
+            .map((r) => `<tr><td>${esc(r.name)}<small>${esc(r.employee_code || "")}</small></td><td>${esc(r.email)}</td><td><code>${esc(r.temporary_password)}</code></td></tr>`)
+            .join("")}</tbody></table></div><div class="actions"><button id="dl-temp">Download (CSV)</button></div>`,
+        );
+        document.querySelector("#dl-temp").onclick = () => {
+          const url = URL.createObjectURL(
+            new Blob(
+              [
+                "﻿employee_code,name,email,temporary_password\r\n" +
+                  rows.map((r) => [r.employee_code ?? "", r.name, r.email, r.temporary_password].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n"),
+              ],
+              { type: "text/csv" },
+            ),
+          );
+          Object.assign(document.createElement("a"), { href: url, download: "temporary-passwords.csv" }).click();
+          URL.revokeObjectURL(url);
+        };
+      }, 0);
+    },
+  );
+}
 async function employeesPage(id) {
   const org = await api("/admin/org");
   org.custom = await api("/custom-fields");
@@ -922,7 +960,9 @@ async function employeesPage(id) {
     heading(
       "Your people",
       "Employee records, roles and reporting lines.",
-      has("employees.write") ? '<button id="add">+ Add employee</button>' : "",
+      has("employees.write")
+        ? '<div class="actions"><button class="secondary" id="temp-pw">New temporary passwords</button><button id="add">+ Add employee</button></div>'
+        : "",
     ) +
     `<div class="card"><form class="filters" id="filters"><label>Search<input name="q" placeholder="Name, email or code"></label><label>Department<select name="department_id">${options(org.departments, null, "All")}</select></label><label>Branch<select name="branch_id">${options(org.branches, null, "All")}</select></label><label>Status<select name="active"><option value="1">Active</option><option value="0">Inactive</option><option value="">All</option></select></label><button>Search</button></form></div><div class="card" id="list">Loading…</div>`;
   const form = document.querySelector("#filters");
@@ -988,6 +1028,7 @@ async function employeesPage(id) {
   document
     .querySelector("#add")
     ?.addEventListener("click", () => employeeDialog(org));
+  document.querySelector("#temp-pw")?.addEventListener("click", (e) => busy(e.currentTarget, tempPasswordsDialog));
   await load();
 }
 
