@@ -34,6 +34,10 @@ import {
   RegularizationScreen,
 } from "./Daily";
 
+import { T, themed } from "../theme";
+import * as ImagePicker from "expo-image-picker";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
+import { Appear, Avatar, Icon, type IconName, PressScale, ScreenIn, success, tick } from "../ui";
 // Self-service screens for the phone: leave, messages, the Laxmi assistant,
 // payslips, attendance requests, directory, helpdesk, alerts and profile. Everything talks to the same API as
 // the web portal, so the same rules and approvals apply.
@@ -53,6 +57,8 @@ type Props = {
   files: Files;
   onSignOut: () => void;
   onPassword: () => void;
+  // Tells the app shell the person's details changed (a new photo), so the top bar updates.
+  onProfileChanged?: () => void;
 };
 
 type Payslip = {
@@ -305,16 +311,17 @@ function Btn({
   disabled?: boolean;
 }) {
   return (
-    <Pressable
+    <PressScale
       accessibilityRole="button"
+      accessibilityState={{ disabled: !!disabled }}
       disabled={disabled}
       onPress={onPress}
       style={[s.btn, secondary && s.btnSecondary, disabled && { opacity: 0.5 }]}
     >
-      <Text style={[s.btnText, secondary && { color: "#c8102e" }]}>
+      <Text style={[s.btnText, secondary && { color: T.primary }]}>
         {title}
       </Text>
-    </Pressable>
+    </PressScale>
   );
 }
 function Field({
@@ -364,6 +371,7 @@ export default function More({
   files,
   onSignOut,
   onPassword,
+  onProfileChanged,
 }: Props) {
   const [unread, setUnread] = useState(0);
   const [chatUnread, setChatUnread] = useState(0);
@@ -381,7 +389,7 @@ export default function More({
     onCounts(unread, chatUnread);
   }, [unread, chatUnread, onCounts]);
   return (
-    <View style={{ gap: 14 }}>
+    <ScreenIn key={section}>
       <Text style={s.crumb}>
         {MENU.find(([, items]) => items.some(([id]) => id === section))?.[0]}
         {section === "Home" ? "" : " / " + section}
@@ -430,11 +438,12 @@ export default function More({
         <ProfileWithDetails
           api={api}
           files={files}
+          onChanged={onProfileChanged}
           onSignOut={onSignOut}
           onPassword={onPassword}
         />
       )}
-    </View>
+    </ScreenIn>
   );
 }
 
@@ -467,7 +476,7 @@ function useLoad<T>(load: () => Promise<T>) {
 }
 const Status = ({ loading, error }: { loading: boolean; error: string }) =>
   loading ? (
-    <ActivityIndicator color="#c8102e" />
+    <ActivityIndicator color={T.primary} />
   ) : error ? (
     <Text style={s.error}>{error}</Text>
   ) : null;
@@ -498,15 +507,13 @@ function PunchButton({
 }) {
   const [working, setWorking] = useState(false);
   return (
-    <Pressable
-      style={({ pressed }) => [
-        s.punchBtn,
-        pressed && { opacity: 0.8 },
-        (disabled || working) && { opacity: 0.55 },
-      ]}
+    <PressScale
+      style={[s.punchBtn, (disabled || working) && { opacity: 0.55 }]}
+      haptic
       disabled={disabled || working}
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled || working, busy: working }}
       onPress={async () => {
         setWorking(true);
         try {
@@ -516,8 +523,8 @@ function PunchButton({
         }
       }}
     >
-      {working ? <ActivityIndicator color="#ac051b" /> : <Text style={s.punchBtnText}>{label}</Text>}
-    </Pressable>
+      {working ? <ActivityIndicator color={T.primaryDark} /> : <Text style={s.punchBtnText}>{label}</Text>}
+    </PressScale>
   );
 }
 
@@ -589,12 +596,12 @@ function PunchHero({
 }
 
 // Quick links on Home, a group per page, swiped sideways.
-const QUICK: [string, string, [Section, string, string][]][] = [
-  ["Attendance", "◷", [["My Attendance", "Att log", "▤"], ["Requests", "Regularize", "✎"], ["Attendance Summary", "Summary", "◔"]]],
-  ["On duty", "✈", [["OD", "OD", "✈"], ["Multiple OD", "Multiple OD", "▦"], ["OD Log History", "OD log", "↺"]]],
-  ["Leave", "☼", [["Leave", "Leave", "☼"], ["Holidays", "Holidays", "✦"], ["Optional Holiday", "Optional holiday", "☑"]]],
-  ["Pay", "₹", [["Payslips", "Payslip", "₹"], ["Tax Declaration", "Tax", "❒"], ["My Claims", "Claims", "⎘"]]],
-  ["Connect", "✆", [["Ask Laxmi", "Ask Laxmi", "✦"], ["Messages", "Messages", "✉"], ["Helpdesk", "Helpdesk", "?"]]],
+const QUICK: [string, IconName, [Section, string, IconName][]][] = [
+  ["Attendance", "time-outline", [["My Attendance", "Att log", "calendar-outline"], ["Requests", "Regularize", "create-outline"], ["Attendance Summary", "Summary", "pie-chart-outline"]]],
+  ["On duty", "briefcase-outline", [["OD", "OD", "navigate-outline"], ["Multiple OD", "Multiple OD", "albums-outline"], ["OD Log History", "OD log", "refresh-circle-outline"]]],
+  ["Leave", "sunny-outline", [["Leave", "Leave", "umbrella-outline"], ["Holidays", "Holidays", "gift-outline"], ["Optional Holiday", "Optional holiday", "checkbox-outline"]]],
+  ["Pay", "wallet-outline", [["Payslips", "Payslip", "receipt-outline"], ["Tax Declaration", "Tax", "document-text-outline"], ["My Claims", "Claims", "card-outline"]]],
+  ["Connect", "chatbubbles-outline", [["Ask Laxmi", "Ask Laxmi", "sparkles-outline"], ["Messages", "Messages", "chatbubble-ellipses-outline"], ["Helpdesk", "Helpdesk", "help-buoy-outline"]]],
 ];
 function QuickLinks({ onSection }: { onSection: (s: Section) => void }) {
   const [width, setWidth] = useState(0);
@@ -612,19 +619,21 @@ function QuickLinks({ onSection }: { onSection: (s: Section) => void }) {
           {QUICK.map(([group, icon, links]) => (
             <View key={group} style={[s.card, s.quickPage, { width }]}>
               <View style={s.quickHead}>
-                <Text style={s.quickHeadIcon}>{icon}</Text>
+                <View style={s.quickHeadIcon}>
+                  <Icon name={icon} size={22} color={T.primary} />
+                </View>
                 <Text style={s.heading}>{group}</Text>
               </View>
               <View style={s.quickRow}>
                 {links.map(([id, label, glyph]) => (
-                  <Pressable key={id} accessibilityRole="button" style={s.quickLink} onPress={() => onSection(id)}>
+                  <PressScale key={id} accessibilityRole="button" accessibilityLabel={label} style={s.quickLink} haptic onPress={() => onSection(id)}>
                     <View style={s.quickIcon}>
-                      <Text style={s.quickGlyph}>{glyph}</Text>
+                      <Icon name={glyph} size={26} color={T.primary} />
                     </View>
                     <Text style={s.quickText} numberOfLines={2}>
                       {label}
                     </Text>
-                  </Pressable>
+                  </PressScale>
                 ))}
               </View>
             </View>
@@ -667,7 +676,7 @@ type Announcement = {
   author: string | null;
 };
 type TodayInfo = {
-  user?: { od_punch?: boolean };
+  user?: { od_punch?: boolean; photo_at?: string | null };
   od_allowed?: boolean;
   openTrip?: { purpose: string; out_at: string } | null;
   openShift: { in_at: string; workplace_name: string; source?: string } | null;
@@ -737,16 +746,19 @@ function HomeScreen({
   );
   return (
     <>
-      <View style={s.greetRow}>
-        <View style={s.greetAvatar}>
-          <Text style={s.greetAvatarText}>{me ? initialsOf(me.name) : ""}</Text>
-        </View>
+      <Appear index={0} style={s.greetRow}>
+        <Avatar
+          name={me?.name ?? ""}
+          uri={t?.user?.photo_at && me ? `${files.base}/api/people/${me.id}/photo?v=${encodeURIComponent(t.user.photo_at)}` : null}
+          headers={files.headers()}
+          size={56}
+        />
         <View style={{ flex: 1 }}>
           <Text style={s.note}>{greeting}</Text>
           <Text style={s.greetName}>{me?.name ?? " "}</Text>
         </View>
-      </View>
-      <View style={s.strip}>
+      </Appear>
+      <Appear index={1} style={s.strip}>
         <Text style={s.stripText}>
           {new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date())}
         </Text>
@@ -755,8 +767,9 @@ function HomeScreen({
           {t?.shift ? `${t.shift.name} ${t.shift.start}` : "—"}
         </Text>
         <View style={s.stripDivider} />
-        <Text style={[s.stripText, { color: "#c8102e" }]}>{status}</Text>
-      </View>
+        <Text style={[s.stripText, { color: T.primary }]}>{status}</Text>
+      </Appear>
+      <Appear index={2}>
       <PunchHero
         today={t}
         onSlidePunch={async () => {
@@ -765,14 +778,20 @@ function HomeScreen({
         }}
         onOdPunch={onOdPunch}
       />
-      <QuickLinks onSection={onSection} />
-      <View style={s.card}>
-        <Text style={s.heading}>📣 Announcements</Text>
+      </Appear>
+      <Appear index={3}>
+        <QuickLinks onSection={onSection} />
+      </Appear>
+      <Appear index={4} style={s.card}>
+        <View style={s.headRow}>
+          <Icon name="megaphone-outline" size={22} color={T.primary} />
+          <Text style={s.heading}>Announcements</Text>
+        </View>
         <Status loading={news.loading} error={news.error} />
         {(news.data ?? []).map((a) => (
           <View key={"a" + a.id} style={s.feed}>
             <Text style={s.feedTitle}>
-              {a.pinned ? "📌 " : ""}
+              {a.pinned ? "Pinned · " : ""}
               {a.title}
             </Text>
             <Text style={s.body}>{a.body}</Text>
@@ -781,7 +800,7 @@ function HomeScreen({
         ))}
         {(home.data?.joiners ?? []).map((j) => (
           <View key={"j" + j.id} style={s.feed}>
-            <Text style={s.feedTitle}>👤 New colleague</Text>
+            <Text style={s.feedTitle}>New colleague</Text>
             <Text style={s.body}>
               {j.name}
               {j.employee_code ? " (" + j.employee_code + ")" : ""} has joined
@@ -793,9 +812,12 @@ function HomeScreen({
         {!news.loading && (news.data ?? []).length === 0 && (home.data?.joiners ?? []).length === 0 && (
           <Text style={s.note}>No announcements yet.</Text>
         )}
-      </View>
-      <View style={s.card}>
-        <Text style={s.heading}>Birthdays 🎉</Text>
+      </Appear>
+      <Appear index={5} style={s.card}>
+        <View style={s.headRow}>
+          <Icon name="balloon-outline" size={22} color={T.primary} />
+          <Text style={s.heading}>Birthdays</Text>
+        </View>
         <Status loading={home.loading} error={home.error} />
         {(home.data?.birthdays ?? []).map((p) => (
           <View key={p.id} style={s.row}>
@@ -814,8 +836,8 @@ function HomeScreen({
         {!home.loading && (home.data?.birthdays ?? []).length === 0 && (
           <Text style={s.note}>No birthdays in {MONTHS[(home.data?.month ?? 1) - 1]}.</Text>
         )}
-      </View>
-      <View style={s.card}>
+      </Appear>
+      <Appear index={6} style={s.card}>
         <Text style={s.heading}>My team</Text>
         {home.data && (
           <View style={{ alignItems: "center", gap: 6 }}>
@@ -826,7 +848,7 @@ function HomeScreen({
             <View style={[s.wrap, { justifyContent: "center" }]}>{home.data.org.reports.map((p) => node(p))}</View>
           </View>
         )}
-      </View>
+      </Appear>
       <GalleryBunches api={api} files={files} />
     </>
   );
@@ -1098,7 +1120,7 @@ function MessagesScreen({
             <Text style={s.link}>Back</Text>
           </Pressable>
         </View>
-        {!info && <ActivityIndicator color="#c8102e" />}
+        {!info && <ActivityIndicator color={T.primary} />}
         {earlier && (
           <Btn
             title="Show earlier messages"
@@ -2812,7 +2834,7 @@ function AlertsScreen({
           }}
         >
           <View style={{ flex: 1 }}>
-            <Text style={[s.strong, !n.read_at && { color: "#c8102e" }]}>
+            <Text style={[s.strong, !n.read_at && { color: T.primary }]}>
               {!n.read_at ? "● " : ""}
               {n.title}
             </Text>
@@ -2830,13 +2852,70 @@ function ProfileScreen({
   files,
   onSignOut,
   onPassword,
+  onChanged,
 }: {
   api: Api;
   files: Files;
   onSignOut: () => void;
   onPassword: () => void;
+  onChanged?: () => void;
 }) {
   const me = useLoad(() => api<Profile>("/profile"));
+  const who = useLoad(() => api<{ user: { id: number; photo_at: string | null } }>("/me"));
+  const [saving, setSaving] = useState(false);
+  // A square photo from the camera or the gallery, shrunk to 512 px before upload.
+  const choosePhoto = async (camera: boolean) => {
+    const perm = camera
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Permission needed", camera ? "Allow the camera in phone settings to take a photo." : "Allow photo access in phone settings to choose a photo.");
+      return;
+    }
+    const picked = camera
+      ? await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 1 })
+      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, aspect: [1, 1], quality: 1 });
+    if (picked.canceled) return;
+    setSaving(true);
+    try {
+      const image = await ImageManipulator.manipulate(picked.assets[0].uri).resize({ width: 512 }).renderAsync();
+      const out = await image.saveAsync({ compress: 0.82, format: SaveFormat.JPEG, base64: true });
+      await api("/profile/photo", { mime: "image/jpeg", data: out.base64 }, "PUT");
+      success();
+      await who.reload();
+      onChanged?.();
+    } catch (e) {
+      Alert.alert("Could not save the photo", errorText(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const photoMenu = () => {
+    tick();
+    Alert.alert("Profile photo", "A clear, recent photo of your face works best.", [
+      { text: "Take a photo", onPress: () => void choosePhoto(true) },
+      { text: "Choose from gallery", onPress: () => void choosePhoto(false) },
+      ...(who.data?.user.photo_at
+        ? [
+            {
+              text: "Remove photo",
+              style: "destructive" as const,
+              onPress: async () => {
+                if (await attempt(() => api("/profile/photo", undefined, "DELETE"))) {
+                  await who.reload();
+                  onChanged?.();
+                }
+              },
+            },
+          ]
+        : []),
+      { text: "Cancel", style: "cancel" as const },
+    ]);
+  };
+  const photoUri =
+    who.data?.user.photo_at
+      ? `${files.base}/api/people/${who.data.user.id}/photo?v=${encodeURIComponent(who.data.user.photo_at)}`
+      : null;
   const [doc, setDoc] = useState<"" | "payslip" | "form16">("");
   const p = me.data;
   const work: [string, string | null | undefined][] = p
@@ -2856,9 +2935,18 @@ function ProfileScreen({
           <View style={s.profileHead}>
             <View style={s.profileBand} />
             <View style={s.profileTop}>
-              <View style={s.profileAvatar}>
-                <Text style={s.profileAvatarText}>{initialsOf(p.name)}</Text>
-              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={photoUri ? "Change profile photo" : "Add a profile photo"}
+                onPress={photoMenu}
+                disabled={saving}
+                style={s.profileAvatar}
+              >
+                <Avatar name={p.name} uri={photoUri} headers={files.headers()} size={80} />
+                <View style={s.photoBadge}>
+                  {saving ? <ActivityIndicator color="#fff" size="small" /> : <Icon name="camera" size={16} color="#fff" />}
+                </View>
+              </Pressable>
               <View style={{ flex: 1, gap: 2 }}>
                 <Text style={s.profileName}>{p.name}</Text>
                 <Text style={s.note}>{p.designation_name || ""}</Text>
@@ -2872,12 +2960,12 @@ function ProfileScreen({
           </View>
           <View style={s.contactRow}>
             <Pressable style={s.contactTile} accessibilityRole="button" onPress={() => p.email && void Linking.openURL("mailto:" + p.email)}>
-              <Text style={s.contactIcon}>✉</Text>
+              <Icon name="mail-outline" size={24} color={T.primary} />
               <Text style={s.contactLabel}>EMAIL</Text>
               <Text style={s.strong} numberOfLines={1}>{p.email || "—"}</Text>
             </Pressable>
             <Pressable style={s.contactTile} accessibilityRole="button" onPress={() => p.phone && void Linking.openURL("tel:" + p.phone)}>
-              <Text style={s.contactIcon}>✆</Text>
+              <Icon name="call-outline" size={24} color={T.primary} />
               <Text style={s.contactLabel}>PHONE</Text>
               <Text style={s.strong} numberOfLines={1}>{p.phone || "—"}</Text>
             </Pressable>
@@ -2897,8 +2985,8 @@ function ProfileScreen({
       <View style={s.contactRow}>
         {(
           [
-            ["payslip", "Pay slip", "₹"],
-            ["form16", "Form 16", "❒"],
+            ["payslip", "Pay slip", "receipt-outline"],
+            ["form16", "Form 16", "document-text-outline"],
           ] as const
         ).map(([id, label, glyph]) => (
           <Pressable
@@ -2908,9 +2996,9 @@ function ProfileScreen({
             style={[s.contactTile, doc === id && s.docOn]}
             onPress={() => setDoc(doc === id ? "" : id)}
           >
-            <Text style={[s.contactIcon, doc === id && { color: "#fff" }]}>{glyph}</Text>
+            <Icon name={glyph} size={24} color={doc === id ? "#fff" : T.primary} />
             <Text style={[s.strong, doc === id && { color: "#fff" }]}>{label}</Text>
-            <Text style={[s.note, doc === id && { color: "#fde7ea" }]}>{doc === id ? "Tap to close" : "Tap to open"}</Text>
+            <Text style={[s.note, doc === id && { color: T.soft }]}>{doc === id ? "Tap to close" : "Tap to open"}</Text>
           </Pressable>
         ))}
       </View>
@@ -2925,6 +3013,7 @@ function ProfileScreen({
 function ProfileWithDetails(props: {
   api: Api;
   files: Files;
+  onChanged?: () => void;
   onSignOut: () => void;
   onPassword: () => void;
 }) {
@@ -2936,7 +3025,7 @@ function ProfileWithDetails(props: {
   );
 }
 
-const s = StyleSheet.create({
+const s = themed(() => StyleSheet.create({
   card: {
     backgroundColor: "#fff",
     borderWidth: 1,
@@ -2964,20 +3053,20 @@ const s = StyleSheet.create({
   btn: {
     paddingVertical: 15,
     paddingHorizontal: 20,
-    backgroundColor: "#c8102e",
+    backgroundColor: T.primary,
     borderRadius: 12,
     alignItems: "center",
   },
-  btnSecondary: { backgroundColor: "#fff1f3" },
+  btnSecondary: { backgroundColor: T.softer },
   btnText: { fontSize: 15, color: "#fff", fontWeight: "600" },
   chip: {
     paddingVertical: 9,
     paddingHorizontal: 14,
     borderRadius: 18,
-    backgroundColor: "#fff1f3",
+    backgroundColor: T.softer,
   },
-  chipOn: { backgroundColor: "#c8102e" },
-  chipText: { color: "#c8102e", fontWeight: "600", fontSize: 13 },
+  chipOn: { backgroundColor: T.primary },
+  chipText: { color: T.primary, fontWeight: "600", fontSize: 13 },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   // Wraps instead of overflowing on narrow phones and with large text sizes.
   row: {
@@ -2992,7 +3081,7 @@ const s = StyleSheet.create({
   },
   strong: { fontWeight: "600", color: "#3a3c4a", fontSize: 14 },
   note: { color: "#7a7d8c", fontSize: 12, lineHeight: 18 },
-  link: { color: "#c8102e", fontWeight: "600", fontSize: 13 },
+  link: { color: T.primary, fontWeight: "600", fontSize: 13 },
   error: {
     color: "#894a35",
     backgroundColor: "#f9eae3",
@@ -3000,8 +3089,8 @@ const s = StyleSheet.create({
     borderRadius: 10,
   },
   pill: {
-    backgroundColor: "#fff1f3",
-    color: "#c8102e",
+    backgroundColor: T.softer,
+    color: T.primary,
     fontSize: 11,
     fontWeight: "600",
     paddingVertical: 3,
@@ -3012,18 +3101,18 @@ const s = StyleSheet.create({
     alignSelf: "flex-start",
   },
   net: {
-    backgroundColor: "#ac051b",
+    backgroundColor: T.primaryDark,
     borderRadius: 12,
     padding: 16,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  netLabel: { color: "#fde7ea", fontWeight: "600" },
+  netLabel: { color: T.soft, fontWeight: "600" },
   netValue: { color: "#fff", fontSize: 22, fontWeight: "700" },
   bubble: { backgroundColor: "#f3f2f7", borderRadius: 12, padding: 12, gap: 4 },
   hero: {
-    backgroundColor: "#ac051b",
+    backgroundColor: T.primaryDark,
     borderRadius: 24,
     padding: 18,
     gap: 16,
@@ -3034,7 +3123,7 @@ const s = StyleSheet.create({
     width: 220,
     height: 220,
     borderRadius: 110,
-    backgroundColor: "#c8102e",
+    backgroundColor: T.primary,
     opacity: 0.55,
     right: -70,
     top: -90,
@@ -3044,7 +3133,7 @@ const s = StyleSheet.create({
     width: 160,
     height: 160,
     borderRadius: 80,
-    backgroundColor: "#ff6b81",
+    backgroundColor: T.light,
     opacity: 0.25,
     left: -50,
     bottom: -60,
@@ -3057,7 +3146,7 @@ const s = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 22,
   },
-  timeLabel: { color: "#fde7ea", fontSize: 13, letterSpacing: 1 },
+  timeLabel: { color: T.soft, fontSize: 13, letterSpacing: 1 },
   timeValue: { color: "#fff", fontSize: 34, fontWeight: "800" },
   punchBtn: {
     height: 56,
@@ -3066,7 +3155,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  punchBtnText: { color: "#ac051b", fontWeight: "800", fontSize: 17, letterSpacing: 0.5 },
+  punchBtnText: { color: T.primaryDark, fontWeight: "800", fontSize: 17, letterSpacing: 0.5 },
   odBtn: {
     height: 46,
     borderRadius: 23,
@@ -3078,15 +3167,15 @@ const s = StyleSheet.create({
   odBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   heroTitle: { color: "#fff", fontSize: 18, fontWeight: "800" },
   heroRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 14 },
-  heroLine: { color: "#fde7ea", fontSize: 15, fontWeight: "600" },
+  heroLine: { color: T.soft, fontSize: 15, fontWeight: "600" },
   heroTime: { color: "#fff", fontSize: 20, fontWeight: "800" },
   sectionTitle: { color: "#2a2c3a", fontSize: 18, fontWeight: "700", textAlign: "center" },
   quickPage: { gap: 14 },
   quickHead: { flexDirection: "row", alignItems: "center", gap: 10 },
   quickHeadIcon: {
     fontSize: 20,
-    color: "#c8102e",
-    backgroundColor: "#fde7ea",
+    color: T.primary,
+    backgroundColor: T.soft,
     width: 40,
     height: 40,
     borderRadius: 12,
@@ -3101,21 +3190,21 @@ const s = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 16,
-    backgroundColor: "#fff1f3",
+    backgroundColor: T.softer,
     alignItems: "center",
     justifyContent: "center",
   },
-  quickGlyph: { fontSize: 24, color: "#c8102e" },
+  quickGlyph: { fontSize: 24, color: T.primary },
   quickText: { color: "#2a2c3a", fontSize: 13, fontWeight: "600", textAlign: "center" },
   dots: { flexDirection: "row", justifyContent: "center", gap: 6 },
   dotPage: { width: 8, height: 6, borderRadius: 3, backgroundColor: "#e1e0e8" },
-  dotPageOn: { width: 24, backgroundColor: "#c8102e" },
+  dotPageOn: { width: 24, backgroundColor: T.primary },
   greetRow: { flexDirection: "row", alignItems: "center", gap: 14 },
   greetAvatar: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: "#c8102e",
+    backgroundColor: T.primary,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -3144,24 +3233,38 @@ const s = StyleSheet.create({
     paddingBottom: 16,
     gap: 14,
   },
-  profileBand: { position: "absolute", top: 0, left: 0, right: 0, height: 70, backgroundColor: "#ac051b" },
+  profileBand: { position: "absolute", top: 0, left: 0, right: 0, height: 70, backgroundColor: T.primaryDark },
   profileTop: { flexDirection: "row", alignItems: "flex-end", gap: 14, paddingHorizontal: 16, paddingTop: 30 },
   profileAvatar: {
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: "#c8102e",
+    backgroundColor: T.primary,
     borderWidth: 4,
     borderColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
   },
   profileAvatarText: { color: "#fff", fontSize: 30, fontWeight: "800" },
+  photoBadge: {
+    position: "absolute",
+    right: 0,
+    bottom: 0,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: T.primaryDark,
+    borderWidth: 2,
+    borderColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   profileName: { color: "#2a2c3a", fontSize: 21, fontWeight: "800" },
   profileDept: {
     alignSelf: "flex-start",
-    color: "#ac051b",
-    backgroundColor: "#fde7ea",
+    color: T.primaryDark,
+    backgroundColor: T.soft,
     fontWeight: "700",
     fontSize: 12,
     paddingHorizontal: 10,
@@ -3191,16 +3294,16 @@ const s = StyleSheet.create({
     gap: 4,
     minHeight: 96,
   },
-  contactIcon: { fontSize: 22, color: "#c8102e" },
+  contactIcon: { fontSize: 22, color: T.primary },
   contactLabel: { color: "#6b6e7c", fontSize: 11, fontWeight: "700", letterSpacing: 1 },
-  docOn: { backgroundColor: "#c8102e", borderColor: "#c8102e" },
+  docOn: { backgroundColor: T.primary, borderColor: T.primary },
   tiles: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   tile: { flex: 1, minWidth: 130, borderRadius: 14, padding: 14, gap: 2 },
   tileLabel: { color: "#fff", fontWeight: "700", fontSize: 12 },
   tileValue: { color: "#fff", fontWeight: "800", fontSize: 22 },
   galleryCard: { backgroundColor: "#171a28", borderColor: "#2b2f45" },
   galleryKicker: {
-    color: "#ff6b81",
+    color: T.light,
     fontSize: 11,
     fontWeight: "700",
     letterSpacing: 3,
@@ -3228,7 +3331,7 @@ const s = StyleSheet.create({
     color: "#fff",
     fontSize: 11,
     fontWeight: "700",
-    backgroundColor: "#c8102e",
+    backgroundColor: T.primary,
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 10,
@@ -3275,7 +3378,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     minWidth: 140,
   },
-  orgMe: { backgroundColor: "#fde7ea", borderColor: "#f3b8c0" },
+  orgMe: { backgroundColor: T.soft, borderColor: T.border },
   orgLine: { width: 1, height: 14, backgroundColor: "#b9b9c6" },
   clock: {
     fontSize: 28,
@@ -3291,13 +3394,13 @@ const s = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: "#fff1f3",
+    backgroundColor: T.softer,
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarText: { color: "#c8102e", fontWeight: "700", fontSize: 13 },
+  avatarText: { color: T.primary, fontWeight: "700", fontSize: 13 },
   count: {
-    backgroundColor: "#c8102e",
+    backgroundColor: T.primary,
     color: "#fff",
     fontSize: 11,
     fontWeight: "700",
@@ -3318,10 +3421,10 @@ const s = StyleSheet.create({
     marginTop: 4,
   },
   callout: {
-    color: "#c8102e",
-    backgroundColor: "#fff1f3",
+    color: T.primary,
+    backgroundColor: T.softer,
     padding: 12,
     borderRadius: 10,
     overflow: "hidden",
   },
-});
+}));

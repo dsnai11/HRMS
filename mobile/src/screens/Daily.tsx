@@ -21,14 +21,23 @@ import {
   useLoad,
 } from "./kit";
 
+import { T, themed } from "../theme";
+import { Appear, Icon, tick } from "../ui";
 // The day-to-day screens of the phone app: attendance log and summary, regularization,
 // Multiple OD, leave (summary, request, history), holidays and optional holidays. The
 // layout follows the screens staff knew from the old HR app; the look is Laxmi's own.
 
+// The brand shades are read from the theme each time, so a new brand colour shows at once.
 export const C = {
-  red: "#c8102e",
-  dark: "#ac051b",
-  soft: "#fde7ea",
+  get red() {
+    return T.primary;
+  },
+  get dark() {
+    return T.primaryDark;
+  },
+  get soft() {
+    return T.soft;
+  },
   ink: "#2a2c3a",
   muted: "#6b6e7c",
   line: "#eceaf1",
@@ -43,14 +52,14 @@ export const C = {
   violetSoft: "#efeafb",
 };
 type Tone = "green" | "amber" | "red" | "blue" | "violet" | "grey";
-const TONE: Record<Tone, [string, string]> = {
+const TONE: Record<Tone, [string, string]> = themed(() => ({
   green: [C.green, C.greenSoft],
   amber: [C.amber, C.amberSoft],
   red: [C.dark, C.soft],
   blue: [C.blue, C.blueSoft],
   violet: [C.violet, C.violetSoft],
   grey: [C.muted, "#f0eff4"],
-};
+}));
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MONTHS_LONG = [
@@ -122,7 +131,10 @@ function Segments<T extends string>({
           key={v}
           accessibilityRole="tab"
           accessibilityState={{ selected: value === v }}
-          onPress={() => onChange(v)}
+          onPress={() => {
+            if (v !== value) tick();
+            onChange(v);
+          }}
           style={[d.segment, value === v && d.segmentOn]}
         >
           <Text style={[d.segmentText, value === v && { color: "#fff" }]} numberOfLines={1}>
@@ -302,7 +314,7 @@ function Sheet({
               {sub ? <Text style={d.note}>{sub}</Text> : null}
             </View>
             <Pressable accessibilityRole="button" accessibilityLabel="Close" hitSlop={10} onPress={onClose} style={d.close}>
-              <Text style={{ fontSize: 18, color: C.muted }}>✕</Text>
+              <Icon name="close" size={20} color={C.muted} />
             </Pressable>
           </View>
           <ScrollView contentContainerStyle={{ gap: 14, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
@@ -320,7 +332,7 @@ function EmptyCard({ title, text }: { title: string; text: string }) {
   return (
     <Card style={{ alignItems: "center", paddingVertical: 30 }}>
       <View style={d.emptyIcon}>
-        <Text style={{ fontSize: 22, color: C.red }}>◎</Text>
+        <Icon name="file-tray-outline" size={26} color={C.red} />
       </View>
       <Text style={d.strong}>{title}</Text>
       <Text style={[d.note, { textAlign: "center" }]}>{text}</Text>
@@ -410,11 +422,11 @@ export function AttLogScreen({ api }: { api: Api }) {
       {loaded && days.length === 0 && (
         <EmptyCard title="Nothing to show" text="Days appear here once attendance counts for this month." />
       )}
-      {days.map((x) => {
+      {days.map((x, i) => {
         const [code, tone, word] = DAY_CODE[x.status] ?? ["—", "grey" as Tone, x.status];
         const fixable = ["absent", "half_day", "half_leave", "pending"].includes(x.status) || (!!x.in_at && !x.out_at && x.date < today());
         return (
-          <View key={x.date} style={d.logCard}>
+          <Appear key={x.date} index={i} style={d.logCard}>
             <DateBlock date={x.date} />
             <View style={[d.logBar, { backgroundColor: TONE[tone][0] }]} />
             <View style={d.logBody}>
@@ -436,11 +448,14 @@ export function AttLogScreen({ api }: { api: Api }) {
               </View>
               {fixable && (
                 <Pressable accessibilityRole="button" style={d.smallBtn} onPress={() => setFixDate(x.date)}>
-                  <Text style={d.smallBtnText}>✎ Regularize</Text>
+                  <View style={d.inline}>
+                    <Icon name="create-outline" size={16} color={C.red} />
+                    <Text style={d.smallBtnText}>Regularize</Text>
+                  </View>
                 </Pressable>
               )}
             </View>
-          </View>
+          </Appear>
         );
       })}
       <RequestSheet
@@ -597,8 +612,8 @@ export function RegularizationScreen({ api }: { api: Api }) {
       {!list.loading && rows.length === 0 && (
         <EmptyCard title="No requests" text="Requests to correct your attendance appear here." />
       )}
-      {rows.map((r) => (
-        <View key={r.id} style={d.logCard}>
+      {rows.map((r, i) => (
+        <Appear key={r.id} index={i} style={d.logCard}>
           <DateBlock date={r.date} />
           <View style={[d.logBar, { backgroundColor: TONE[STATUS_TONE[r.status] ?? "grey"][0] }]} />
           <View style={d.logBody}>
@@ -630,7 +645,7 @@ export function RegularizationScreen({ api }: { api: Api }) {
               </Pressable>
             )}
           </View>
-        </View>
+        </Appear>
       ))}
       <RequestSheet
         api={api}
@@ -679,8 +694,8 @@ export function MultipleOdScreen({ api }: { api: Api }) {
       {!list.loading && shown.length === 0 && (
         <EmptyCard title="No Multiple OD requests" text="Ask for OD for several days at once, such as a tour or a branch visit." />
       )}
-      {shown.map((b) => (
-        <View key={b.rows[0].batch_id ?? b.from} style={d.logCard}>
+      {shown.map((b, i) => (
+        <Appear key={b.rows[0].batch_id ?? b.from} index={i} style={d.logCard}>
           <DateBlock date={b.from} extra={plural(b.rows.length, "day")} />
           <View style={[d.logBar, { backgroundColor: TONE[STATUS_TONE[b.status] ?? "blue"][0] }]} />
           <View style={d.logBody}>
@@ -697,7 +712,7 @@ export function MultipleOdScreen({ api }: { api: Api }) {
               ))}
             </View>
           </View>
-        </View>
+        </Appear>
       ))}
       <Sheet visible={adding} title="New Multiple OD" sub="Out on duty for several days: one request for the whole trip." onClose={() => setAdding(false)}>
         <View style={d.row2}>
@@ -828,11 +843,11 @@ export function OdScreen({
       )}
       <View style={d.row2}>
         <Pressable style={d.linkTile} accessibilityRole="button" onPress={() => onSection("Multiple OD")}>
-          <Text style={d.linkTileIcon}>▦</Text>
+          <Icon name="albums-outline" size={26} color={C.red} />
           <Text style={d.linkTileText}>Multiple OD</Text>
         </Pressable>
         <Pressable style={d.linkTile} accessibilityRole="button" onPress={() => onSection("OD Log History")}>
-          <Text style={d.linkTileIcon}>↺</Text>
+          <Icon name="refresh-circle-outline" size={26} color={C.red} />
           <Text style={d.linkTileText}>OD log history</Text>
         </Pressable>
       </View>
@@ -1094,10 +1109,10 @@ function LeaveHistory({
       />
       <Status loading={reqs.loading} error={reqs.error} />
       {!reqs.loading && rows.length === 0 && <EmptyCard title="No leave requests" text="Requests you send appear here." />}
-      {rows.map((r) => {
+      {rows.map((r, i) => {
         const p = parts(r.from_date);
         return (
-          <View key={r.id} style={d.logCard}>
+          <Appear key={r.id} index={i} style={d.logCard}>
             <View style={d.dateBlock}>
               <Text style={d.dateDay}>{p.day}</Text>
               <Text style={d.dateSub}>{MONTHS[p.m - 1].toUpperCase()}</Text>
@@ -1144,7 +1159,7 @@ function LeaveHistory({
                 </Pressable>
               )}
             </View>
-          </View>
+          </Appear>
         );
       })}
     </>
@@ -1254,11 +1269,11 @@ export function HolidaysScreen({ api }: { api: Api }) {
   return (
     <>
       <Card style={{ backgroundColor: C.red, borderColor: C.red }}>
-        <Text style={[d.kicker, { color: "#ffd9df" }]}>HOLIDAY CALENDAR {year}</Text>
+        <Text style={[d.kicker, { color: T.onPrimarySoft }]}>HOLIDAY CALENDAR {year}</Text>
         <Text style={[d.bigNumber, { color: "#fff" }]}>
-          {all.length} <Text style={[d.bigUnit, { color: "#ffd9df" }]}>holidays this year</Text>
+          {all.length} <Text style={[d.bigUnit, { color: T.onPrimarySoft }]}>holidays this year</Text>
         </Text>
-        <Text style={{ color: "#ffd9df" }}>
+        <Text style={{ color: T.onPrimarySoft }}>
           {general.length} general · {restricted.length} restricted (optional)
         </Text>
         {next && (
@@ -1281,11 +1296,11 @@ export function HolidaysScreen({ api }: { api: Api }) {
       />
       <Status loading={hol.loading} error={hol.error} />
       {!hol.loading && rows.length === 0 && <EmptyCard title="No holidays" text={`None listed for ${year}.`} />}
-      {rows.map((h) => {
+      {rows.map((h, i) => {
         const left = daysUntil(h.date);
         const p = parts(h.date);
         return (
-          <View key={h.date + h.name} style={d.logCard}>
+          <Appear key={h.date + h.name} index={i} style={d.logCard}>
             <View style={[d.dateBlock, { backgroundColor: "#fff", borderRightWidth: 1, borderColor: C.line }]}>
               <Text style={[d.dateSub, { color: C.red }]}>{MONTHS[p.m - 1].toUpperCase()}</Text>
               <Text style={[d.dateDay, { color: C.ink }]}>{p.day}</Text>
@@ -1301,7 +1316,7 @@ export function HolidaysScreen({ api }: { api: Api }) {
                 <Tag text={left < 0 ? "Passed" : left === 0 ? "Today" : "In " + plural(left, "day")} tone={left < 0 ? "grey" : "green"} />
               </View>
             </View>
-          </View>
+          </Appear>
         );
       })}
     </>
@@ -1401,7 +1416,7 @@ export function OptionalHolidayScreen({ api }: { api: Api }) {
   );
 }
 
-export const d = StyleSheet.create({
+export const d = themed(() => StyleSheet.create({
   card: { backgroundColor: "#fff", borderWidth: 1, borderColor: C.line, borderRadius: 18, padding: 16, gap: 10 },
   heading: { color: C.ink, fontSize: 18, fontWeight: "700" },
   section: { color: C.ink, fontSize: 17, fontWeight: "700", marginTop: 4 },
@@ -1426,7 +1441,7 @@ export const d = StyleSheet.create({
   row2: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   row3: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   rowBetween: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  chip: { paddingVertical: 9, paddingHorizontal: 14, borderRadius: 18, backgroundColor: "#fff1f3", minHeight: 36, justifyContent: "center" },
+  chip: { paddingVertical: 9, paddingHorizontal: 14, borderRadius: 18, backgroundColor: T.softer, minHeight: 36, justifyContent: "center" },
   chipOn: { backgroundColor: C.red },
   chipText: { color: C.red, fontWeight: "600", fontSize: 13 },
   tag: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 12, alignSelf: "flex-start" },
@@ -1470,8 +1485,8 @@ export const d = StyleSheet.create({
   logCard: { flexDirection: "row", backgroundColor: "#fff", borderRadius: 18, borderWidth: 1, borderColor: C.line, overflow: "hidden" },
   dateBlock: { width: 76, backgroundColor: C.red, alignItems: "center", justifyContent: "center", paddingVertical: 14, gap: 2 },
   dateDay: { color: "#fff", fontSize: 28, fontWeight: "800" },
-  dateSub: { color: "#ffd9df", fontSize: 13, fontWeight: "600" },
-  dateSmall: { color: "#ffd9df", fontSize: 11 },
+  dateSub: { color: T.onPrimarySoft, fontSize: 13, fontWeight: "600" },
+  dateSmall: { color: T.onPrimarySoft, fontSize: 11 },
   dateCode: { color: "#fff", fontSize: 12, fontWeight: "800", backgroundColor: "rgba(255,255,255,0.18)", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, marginTop: 4 },
   logBar: { width: 4 },
   logBody: { flex: 1, padding: 12, gap: 8 },
@@ -1479,6 +1494,7 @@ export const d = StyleSheet.create({
   timeIn: { color: C.blue, fontWeight: "800" },
   timeOut: { color: C.dark, fontWeight: "800" },
   smallBtn: { alignSelf: "flex-start", borderWidth: 1, borderColor: C.red, borderRadius: 16, paddingVertical: 8, paddingHorizontal: 14, minHeight: 36 },
+  inline: { flexDirection: "row", alignItems: "center", gap: 6 },
   smallBtnText: { color: C.red, fontWeight: "700", fontSize: 13 },
   primarySmall: { backgroundColor: C.red, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 16, minHeight: 44, justifyContent: "center" },
   primarySmallText: { color: "#fff", fontWeight: "700", fontSize: 14 },
@@ -1520,10 +1536,10 @@ export const d = StyleSheet.create({
   tile: { flexGrow: 1, flexBasis: "30%", minWidth: 96, backgroundColor: "#fff", borderRadius: 16, borderWidth: 1, borderColor: C.line, padding: 14, alignItems: "center", gap: 4 },
   tileValue: { fontSize: 26, fontWeight: "800" },
   choice: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#fff", borderRadius: 14, borderWidth: 1, borderColor: C.line, padding: 14, minHeight: 56 },
-  choiceOn: { borderColor: C.red, backgroundColor: "#fff7f8" },
+  choiceOn: { borderColor: C.red, backgroundColor: T.softer },
   check: { width: 26, height: 26, borderRadius: 8, borderWidth: 2, borderColor: "#c9c8d3", alignItems: "center", justifyContent: "center" },
   checkOn: { backgroundColor: C.red, borderColor: C.red },
   linkTile: { flex: 1, minWidth: 130, backgroundColor: "#fff", borderRadius: 16, borderWidth: 1, borderColor: C.line, padding: 16, alignItems: "center", gap: 6, minHeight: 88 },
   linkTileIcon: { fontSize: 22, color: C.red },
   linkTileText: { color: C.ink, fontWeight: "600" },
-});
+}));

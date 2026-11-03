@@ -537,8 +537,12 @@ export function registerPreboarding(router, app) {
       for (const [k, l] of [
         ["id_proof", "an ID proof"],
         ["address_proof", "an address proof"],
+        ["photo", "a passport-size photograph"],
       ])
         if (!kinds.includes(k)) missing.push(`upload ${l}`);
+      for (const d of await docsOf(p.id))
+        if (d.kind === "photo" && !["image/jpeg", "image/png"].includes(d.mime))
+          missing.push("upload the photograph as a JPG or PNG");
       if (missing.length)
         throw new HttpError(400, `Still needed: ${missing.join(", ")}.`);
       await db

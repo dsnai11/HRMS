@@ -7,7 +7,7 @@ import {
   optionalString,
   string,
 } from "../http.js";
-import { requireOwned } from "../scope.js";
+import { requireOwned, staffWith } from "../scope.js";
 import { can } from "../rbac.js";
 import { round } from "../payroll/engine.js";
 import { encashmentRate, gratuity } from "../payroll/extras.js";
@@ -23,6 +23,35 @@ const KINDS = [
   "absconding",
   "other",
 ];
+// Why people leave, for the resignation form and HR's attrition reports.
+export const RESIGN_REASONS = {
+  better_opportunity: "Better job opportunity",
+  compensation: "Salary and benefits",
+  career_growth: "Career growth",
+  higher_studies: "Higher studies",
+  relocation: "Relocation",
+  personal: "Personal or family reasons",
+  health: "Health",
+  work_environment: "Work environment",
+  manager: "Relationship with manager",
+  other: "Other",
+};
+// What the exit interview asks the employee to rate, 1 (poor) to 5 (excellent).
+export const INTERVIEW_AREAS = {
+  role: "The work and the role",
+  manager: "Support from my manager",
+  team: "My team and colleagues",
+  growth: "Learning and growth",
+  pay: "Pay and benefits",
+  balance: "Work-life balance",
+  culture: "Company culture",
+};
+const INTERVIEW_QUESTIONS = {
+  main_reason: "What is the main reason you are leaving?",
+  liked: "What did you like most about working here?",
+  improve: "What should the company improve?",
+  retain: "What could have made you stay?",
+};
 // Leave encashment on resignation or retirement is exempt up to this amount.
 const ENCASHMENT_EXEMPT = 2500000;
 const CLEARANCE = [
@@ -86,11 +115,45 @@ export function registerExit(router, app) {
     FROM exits x JOIN users u ON u.id=x.user_id LEFT JOIN departments d ON d.id=u.department_id LEFT JOIN designations g ON g.id=u.designation_id`;
 
   // ---- employee ---------------------------------------------------------------------------------
+  // Everything the employee's resignation screen shows: the request, where it stands, the
+  // clearance checklist, the exit interview and the settlement.
   router.get("/api/exit/mine", async ({ user, send }) => {
     const x = await db
-      .prepare("SELECT * FROM exits WHERE user_id=? ORDER BY id DESC LIMIT 1")
+      .prepare(
+        `SELECT x.*,h.name handover_name,m.name manager_review_by FROM exits x
+         LEFT JOIN users h ON h.id=x.handover_to LEFT JOIN users m ON m.id=x.manager_by
+         WHERE x.user_id=? ORDER BY x.id DESC LIMIT 1`,
+      )
       .get(user.id);
-    return send(200, { exit: x ?? null, notice_days: await noticeFor(user) });
+    const notice = await noticeFor(user);
+    if (!x) return send(200, { exit: null, notice_days: notice, reasons: RESIGN_REASONS, areas: INTERVIEW_AREAS, questions: INTERVIEW_QUESTIONS });
+    const [clearance, interview, settlement] = await Promise.all([
+      db
+        .prepare("SELECT id,department,item,cleared,cleared_at FROM exit_clearance WHERE exit_id=? ORDER BY id")
+        .all(x.id),
+      db.prepare("SELECT * FROM exit_interviews WHERE exit_id=?").get(x.id),
+      db.prepare("SELECT pay_in_month,data,created_at FROM settlements WHERE exit_id=? AND status='posted'").get(x.id),
+    ]);
+    const noticeEnd = addDays(x.notice_given_on, x.notice_days);
+    const lwd = x.last_working_day ?? x.requested_last_day ?? noticeEnd;
+    const t = today();
+    const s = settlement && JSON.parse(settlement.data);
+    return send(200, {
+      exit: x,
+      notice_days: notice,
+      notice_end: noticeEnd,
+      days_left: x.status === "accepted" ? Math.max(0, days(t, lwd)) : null,
+      // Days of notice not served if the last day is earlier than the notice ends.
+      shortfall: x.kind === "resignation" && !x.waive_notice ? Math.max(0, days(lwd, noticeEnd)) : 0,
+      clearance,
+      interview: interview
+        ? { ...interview, ratings: JSON.parse(interview.ratings), answers: JSON.parse(interview.answers) }
+        : null,
+      settlement: s ? { pay_in_month: settlement.pay_in_month, net: s.net ?? s.net_pay ?? null, posted_at: settlement.created_at } : null,
+      reasons: RESIGN_REASONS,
+      areas: INTERVIEW_AREAS,
+      questions: INTERVIEW_QUESTIONS,
+    });
   });
   router.post("/api/exit/resign", async ({ user, body, send, audit }) => {
     if (user.role === "super_admin")
@@ -104,15 +167,42 @@ export function registerExit(router, app) {
     )
       throw new HttpError(409, "You already have an exit in progress.");
     const b = await body();
+    const category = oneOf(b.reason_category ?? "other", "Reason", Object.keys(RESIGN_REASONS));
     const requested = isoDate(b.requested_last_day, "Requested last day");
     if (requested && requested < today())
       throw new HttpError(400, "Requested last day cannot be in the past.");
+    const notice = await noticeFor(user);
+    const noticeEnd = addDays(today(), notice);
+    // A last day before the notice ends is a request for early release; HR decides.
+    const early = Boolean(requested && requested < noticeEnd);
+    const personalEmail = optionalString(b.personal_email, "Personal email", 150);
+    if (personalEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(personalEmail))
+      throw new HttpError(400, "Personal email does not look right.");
+    const personalPhone = optionalString(b.personal_phone, "Personal phone", 20);
+    let letter = null;
+    if (b.letter_document_id) {
+      const doc = await db
+        .prepare("SELECT id FROM documents WHERE id=? AND user_id=? AND deleted_at IS NULL")
+        .get(integer(Number(b.letter_document_id)), user.id);
+      if (!doc) throw new HttpError(400, "The resignation letter is not one of your documents.");
+      letter = doc.id;
+    }
+    let handover = null;
+    if (b.handover_to) {
+      const h = await db
+        .prepare("SELECT id FROM users WHERE id=? AND company_id=? AND active=1")
+        .get(integer(Number(b.handover_to)), user.company_id);
+      if (!h || h.id === user.id) throw new HttpError(400, "Choose an active colleague to hand over to.");
+      handover = h.id;
+    }
     const id = await transaction(async () => {
       const id = Number(
         (
           await db
             .prepare(
-              "INSERT INTO exits(company_id,user_id,kind,initiated_by,notice_given_on,notice_days,requested_last_day,reason,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+              `INSERT INTO exits(company_id,user_id,kind,initiated_by,notice_given_on,notice_days,requested_last_day,reason,created_by,created_at,
+               reason_category,personal_email,personal_phone,letter_document_id,handover_to,handover_notes,early_release)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
             )
             .run(
               user.company_id,
@@ -120,35 +210,96 @@ export function registerExit(router, app) {
               "resignation",
               "employee",
               today(),
-              await noticeFor(user),
+              notice,
               requested,
-              string(b.reason, "Reason", 500),
+              string(b.reason, "Reason", 1000),
               user.id,
               nowIso(),
+              category,
+              personalEmail,
+              personalPhone,
+              letter,
+              handover,
+              optionalString(b.handover_notes, "Handover notes", 2000),
+              early ? 1 : 0,
             )
         ).lastInsertRowid,
       );
-      await audit("resignation_submitted", { id });
+      await audit("resignation_submitted", { id, category, early });
       return id;
     });
-    return send(201, { id });
+    // The manager reviews first; HR hears at the same time and decides.
+    const title = `${user.name} has resigned${early ? " and asks for early release" : ""}`;
+    const body2 = `Reason: ${RESIGN_REASONS[category]}. Asked-for last day: ${requested ?? noticeEnd}.`;
+    if (user.manager_id)
+      await app.notify([user.manager_id], { companyId: user.company_id, kind: "exit", title, body: `${body2} Give your view under Supervisor → Resignations.`, link: "team", email: true });
+    const hr = (await staffWith(db, user.company_id, ["exit.manage"], user.id)).map((x) => x.id).filter((x) => x !== user.manager_id);
+    if (hr.length) await app.notify(hr, { companyId: user.company_id, kind: "exit", title, body: body2, link: "hiring", email: true });
+    return send(201, { id, early_release: early, notice_end: noticeEnd });
   });
-  router.post("/api/exit/withdraw", async ({ user, send, audit }) => {
+  // Before HR decides the employee withdraws at once; after acceptance they ask, and HR decides.
+  router.post("/api/exit/withdraw", async ({ user, body, send, audit }) => {
     const x = await db
       .prepare(
-        "SELECT * FROM exits WHERE user_id=? AND status='pending' AND initiated_by='employee'",
+        "SELECT * FROM exits WHERE user_id=? AND status IN ('pending','accepted') AND initiated_by='employee'",
       )
       .get(user.id);
-    if (!x)
-      throw new HttpError(
-        409,
-        "There is no pending resignation to withdraw. Ask HR if it was already accepted.",
-      );
-    await db
-      .prepare("UPDATE exits SET status='withdrawn' WHERE id=?")
-      .run(x.id);
-    await audit("resignation_withdrawn", { id: x.id });
-    return send(200, { ok: true });
+    if (!x) throw new HttpError(409, "There is no resignation to withdraw.");
+    if (x.status === "pending") {
+      await db.prepare("UPDATE exits SET status='withdrawn' WHERE id=?").run(x.id);
+      await audit("resignation_withdrawn", { id: x.id });
+      return send(200, { ok: true, status: "withdrawn" });
+    }
+    if (x.withdraw_requested_at) throw new HttpError(409, "You have already asked to withdraw. HR will reply.");
+    if (await db.prepare("SELECT id FROM settlements WHERE exit_id=? AND status='posted'").get(x.id))
+      throw new HttpError(409, "Your full and final settlement is already made. Speak to HR.");
+    const reason = string((await body()).reason, "Why you want to stay", 500);
+    await db.prepare("UPDATE exits SET withdraw_requested_at=?,withdraw_reason=? WHERE id=?").run(nowIso(), reason, x.id);
+    await audit("resignation_withdrawal_requested", { id: x.id });
+    const to = (await staffWith(db, user.company_id, ["exit.manage"], user.id)).map((r) => r.id);
+    if (user.manager_id && !to.includes(user.manager_id)) to.push(user.manager_id);
+    if (to.length)
+      await app.notify(to, {
+        companyId: user.company_id,
+        kind: "exit",
+        title: `${user.name} asks to withdraw their resignation`,
+        body: reason,
+        link: "hiring",
+      });
+    return send(200, { ok: true, status: "withdrawal_requested" });
+  });
+  // The exit interview, filled in by the employee once the resignation is accepted.
+  router.post("/api/exit/interview", async ({ user, body, send, audit }) => {
+    const x = await db.prepare("SELECT * FROM exits WHERE user_id=? AND status='accepted'").get(user.id);
+    if (!x) throw new HttpError(409, "The exit interview opens once your resignation is accepted.");
+    if (await db.prepare("SELECT exit_id FROM exit_interviews WHERE exit_id=?").get(x.id))
+      throw new HttpError(409, "You have already sent your exit interview. Thank you.");
+    const b = await body();
+    const ratings = {};
+    for (const k of Object.keys(INTERVIEW_AREAS)) {
+      const v = b.ratings?.[k];
+      if (v === undefined || v === null || v === "") continue;
+      ratings[k] = Math.round(number(Number(v), INTERVIEW_AREAS[k], 1, 5));
+    }
+    if (Object.keys(ratings).length < 3) throw new HttpError(400, "Rate at least three areas.");
+    const answers = {};
+    for (const k of Object.keys(INTERVIEW_QUESTIONS)) {
+      const v = optionalString(b.answers?.[k], INTERVIEW_QUESTIONS[k], 2000);
+      if (v) answers[k] = v;
+    }
+    if (!answers.main_reason) throw new HttpError(400, "Tell us the main reason you are leaving.");
+    const yn = (v) => (v === undefined || v === null ? null : v ? 1 : 0);
+    await transaction(async () => {
+      await db
+        .prepare("INSERT INTO exit_interviews(exit_id,ratings,answers,would_rejoin,would_recommend,submitted_at) VALUES(?,?,?,?,?,?)")
+        .run(x.id, JSON.stringify(ratings), JSON.stringify(answers), yn(b.would_rejoin), yn(b.would_recommend), nowIso());
+      // The clearance item for the exit interview is done.
+      await db
+        .prepare("UPDATE exit_clearance SET cleared=1,cleared_at=?,note='Filled in by the employee' WHERE exit_id=? AND item='Conduct the exit interview' AND cleared=0")
+        .run(nowIso(), x.id);
+    });
+    await audit("exit_interview_submitted", { id: x.id });
+    return send(201, { ok: true });
   });
 
   // ---- HR: list, start, decide ---------------------------------------------------------------
@@ -246,6 +397,15 @@ export function registerExit(router, app) {
             "SELECT c.*,u.name cleared_by_name FROM exit_clearance c LEFT JOIN users u ON u.id=c.cleared_by WHERE c.exit_id=? ORDER BY c.id",
           )
           .all(x.id),
+        // The employee's own exit interview, and the reason in words.
+        interview: await db
+          .prepare("SELECT * FROM exit_interviews WHERE exit_id=?")
+          .get(x.id)
+          .then((i) => i && { ...i, ratings: JSON.parse(i.ratings), answers: JSON.parse(i.answers) }),
+        reason_label: RESIGN_REASONS[x.reason_category] ?? null,
+        handover_name: x.handover_to
+          ? (await db.prepare("SELECT name FROM users WHERE id=?").get(x.handover_to))?.name
+          : null,
         settlement: settlement
           ? { ...settlement, data: JSON.parse(settlement.data) }
           : null,
@@ -340,6 +500,41 @@ export function registerExit(router, app) {
           .prepare("UPDATE users SET exit_date=? WHERE id=?")
           .run(lwd, x.user_id);
         await audit("exit_updated", { id: x.id, lwd });
+      });
+      return send(200, { ok: true });
+    },
+  );
+  router.post(
+    "/api/admin/exits/:id/withdrawal",
+    { perm: "exit.manage" },
+    async ({ params, companyId, body, send, audit }) => {
+      const x = await owned("exits", params.id, companyId, "exit");
+      if (!x.withdraw_requested_at || x.status !== "accepted")
+        throw new HttpError(409, "There is no withdrawal request on this exit.");
+      const b = await body();
+      const decision = oneOf(b.decision, "Decision", ["approved", "declined"]);
+      const note = optionalString(b.note, "Note", 300);
+      if (decision === "declined" && !note) throw new HttpError(400, "Say why the withdrawal is not accepted.");
+      if (decision === "approved") {
+        if (await db.prepare("SELECT id FROM settlements WHERE exit_id=? AND status='posted'").get(x.id))
+          throw new HttpError(409, "Void the settlement first.");
+        await transaction(async () => {
+          await db.prepare("UPDATE exits SET status='withdrawn',decision_note=? WHERE id=?").run(note, x.id);
+          await db.prepare("UPDATE users SET exit_date=NULL WHERE id=?").run(x.user_id);
+          await db.prepare("DELETE FROM exit_clearance WHERE exit_id=?").run(x.id);
+        });
+      } else
+        await db.prepare("UPDATE exits SET withdraw_requested_at=NULL,withdraw_reason=NULL,decision_note=? WHERE id=?").run(note, x.id);
+      await audit("resignation_withdrawal_decided", { id: x.id, decision });
+      await app.notify([x.user_id], {
+        companyId,
+        kind: "exit",
+        title:
+          decision === "approved"
+            ? "Your resignation is withdrawn. Welcome back."
+            : "Your request to withdraw your resignation was not accepted",
+        body: note ?? undefined,
+        link: "myemployment",
       });
       return send(200, { ok: true });
     },

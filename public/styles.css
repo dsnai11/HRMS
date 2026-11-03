@@ -2696,7 +2696,7 @@ input[type="radio"] {
 .sidebar {
   background:
     radial-gradient(260px 220px at 0% 0%, rgba(255, 45, 75, 0.35), transparent 70%),
-    linear-gradient(180deg, #a3071d 0%, #6e0212 55%, #24060b 100%);
+    linear-gradient(180deg, var(--brand-a, #a3071d) 0%, var(--brand-b, #6e0212) 55%, #24060b 100%);
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.08), 8px 0 40px -20px rgba(125, 3, 19, 0.6);
 }
 .sidebar .brand {
@@ -2983,7 +2983,7 @@ dialog::backdrop {
   background:
     radial-gradient(600px 400px at 85% 15%, rgba(255, 45, 75, 0.55), transparent 65%),
     radial-gradient(500px 380px at 10% 95%, rgba(255, 255, 255, 0.12), transparent 60%),
-    linear-gradient(160deg, #b0081f, #6e0212 55%, #1d0408);
+    linear-gradient(160deg, var(--brand-a, #b0081f), var(--brand-b, #6e0212) 55%, #1d0408);
 }
 .login-story::before {
   content: "";
@@ -4369,4 +4369,216 @@ th.num {
   .filters {
     grid-template-columns: 1fr;
   }
+}
+
+/* Brand block in the menu: a long company name wraps inside the white box, under control,
+   and "HRMS" stays with it. */
+.sidebar .brand {
+  height: auto;
+  min-height: 64px;
+  align-items: center;
+  overflow: hidden;
+}
+.sidebar .brand > div {
+  min-width: 0;
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.sidebar .brand-logo {
+  height: 30px;
+  max-width: 44%;
+  object-fit: contain;
+}
+.sidebar .brand small {
+  display: block;
+  margin-top: 4px;
+}
+
+/* Profile photos */
+.avatar.has-photo {
+  padding: 0;
+  overflow: hidden;
+  background: var(--red-50);
+}
+.avatar.has-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.avatar-xl {
+  width: 96px;
+  height: 96px;
+  font-size: 32px;
+  flex: none;
+}
+.photo-row {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.photo-row > div {
+  flex: 1;
+  min-width: 220px;
+}
+.file-button {
+  cursor: pointer;
+}
+.file-button:focus-within {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
+}
+
+/* Appearance & branding */
+.brand-admin {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 18px;
+}
+.color-field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.color-field input[type="color"] {
+  width: 52px;
+  height: 44px;
+  padding: 2px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.color-field input:not([type="color"]) {
+  flex: 1;
+  font-variant-numeric: tabular-nums;
+}
+.brand-preview {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  background: #f8f7fa;
+}
+.bp-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  color: #fff;
+  background: var(--red);
+}
+.bp-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+}
+.bp-body {
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+.bp-card {
+  background: #fff;
+  border-radius: 14px;
+  padding: 14px;
+  display: grid;
+  gap: 4px;
+  color: #2a2c3a;
+}
+.bp-card strong {
+  font-size: 22px;
+}
+.bp-btn,
+.bp-chip {
+  justify-self: start;
+  color: #fff;
+  background: var(--red);
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-weight: 700;
+  font-size: 13px;
+}
+.bp-chips {
+  display: flex;
+  gap: 8px;
+}
+.bp-chip:not(.on) {
+  background: #fff;
+  color: #2a2c3a;
+  border: 1px solid var(--line);
+}
+.logo-box {
+  background: #fff;
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  padding: 18px;
+  display: grid;
+  place-items: center;
+  min-height: 110px;
+}
+.logo-box img {
+  max-height: 80px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+/* Resignation steps */
+.exit-steps {
+  list-style: none;
+  margin: 8px 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 0;
+}
+.exit-steps li {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 12px;
+  position: relative;
+  padding-bottom: 14px;
+}
+.exit-steps li:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 22px;
+  bottom: 0;
+  width: 2px;
+  background: var(--line);
+}
+.exit-steps li.done:not(:last-child)::before {
+  background: #1f7a4d;
+}
+.exit-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  background: #fff;
+}
+.exit-steps li.done .exit-dot {
+  background: #1f7a4d;
+  border-color: #1f7a4d;
+}
+.exit-steps li.now .exit-dot {
+  background: var(--red);
+  border-color: var(--red);
+  box-shadow: 0 0 0 4px var(--red-50);
+}
+.exit-steps li.next strong {
+  color: var(--muted);
+}
+.exit-steps small {
+  display: block;
+  color: var(--muted);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }

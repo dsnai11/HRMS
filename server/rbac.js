@@ -40,6 +40,7 @@ const ADMIN = [
   "budget.manage",
   "budget.approve",
   "workplaces.manage",
+  "branding.manage",
   "audit.read",
   "roles.assign",
 ];
@@ -69,6 +70,7 @@ export const GRANTABLE = {
   "org.read": ["Organisation", "See departments, branches and workplaces"],
   "org.manage": ["Organisation", "Change departments, branches and other lists"],
   "workplaces.manage": ["Organisation", "Add workplaces"],
+  "branding.manage": ["Organisation", "Colours and logo of the portal and the phone app"],
   "attendance.read": ["Attendance", "See everyone's attendance"],
   "attendance.import": ["Attendance", "Import attendance files"],
   "devices.manage": ["Attendance", "Approve employees' phones"],

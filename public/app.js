@@ -129,7 +129,7 @@ async function busy(button, fn) {
   }
 }
 const brand = (name = me?.company?.name || config.company) =>
-  `<div class="brand"><img class="brand-logo" src="/brand/logo.png" alt=""><div>${esc(name)}<small>HRMS</small></div></div>`;
+  `<div class="brand"><img class="brand-logo" src="${esc(brandLogoSrc())}" alt=""><div>${esc(name)}<small>HRMS</small></div></div>`;
 const empty = (title, description) =>
   `<div class="empty"><div class="empty-icon">◎</div><strong>${esc(title)}</strong>${esc(description)}</div>`;
 function login() {
@@ -366,6 +366,7 @@ function navGroups() {
         has("recruitment.manage") && ["rms", "RMS (resumes)"],
         has("devices.manage") && ["devices", "Devices"],
         has("roles.assign") && ["roles", "Roles & rights"],
+        has("branding.manage") && ["branding", "Appearance & branding"],
         has("security.read") && ["security", "Security"],
         ((me.case_kinds ?? []).length > 0 || has("roles.assign")) && ["cases", "Cases"],
         has("surveys.manage") && ["surveyadmin", "Engagement surveys"],
@@ -489,7 +490,7 @@ function shell() {
     )
     .join("");
   const sub = [me.employee_code, me.designation].filter(Boolean);
-  app.innerHTML = `<a class="skip-link" href="#content">Skip to main content</a><div class="layout"><aside class="sidebar" id="sidebar" aria-label="Main menu">${brand()}<nav class="nav">${nav}</nav><div class="sidebar-foot"><div class="drawer-theme">${themeToggle()}</div><strong>${esc(me.company?.name || config.company)}</strong>${esc(config.timezone)}</div></aside><div class="nav-backdrop" id="nav-backdrop" hidden></div><main class="main"><header class="topbar"><div class="topbar-left"><button type="button" class="ghost menu-toggle" id="menu-toggle" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false">${svgIcon("menu")}</button>${me.role === "super_admin" ? "" : '<div class="people-search"><input id="people-q" type="search" placeholder="Search people" aria-label="Search people across the company" autocomplete="off"><div id="people-out" class="people-out" hidden></div></div>'}</div><div class="user">${companies.length > 1 ? `<select id="company" aria-label="Company">${companies.map((c) => `<option value="${c.id}" ${c.id === scope ? "selected" : ""}>${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("")}</select>` : ""}${themeToggle()}<button class="ghost bell" id="bell" aria-label="Notifications">${svgIcon("bell")}<span id="bell-n" class="bell-n"></span></button><div class="me-menu"><button type="button" class="me-button" id="me-button" aria-haspopup="true" aria-expanded="false"><span class="avatar">${initials(me.name)}</span><span class="me-text"><strong>${esc(sub[0] || me.name)}</strong><small>${esc(sub[1] || (sub[0] ? me.name : ""))}</small></span><span class="chev" aria-hidden="true">⌄</span></button><div class="me-drop" id="me-drop" hidden><div class="me-name">${esc(me.name)}</div><button type="button" data-page="profile">Personal Information</button><button type="button" id="password">Change Password</button><button type="button" id="logout">Log Out</button></div></div></div></header><section class="content" id="content" tabindex="-1"><div class="loading">Loading…</div></section><footer class="foot">© ${new Date().getFullYear()}, ${esc(me.company?.name || config.company)}</footer></main></div>`;
+  app.innerHTML = `<a class="skip-link" href="#content">Skip to main content</a><div class="layout"><aside class="sidebar" id="sidebar" aria-label="Main menu">${brand()}<nav class="nav">${nav}</nav><div class="sidebar-foot"><div class="drawer-theme">${themeToggle()}</div><strong>${esc(me.company?.name || config.company)}</strong>${esc(config.timezone)}</div></aside><div class="nav-backdrop" id="nav-backdrop" hidden></div><main class="main"><header class="topbar"><div class="topbar-left"><button type="button" class="ghost menu-toggle" id="menu-toggle" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false">${svgIcon("menu")}</button>${me.role === "super_admin" ? "" : '<div class="people-search"><input id="people-q" type="search" placeholder="Search people" aria-label="Search people across the company" autocomplete="off"><div id="people-out" class="people-out" hidden></div></div>'}</div><div class="user">${companies.length > 1 ? `<select id="company" aria-label="Company">${companies.map((c) => `<option value="${c.id}" ${c.id === scope ? "selected" : ""}>${esc(c.name)}${c.active ? "" : " (inactive)"}</option>`).join("")}</select>` : ""}${themeToggle()}<button class="ghost bell" id="bell" aria-label="Notifications">${svgIcon("bell")}<span id="bell-n" class="bell-n"></span></button><div class="me-menu"><button type="button" class="me-button" id="me-button" aria-haspopup="true" aria-expanded="false">${avatarHtml(me)}<span class="me-text"><strong>${esc(sub[0] || me.name)}</strong><small>${esc(sub[1] || (sub[0] ? me.name : ""))}</small></span><span class="chev" aria-hidden="true">⌄</span></button><div class="me-drop" id="me-drop" hidden><div class="me-name">${esc(me.name)}</div><button type="button" data-page="profile">Personal Information</button><button type="button" id="password">Change Password</button><button type="button" id="logout">Log Out</button></div></div></div></header><section class="content" id="content" tabindex="-1"><div class="loading">Loading…</div></section><footer class="foot">© ${new Date().getFullYear()}, ${esc(me.company?.name || config.company)}</footer></main></div>`;
   document.querySelectorAll("[data-group]").forEach(
     (b) =>
       (b.onclick = () => {
@@ -704,6 +705,7 @@ async function render() {
     if (page === "laxmi") return await laxmiPage(id);
     if (page === "hrguide") return await hrGuidePage(id);
     if (page === "budgets") return await budgetsPage(id);
+    if (page === "branding") return await brandingPage(id);
     if (page === "hiring") return await hiringPage(id);
     if (page === "overview") {
       await hrDashboardPage(id);
@@ -1207,6 +1209,7 @@ async function profileView(id) {
       '<button class="secondary" id="edit">Edit contact details</button>',
     ) +
     `<div class="card"><h2>${esc(p.name)}</h2><p class="muted">${esc(p.designation_name || "")}${p.designation_name && p.department_name ? " · " : ""}${esc(p.department_name || "")}</p>${row("Employee code", p.employee_code)}${row("Email", p.email)}${row("Role", roleLabel({ ...p, custom_role_name: p.custom_role_name ?? me.role_name }))}${row("Reports to", p.manager_name)}${row("Branch", p.branch_name)}${row("Workplace", p.workplace_name)}${row("Division", p.division)}${row("Section", p.section)}${row("Employee level", p.employee_level)}${row("Job title code", p.job_title_code)}${row("Employment", EMPLOYMENT[p.employment_type])}${row("Date of joining", p.date_of_joining)}</div><div class="card"><h2>Contact</h2>${row("Phone", p.phone)}${row("Address", p.address)}${row("Emergency contact", [p.emergency_name, p.emergency_relation, p.emergency_phone].filter(Boolean).join(" · "))}</div><p class="muted">To change your name, email, department or other job details, contact HR.</p>`;
+  await photoCard(id);
   await securityCard(id);
   await myDetailsCard(id);
   await bankCard(id);
@@ -1482,7 +1485,7 @@ async function myAttendancePage(id) {
 // start could use a function from a later script before it exists.
 document.addEventListener("DOMContentLoaded", async () => {
   try {
-    config = await api("/config");
+    [config] = await Promise.all([api("/config"), loadBranding()]);
     if (resetFromLink()) return;
     await loadMe();
     page = landing();

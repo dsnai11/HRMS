@@ -275,6 +275,10 @@ test("pre-boarding: accept online, submit details, HR verifies, hire copies ever
     mime: "application/pdf",
     data: PDF,
   });
+  // A passport-size photograph is needed too, as a picture (it becomes the profile photo).
+  assert.match((await join("/submit", {})).data.error, /photograph/);
+  const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("png")]).toString("base64");
+  assert.equal((await join("/documents", { kind: "photo", name: "photo", mime: "image/png", data: PNG })).status, 201);
   assert.equal((await join("/submit", {})).status, 200);
   // Locked after submission.
   assert.equal((await join("/form", { address: "x" }, "PUT")).status, 409);
@@ -317,7 +321,7 @@ test("pre-boarding: accept online, submit details, HR verifies, hire copies ever
   // Pipeline view for HR.
   const joiners = await call("/admin/onboarding/joiners", undefined, hr);
   assert.equal(joiners.data.pending[0].preboarding_status, "verified");
-  assert.equal(joiners.data.pending[0].docs_verified, 2);
+  assert.equal(joiners.data.pending[0].docs_verified, 3);
 
   // Hire: profile, documents and bank/PAN details move across; probation and buddy are set.
   const hired = await call(
@@ -336,8 +340,10 @@ test("pre-boarding: accept online, submit details, HR verifies, hire copies ever
   const docs = await db
     .prepare("SELECT * FROM documents WHERE user_id=?")
     .all(uid);
-  assert.equal(docs.length, 2);
-  assert.ok(docs.every((d) => d.verified_at));
+  assert.equal(docs.length, 3);
+  assert.ok(docs.filter((d) => d.kind !== "photo").every((d) => d.verified_at));
+  assert.equal(u.photo_mime, "image/png");
+  assert.ok(u.photo_updated_at);
   const priv = await call(
     `/admin/employees/${uid}/private?reveal=1`,
     undefined,

@@ -51,6 +51,7 @@ import { registerSeparation } from "./routes/separation.js";
 import { registerSalaryBills } from "./routes/salary-bills.js";
 import { registerBudgets } from "./routes/budgets.js";
 import { registerOptionalHolidays } from "./routes/optional-holidays.js";
+import { registerBranding } from "./routes/branding.js";
 import { registerCompetencies } from "./routes/competencies.js";
 import { registerTrainingSessions } from "./routes/training-sessions.js";
 import { registerSso } from "./routes/sso.js";
@@ -120,6 +121,7 @@ const STATIC = {
   "/hr-guide.js": ["hr-guide.js", "text/javascript"],
   "/dashboard.js": ["dashboard.js", "text/javascript"],
   "/budgets.js": ["budgets.js", "text/javascript"],
+  "/branding.js": ["branding.js", "text/javascript"],
   "/theme.js": ["theme.js", "text/javascript"],
   "/vendor/leaflet.js": ["../node_modules/leaflet/dist/leaflet.js", "text/javascript"],
   "/vendor/leaflet.css": ["../node_modules/leaflet/dist/leaflet.css", "text/css"],
@@ -278,6 +280,7 @@ export function createApp({
     registerSalaryBills,
     registerBudgets,
     registerOptionalHolidays,
+    registerBranding,
     registerCompetencies,
     registerTrainingSessions,
     registerSso,

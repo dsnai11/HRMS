@@ -13,6 +13,7 @@ export const KINDS = [
   "offer_letter",
   "medical",
   "form16",
+  "photo",
   "other",
 ];
 export const TYPES = {

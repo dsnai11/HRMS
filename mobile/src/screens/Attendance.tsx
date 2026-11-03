@@ -41,6 +41,9 @@ import {
   confirmForPunch,
   setBiometricLock,
 } from "../biometric";
+import { T, applyBrand, brand, restoreBrand, themed, useBrandVersion } from "../theme";
+import { Avatar, Icon, type IconName, failure, success, tick } from "../ui";
+import Animated, { ZoomIn } from "react-native-reanimated";
 type User = {
   id: number;
   name: string;
@@ -50,6 +53,7 @@ type User = {
   employee_code?: string | null;
   designation?: string | null;
   od_punch?: boolean;
+  photo_at?: string | null;
 };
 type Shift = {
   id: number;
@@ -67,6 +71,12 @@ type Profile = {
   company?: {
     id: number;
     name: string;
+    branding?: {
+      primary: string | null;
+      accent: string | null;
+      logo_url: string | null;
+      updated_at: string | null;
+    } | null;
     require_selfie?: boolean;
     require_biometric?: boolean;
   } | null;
@@ -92,6 +102,18 @@ Notifications.setNotificationHandler({
   }),
 });
 const API = (process.env.EXPO_PUBLIC_API_URL || "").replace(/\/$/, "");
+// One outline icon per menu group.
+const MENU_ICON: Record<string, IconName> = {
+  Home: "home-outline",
+  Attendance: "time-outline",
+  "On duty (OD)": "briefcase-outline",
+  "Leave & holidays": "sunny-outline",
+  Approvals: "checkmark-done-outline",
+  "Pay & tax": "wallet-outline",
+  Employee: "person-outline",
+  Growth: "trending-up-outline",
+  Connect: "chatbubbles-outline",
+};
 const KEY = SESSION_KEY;
 const DEVICE_ID_KEY = "laxmi.hrms.device-id";
 const DEVICE_SECRET_KEY = "laxmi.hrms.device-secret";
@@ -114,7 +136,7 @@ function Button({
       onPress={onPress}
       style={[s.button, secondary && s.secondary, disabled && { opacity: 0.5 }]}
     >
-      <Text style={[s.buttonText, secondary && { color: "#c8102e" }]}>
+      <Text style={[s.buttonText, secondary && { color: T.primary }]}>
         {title}
       </Text>
     </Pressable>
@@ -174,6 +196,8 @@ const rootedCheck = () =>
   (rooted ??= Device.isRootedExperimentalAsync().catch(() => null));
 
 export default function Attendance() {
+  // Colours from Appearance & branding: drawn again when they change.
+  useBrandVersion();
   // Narrow phones (320–360 points wide) get less side padding.
   const narrow = useWindowDimensions().width < 380;
   const [token, setToken] = useState<string | null>(null),
@@ -183,6 +207,7 @@ export default function Attendance() {
     pushRegistered = useRef(false),
     identity = useRef<Identity | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [imgHeaders, setImgHeaders] = useState<Record<string, string>>({});
   // When the profile was last read from the server: a punch within a minute uses it as is.
   const profileAt = useRef(0);
   const [busy, setBusy] = useState(false),
@@ -406,7 +431,15 @@ export default function Attendance() {
   async function refresh(session = sessionRef.current) {
     if (!session) return;
     const p = await api<Profile>("/me", undefined, session);
+    if (p.company?.branding) applyBrand(p.company.branding);
     setProfile(p);
+    // Photos load with the same sign-in and phone headers as every request.
+    setImgHeaders({
+      Authorization: "Bearer " + session,
+      ...(identity.current?.secret
+        ? { "X-Device-Id": identity.current.id, "X-Device-Secret": identity.current.secret }
+        : {}),
+    });
     profileAt.current = Date.now();
     warmGps();
     if (!p.user.must_change_password && p.user.role !== "super_admin") {
@@ -429,7 +462,10 @@ export default function Attendance() {
       const text =
         e instanceof Error ? e.message : "Unable to connect. Please retry.";
       setMessage(text);
-      if (popup) Alert.alert("Attendance not recorded", text);
+      if (popup) {
+        failure();
+        Alert.alert("Attendance not recorded", text);
+      }
     } finally {
       locked.current = false;
       setBusy(false);
@@ -439,6 +475,15 @@ export default function Attendance() {
     let mounted = true;
     (async () => {
       try {
+        await restoreBrand();
+        // Before sign-in: the company's colours and logo for the sign-in screen.
+        void api<{ primary: string | null; accent: string | null; logo_url: string | null; updated_at: string | null }>(
+          "/branding",
+          undefined,
+          null,
+        )
+          .then((b) => applyBrand(b))
+          .catch(() => {});
         await loadIdentity();
         const saved = await SecureStore.getItemAsync(KEY);
         if (!mounted) return;
@@ -649,6 +694,7 @@ export default function Attendance() {
           : { ...p, openShift: null, openTrip: null, todayShift: shift };
       });
       void refresh().catch(() => {});
+      success();
       const odShift = od || ending?.source === "od_punch";
       if (od || trip) setOdPurpose("");
       if (trip) {
@@ -701,6 +747,10 @@ export default function Attendance() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
+  // The signed-in person's photo, with the same headers as every other request.
+  const photoUri = profile?.user.photo_at
+    ? `${API}/api/people/${profile.user.id}/photo?v=${encodeURIComponent(profile.user.photo_at)}`
+    : null;
   const open = profile?.openShift,
     done = profile?.todayShift;
   const trip = profile?.openTrip ?? null;
@@ -736,7 +786,7 @@ export default function Attendance() {
             onPress={() => setMenuOpen(true)}
             hitSlop={10}
           >
-            <Text style={s.burger}>☰</Text>
+            <Icon name="menu" size={28} color="#fff" />
           </Pressable>
           <View style={{ flex: 1 }} />
           <Pressable
@@ -745,20 +795,16 @@ export default function Attendance() {
             onPress={() => setView("Alerts")}
             hitSlop={10}
           >
-            <Text style={s.bell}>
-              🔔{counts.alerts ? " " + counts.alerts : ""}
-            </Text>
+            <View>
+              <Icon name="notifications-outline" size={25} color="#fff" />
+              {counts.alerts ? (
+                <View style={s.bellBadge}>
+                  <Text style={s.bellBadgeText}>{counts.alerts > 99 ? "99+" : counts.alerts}</Text>
+                </View>
+              ) : null}
+            </View>
           </Pressable>
-          <View style={s.avatar}>
-            <Text style={s.avatarText}>
-              {profile.user.name
-                .split(" ")
-                .filter(Boolean)
-                .slice(0, 2)
-                .map((w) => w[0].toUpperCase())
-                .join("")}
-            </Text>
-          </View>
+          <Avatar name={profile.user.name} uri={photoUri} headers={imgHeaders} size={40} />
           <View style={{ maxWidth: 170 }}>
             <Text style={s.barCode}>
               {profile.user.employee_code || profile.user.name}
@@ -781,16 +827,9 @@ export default function Attendance() {
             <ScrollView>
               {profile && (
                 <View style={s.menuUser}>
-                  <Text style={s.menuCompany}>LAXMI INDIA FINANCE</Text>
-                  <View style={s.menuAvatar}>
-                    <Text style={s.menuAvatarText}>
-                      {profile.user.name
-                        .split(" ")
-                        .filter(Boolean)
-                        .slice(0, 2)
-                        .map((w) => w[0].toUpperCase())
-                        .join("")}
-                    </Text>
+                  <Text style={s.menuCompany} numberOfLines={2}>{(profile.company?.name ?? "Laxmi India Finance").toUpperCase()}</Text>
+                  <View style={s.menuAvatarRing}>
+                    <Avatar name={profile.user.name} uri={photoUri} headers={imgHeaders} size={64} />
                   </View>
                   <Text style={s.menuName}>{profile.user.name}</Text>
                   {!!profile.user.email && (
@@ -803,7 +842,10 @@ export default function Attendance() {
               )}
               {MENU.map(([group, items]) => (
                 <View key={group} style={{ marginBottom: 6 }}>
-                  <Text style={s.menuGroup}>{group}</Text>
+                  <View style={s.menuGroupRow}>
+                    <Icon name={MENU_ICON[group] ?? "ellipse-outline"} size={16} color={T.onPrimarySoft} />
+                    <Text style={s.menuGroup}>{group}</Text>
+                  </View>
                   {items.map(([id, label]) => (
                     <Pressable
                       key={id}
@@ -895,7 +937,7 @@ export default function Attendance() {
           {!employeeView && (
             <View style={s.brand}>
               <Image
-                source={require("../../assets/logo.png")}
+                source={brand.logo_url ? { uri: API + brand.logo_url } : require("../../assets/logo.png")}
                 style={s.logo}
                 resizeMode="contain"
                 accessibilityIgnoresInvertColors
@@ -907,7 +949,7 @@ export default function Attendance() {
             </View>
           )}
           {loading ? (
-            <ActivityIndicator size="large" color="#c8102e" />
+            <ActivityIndicator size="large" color={T.primary} />
           ) : !token ? (
             <>
               <Text style={s.title}>Your workplace, in one place</Text>
@@ -1068,6 +1110,7 @@ export default function Attendance() {
                   files={files}
                   onSignOut={() => void logout()}
                   onPassword={() => setChanging(true)}
+                  onProfileChanged={() => void refresh().catch(() => {})}
                 />
               ) : (
                 <>
@@ -1289,27 +1332,36 @@ export default function Attendance() {
         <View style={s.tabBar}>
           {(
             [
-              ["Home", "⌂", "Home"],
-              ["Profile", "☺", "Profile"],
-              ["OD", "✈", "OD"],
-              ["My Attendance", "◷", "Att Log"],
+              ["Home", "home", "Home"],
+              ["Profile", "person", "Profile"],
+              ["OD", "briefcase", "OD"],
+              ["My Attendance", "time", "Att Log"],
             ] as const
           ).map(([id, icon, label]) => (
             <Pressable
               key={id}
               accessibilityRole="tab"
               accessibilityState={{ selected: view === id }}
-              onPress={() => setView(id)}
+              onPress={() => {
+                if (view !== id) tick();
+                setView(id);
+              }}
               style={[s.tabItem, view === id && s.tabItemOn]}
             >
-              <View style={[s.tabBubble, view === id && s.tabBubbleOn]}>
-                <Text style={[s.tabIcon, view === id && { color: "#fff" }]}>
-                  {icon}
-                </Text>
-              </View>
+              <Animated.View
+                key={view === id ? "on" : "off"}
+                entering={view === id ? ZoomIn.springify().damping(14) : undefined}
+                style={[s.tabBubble, view === id && s.tabBubbleOn]}
+              >
+                <Icon
+                  name={(view === id ? icon : `${icon}-outline`) as IconName}
+                  size={view === id ? 24 : 22}
+                  color={view === id ? "#fff" : "#7a7d8c"}
+                />
+              </Animated.View>
               <Text
                 numberOfLines={1}
-                style={[s.tabLabel, view === id && { color: "#ac051b" }]}
+                style={[s.tabLabel, view === id && { color: T.primaryDark }]}
               >
                 {label}
               </Text>
@@ -1353,7 +1405,7 @@ export default function Attendance() {
               >
                 <Marker
                   coordinate={{ latitude: fix.latitude, longitude: fix.longitude }}
-                  pinColor="#c8102e"
+                  pinColor={T.primary}
                 />
                 {profile?.workplace?.latitude != null &&
                   profile.workplace.longitude != null &&
@@ -1388,7 +1440,7 @@ export default function Attendance() {
     </SafeAreaView>
   );
 }
-const s = StyleSheet.create({
+const s = themed(() => StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#f8f7fa" },
   scrollNarrow: { padding: 16 },
   scroll: {
@@ -1437,12 +1489,12 @@ const s = StyleSheet.create({
   button: {
     paddingVertical: 17,
     paddingHorizontal: 22,
-    backgroundColor: "#c8102e",
+    backgroundColor: T.primary,
     borderRadius: 12,
     alignItems: "center",
     marginTop: 6,
   },
-  secondary: { backgroundColor: "#fff1f3" },
+  secondary: { backgroundColor: T.softer },
   buttonText: { fontSize: 15, color: "#fff", fontWeight: "600" },
   note: { color: "#7a7d8c", fontSize: 12, lineHeight: 20 },
   heading: {
@@ -1452,7 +1504,7 @@ const s = StyleSheet.create({
     letterSpacing: -0.5,
   },
   badge: {
-    color: "#ac051b",
+    color: T.primaryDark,
     fontSize: 10,
     letterSpacing: 1.3,
     fontWeight: "600",
@@ -1489,11 +1541,11 @@ const s = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: "#ffe0e5",
+    backgroundColor: T.border,
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarText: { color: "#c8102e", fontWeight: "700" },
+  avatarText: { color: T.primary, fontWeight: "700" },
   barCode: { color: "#fff", fontWeight: "700", fontSize: 16 },
   barSub: { color: "#d7d8df", fontSize: 11 },
   eye: {
@@ -1505,9 +1557,9 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  eyeText: { color: "#c8102e", fontSize: 14, fontWeight: "700" },
+  eyeText: { color: T.primary, fontSize: 14, fontWeight: "700" },
   menuUser: {
-    backgroundColor: "#8c0416",
+    backgroundColor: T.primaryDeeper,
     paddingTop: 48,
     paddingHorizontal: 18,
     paddingBottom: 16,
@@ -1522,7 +1574,22 @@ const s = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 8,
   },
-  menuAvatarText: { color: "#ac051b", fontWeight: "800", fontSize: 18 },
+  menuAvatarText: { color: T.primaryDark, fontWeight: "800", fontSize: 18 },
+  menuAvatarRing: { alignSelf: "flex-start", padding: 3, borderRadius: 40, backgroundColor: "#fff" },
+  menuGroupRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 18, paddingTop: 10 },
+  bellBadge: {
+    position: "absolute",
+    top: -6,
+    right: -10,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bellBadgeText: { color: T.primaryDark, fontSize: 11, fontWeight: "800" },
   menuName: { color: "#fff", fontWeight: "800", fontSize: 17 },
   menuCompany: {
     color: "#fff",
@@ -1531,9 +1598,9 @@ const s = StyleSheet.create({
     fontSize: 12,
     marginBottom: 12,
   },
-  menuSub: { color: "#fbd5da", fontSize: 12 },
+  menuSub: { color: T.onPrimarySoft, fontSize: 12 },
   menuVersion: {
-    color: "#fbd5da",
+    color: T.onPrimarySoft,
     fontSize: 11,
     textAlign: "center",
     marginTop: 18,
@@ -1566,7 +1633,7 @@ const s = StyleSheet.create({
     height: 54,
     borderRadius: 27,
     marginTop: -26,
-    backgroundColor: "#c8102e",
+    backgroundColor: T.primary,
     borderWidth: 4,
     borderColor: "#fff",
   },
@@ -1598,19 +1665,18 @@ const s = StyleSheet.create({
     flexDirection: "row",
     backgroundColor: "rgba(0,0,0,0.35)",
   },
-  menu: { width: "84%", maxWidth: 320, backgroundColor: "#ac051b", paddingBottom: 30 },
+  menu: { width: "84%", maxWidth: 320, backgroundColor: T.primaryDark, paddingBottom: 30 },
   menuGroup: {
-    color: "#fbd5da",
+    color: T.onPrimarySoft,
     fontSize: 11,
     fontWeight: "700",
     letterSpacing: 1,
     textTransform: "uppercase",
-    paddingHorizontal: 18,
-    paddingTop: 10,
     paddingBottom: 4,
+    paddingTop: 4,
   },
   menuItem: { paddingVertical: 11, paddingHorizontal: 26 },
-  menuItemOn: { backgroundColor: "#8c0416" },
+  menuItemOn: { backgroundColor: T.primaryDeeper },
   menuText: { color: "#fff", fontSize: 15, fontWeight: "600" },
   historyRow: {
     paddingVertical: 16,
@@ -1632,4 +1698,4 @@ const s = StyleSheet.create({
     letterSpacing: 2,
     marginVertical: 22,
   },
-});
+}));
