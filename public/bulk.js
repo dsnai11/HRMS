@@ -106,7 +106,7 @@ async function importPeopleCard(id) {
       if (!rows.length) return notice("The file has no rows.", true);
       viewDialog(
         "Import options",
-        `<p>${rows.length} rows in <strong>${esc(f.name)}</strong>.</p><label class="check"><input type="checkbox" id="create-missing" checked> Create departments, designations and branches that do not exist yet</label><label class="check"><input type="checkbox" id="update-existing"> Update people who already exist (matched by employee code or email) instead of skipping them. Only the columns you fill in change.</label><div class="actions"><button id="check-file">Check the file</button></div>`,
+        `<p>${rows.length} rows in <strong>${esc(f.name)}</strong>.</p><label class="check"><input type="checkbox" id="create-missing" checked> Create departments, designations and branches that do not exist yet</label><label class="check"><input type="checkbox" id="update-existing"> Also update people who already exist (matched by employee code or email); new people in the file are still added. Only the columns you fill in change.</label><div class="actions"><button id="check-file">Check the file</button></div>`,
       );
       document.querySelector("dialog #check-file").onclick = (e) =>
         busy(e.target, async () => {

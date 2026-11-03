@@ -3,7 +3,7 @@ import { HttpError } from "../http.js";
 import { can } from "../rbac.js";
 
 const WORDS = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const tempPassword = () =>
+export const tempPassword = () =>
   Array.from({ length: 12 }, () => WORDS[randomInt(WORDS.length)]).join("");
 const key = (v) =>
   String(v ?? "")
@@ -98,12 +98,14 @@ export function registerBulk(router, app) {
           if (byCode && byEmail && byCode !== byEmail)
             return fail("Employee code and email belong to different people");
           existingId = byCode ?? byEmail ?? null;
-          if (!existingId)
-            return fail("No existing employee matches this code or email");
-          if (touchedIds.has(existingId))
-            return fail("This person appears twice in the file");
-          touchedIds.add(existingId);
-        } else {
+          if (existingId) {
+            if (touchedIds.has(existingId))
+              return fail("This person appears twice in the file");
+            touchedIds.add(existingId);
+          }
+        }
+        // A new person (always without update mode; in update mode, someone not found).
+        if (!existingId) {
           if (!name) return fail("Name is missing");
           if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
             return fail("Email is missing or not valid");
