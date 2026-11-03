@@ -109,12 +109,7 @@ export function registerAttendance(router, app) {
   );
 
   // Companies can refuse punches from old app versions (for example after a security fix).
-  async function checkAppVersion(companyId, version) {
-    const min = (
-      await db
-        .prepare("SELECT min_app_version FROM companies WHERE id=?")
-        .get(companyId)
-    ).min_app_version;
+  function checkAppVersion(min, version) {
     if (!min) return;
     const parts = (v) =>
       String(v ?? "0")
@@ -133,12 +128,7 @@ export function registerAttendance(router, app) {
     }
   }
   // A small JPEG taken at the moment of the punch, when the company asks for one.
-  async function readSelfie(value, companyId) {
-    const required = (
-      await db
-        .prepare("SELECT require_selfie FROM companies WHERE id=?")
-        .get(companyId)
-    ).require_selfie;
+  function readSelfie(value, required) {
     if (!value) {
       if (required)
         throw new HttpError(422, "Take a selfie to punch.", "selfie_required");
@@ -173,7 +163,25 @@ export function registerAttendance(router, app) {
           "Attendance can only be recorded from the company mobile app.",
           "web_punch_blocked",
         );
-      device = await deviceFromHeaders(app, user, req);
+      // Everything the punch needs to read that does not change inside it is read at the same
+      // time, so the phone waits for one trip to the database here instead of six.
+      let settings, previous, policy, workplace;
+      [device, settings, previous, policy, workplace] = await Promise.all([
+        deviceFromHeaders(app, user, req),
+        db
+          .prepare("SELECT require_biometric,require_selfie,min_app_version FROM companies WHERE id=?")
+          .get(user.company_id),
+        db
+          .prepare(
+            "SELECT latitude,longitude,created_at FROM punch_events WHERE user_id=? AND outcome='accepted' ORDER BY id DESC LIMIT 3",
+          )
+          .all(user.id),
+        b.action === "in" ? app.policyFor(user) : null,
+        b.action === "in" && user.workplace_id
+          ? db.prepare("SELECT * FROM workplaces WHERE id=?").get(user.workplace_id)
+          : null,
+        closeStaleShifts(app, user.id),
+      ]);
       if (!device)
         throw new HttpError(
           403,
@@ -190,21 +198,13 @@ export function registerAttendance(router, app) {
         );
       // The phone reports that its fingerprint or face check passed; like the
       // location signals, the server can only require the report, not prove it.
-      if (
-        b.biometric !== true &&
-        (
-          await db
-            .prepare("SELECT require_biometric FROM companies WHERE id=?")
-            .get(user.company_id)
-        ).require_biometric
-      )
+      if (b.biometric !== true && settings.require_biometric)
         throw new HttpError(
           422,
           "Confirm with your fingerprint or face to punch. Update the app if it does not ask.",
           "biometric_required",
         );
-      await closeStaleShifts(app, user.id);
-      const selfie = trip ? null : await readSelfie(b.selfie, user.company_id);
+      const selfie = trip ? null : readSelfie(b.selfie, settings.require_selfie);
       stored = selfie ? await app.blobs.put(selfie, "selfies") : null;
       const result = await transaction(async () => {
         const nowMs = clock();
@@ -277,15 +277,13 @@ export function registerAttendance(router, app) {
               radius: target.radius,
               max_accuracy: target.max_accuracy,
             }
-          : await db
-              .prepare("SELECT * FROM workplaces WHERE id=?")
-              .get(user.workplace_id ?? -1);
+          : workplace;
         if (!site)
           throw new HttpError(
             422,
             "Ask your administrator to assign a workplace.",
           );
-        await checkAppVersion(user.company_id, b.signals?.appVersion);
+        checkAppVersion(settings.min_app_version, b.signals?.appVersion);
         try {
           // OD days, OD trips and a punch-out during a trip are recorded wherever the person is.
           checkLocation(b.location, od || trip || visit ? { ...site, radius: Infinity } : site, nowMs);
@@ -301,11 +299,7 @@ export function registerAttendance(router, app) {
           signals,
           location: b.location,
           now: nowMs,
-          previous: await db
-            .prepare(
-              "SELECT latitude,longitude,created_at FROM punch_events WHERE user_id=? AND outcome='accepted' ORDER BY id DESC LIMIT 3",
-            )
-            .all(user.id),
+          previous,
         });
         if (risk.reject)
           throw Object.assign(new HttpError(422, risk.reject, risk.flags[0]), {
@@ -363,7 +357,7 @@ export function registerAttendance(router, app) {
         let id = target?.id;
         const rules =
           b.action === "in"
-            ? evaluatePunchIn(await app.policyFor(user), nowMs, timezone)
+            ? evaluatePunchIn(policy, nowMs, timezone)
             : null;
         if (b.action === "in")
           id = Number(
