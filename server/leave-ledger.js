@@ -192,13 +192,11 @@ export async function balances(app, user, asOf) {
   for (const type of types) {
     if (!applies(type, user)) continue;
     const balance = await yearBalance(app.db, user.id, type.id, year);
-    const pending = (
-      await app.db
-        .prepare(
-          "SELECT COALESCE(SUM(days),0) n FROM leave_requests WHERE user_id=? AND leave_type_id=? AND leave_year=? AND status='pending'",
-        )
-        .get(user.id, type.id, year)
-    ).n;
+    const { pending, taken } = await app.db
+      .prepare(
+        "SELECT COALESCE(SUM(CASE WHEN status='pending' THEN days END),0) pending,COALESCE(SUM(CASE WHEN status='approved' THEN days END),0) taken FROM leave_requests WHERE user_id=? AND leave_type_id=? AND leave_year=?",
+      )
+      .get(user.id, type.id, year);
     out.push({
       leave_type_id: type.id,
       name: type.name,
@@ -208,7 +206,10 @@ export async function balances(app, user, asOf) {
       allow_half_day: Boolean(type.allow_half_day),
       year,
       balance: type.unlimited ? null : round2(balance),
-      pending,
+      pending: Number(pending),
+      // Approved days this leave year, and what the year started with plus what was added.
+      taken: Number(taken),
+      entitlement: type.unlimited ? null : round2(balance + Number(taken)),
       available: type.unlimited ? null : round2(balance - pending),
     });
   }

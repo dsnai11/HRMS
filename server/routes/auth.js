@@ -213,7 +213,7 @@ export function registerAuth(router, app) {
       // of nineteen in a row. A shift left open past its limit is closed first, and the
       // shift and trip reads wait for that.
       const stale = closeStaleShifts(app, user.id);
-      const [company, job, manager, approvals, workplace, openShift, todayShift, openTrip, odOk, caseKinds, delegators, device] =
+      const [company, job, manager, approvals, workplace, openShift, todayShift, openTrip, odOk, caseKinds, delegators, device, policy] =
         await Promise.all([
           db.prepare("SELECT id,name,require_selfie,require_biometric,labels FROM companies WHERE id=?").get(companyId),
           db
@@ -231,7 +231,9 @@ export function registerAuth(router, app) {
           caseKindsHandled(db, user),
           delegatorsOf(db, user.id),
           deviceFromHeaders(app, user, req),
+          app.policyFor(user),
         ]);
+      const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
       return send(200, {
         user: { ...safeUser(user), designation: job?.designation ?? null },
         ...(user.needs_2fa ? { needs_2fa: true } : {}),
@@ -245,6 +247,12 @@ export function registerAuth(router, app) {
         is_manager: Boolean(manager),
         approvals_pending: approvals,
         workplace,
+        // Today's shift rule, for the phone's Home strip.
+        shift: policy && {
+          name: policy.name ?? "General shift",
+          start: hm(policy.startMinutes),
+          earliest_out: hm(policy.earliestOutMinutes),
+        },
         openShift: openShift || null,
         todayShift,
         // An OD trip out of the office in the open shift, if any.

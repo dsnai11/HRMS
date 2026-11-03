@@ -33,6 +33,7 @@ export async function policyFor(app, person, date = null) {
     );
   if (!row) return app.policy;
   return {
+    name: row.name,
     startMinutes: minutes(row.start_time),
     graceMinutes: row.grace_minutes,
     hours: row.hours,
