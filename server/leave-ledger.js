@@ -28,13 +28,22 @@ export async function companySettings(db, companyId) {
 }
 
 // Holidays that apply to a branch: company-wide ones plus that branch's own.
-export async function holidayMap(db, companyId, branchId, from, to) {
+// With a userId, the optional holidays that person chose and had approved count too.
+export async function holidayMap(db, companyId, branchId, from, to, userId = null) {
   const rows = await db
     .prepare(
       "SELECT date,name FROM holidays WHERE company_id=? AND date>=? AND date<=? AND (branch_id IS NULL OR branch_id=?) AND optional=0 ORDER BY date",
     )
     .all(companyId, from, to, branchId ?? -1);
-  return new Map(rows.map((r) => [r.date, r.name]));
+  const map = new Map(rows.map((r) => [r.date, r.name]));
+  if (userId)
+    for (const c of await db
+      .prepare(
+        "SELECT date,name FROM optional_holiday_choices WHERE user_id=? AND status='approved' AND date>=? AND date<=?",
+      )
+      .all(userId, from, to))
+      if (!map.has(c.date)) map.set(c.date, c.name);
+  return map;
 }
 
 /** 'holiday', 'weekly_off', or null for an ordinary working day. */

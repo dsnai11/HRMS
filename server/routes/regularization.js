@@ -14,12 +14,17 @@ import {
   optionalString,
 } from "../http.js";
 import { inboxScope } from "../approval.js";
-import { daysBetween, localToUtcMs, monthOf } from "../calendar.js";
-import { companySettings } from "../leave-ledger.js";
+import { randomBytes } from "node:crypto";
+import { addDays, daysBetween, eachDay, localToUtcMs, monthOf } from "../calendar.js";
+import { companySettings, dayKind, holidayMap } from "../leave-ledger.js";
 import { evaluatePunchIn, halfDayReasons } from "../policy.js";
 
-const KINDS = ["missed_punch", "wrong_punch", "on_duty", "work_from_home"];
+const KINDS = ["missed_punch", "wrong_punch", "on_duty", "work_from_home", "short_leave"];
 const SELF_REPORTED = ["missed_punch", "wrong_punch"];
+// Short leave: the times actually worked, a late start or early finish agreed for a few hours.
+// Approved, the day counts in full.
+const NEEDS_TIMES = [...SELF_REPORTED, "short_leave"];
+const MAX_BATCH_DAYS = 31;
 const hhmm = (m) =>
   `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 const time = (v, label) => {
@@ -34,7 +39,7 @@ const time = (v, label) => {
 export async function submitCorrection(
   app,
   user,
-  { kind, date, inTime, outTime, reason, shiftId = null },
+  { kind, date, inTime, outTime, reason, shiftId = null, batchId = null, quiet = false },
 ) {
   const { db } = app;
   const nowIso = new Date(app.clock()).toISOString();
@@ -44,7 +49,7 @@ export async function submitCorrection(
       (
         await db
           .prepare(
-            "INSERT INTO regularizations(company_id,user_id,date,kind,in_time,out_time,reason,created_at,shift_id,from_punch) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO regularizations(company_id,user_id,date,kind,in_time,out_time,reason,created_at,shift_id,from_punch,batch_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
           )
           .run(
             user.company_id,
@@ -57,6 +62,7 @@ export async function submitCorrection(
             nowIso,
             shiftId,
             shiftId ? 1 : 0,
+            batchId,
           )
       ).lastInsertRowid,
     );
@@ -68,7 +74,13 @@ export async function submitCorrection(
       );
     throw e;
   }
-  await app.audit(user, "regularization_requested", { id, kind, date, ...(shiftId ? { shiftId } : {}) });
+  await app.audit(user, "regularization_requested", {
+    id,
+    kind,
+    date,
+    ...(shiftId ? { shiftId } : {}),
+    ...(batchId ? { batchId } : {}),
+  });
   const chain = await chainOf(db, user.company_id, "correction");
   const step = Math.min(
     await nextStep(db, user.company_id, user.id, chain, 0),
@@ -77,6 +89,8 @@ export async function submitCorrection(
   await db
     .prepare("UPDATE regularizations SET step=?,step_at=? WHERE id=?")
     .run(step, nowIso, id);
+  // A Multiple OD request tells the approvers once, for the whole run of days.
+  if (quiet) return id;
   await app.notify(
     await stepApprovers(db, user.company_id, user.id, chain[step]),
     {
@@ -106,7 +120,7 @@ export function registerRegularization(router, app) {
     const reason = string(b.reason, "Reason", 500);
     const inTime = time(b.in_time, "In time"),
       outTime = time(b.out_time, "Out time");
-    if (SELF_REPORTED.includes(kind) && (!inTime || !outTime))
+    if (NEEDS_TIMES.includes(kind) && (!inTime || !outTime))
       throw new HttpError(400, "Give both the in and out time you worked.");
     if (inTime && outTime && outTime <= inTime)
       throw new HttpError(400, "Out time must be after in time.");
@@ -123,7 +137,7 @@ export function registerRegularization(router, app) {
       const used = (
         await db
           .prepare(
-            "SELECT COUNT(*) n FROM regularizations WHERE user_id=? AND status IN ('pending','approved') AND from_punch=0 AND substr(date,1,7)=?",
+            "SELECT COUNT(*) n FROM regularizations WHERE user_id=? AND status IN ('pending','approved') AND from_punch=0 AND batch_id IS NULL AND substr(date,1,7)=?",
           )
           .get(user.id, monthOf(date))
       ).n;
@@ -151,6 +165,74 @@ export function registerRegularization(router, app) {
       reason,
     });
     return send(201, { id });
+  });
+
+  // Multiple OD: out on duty for a run of days (a tour, a branch visit). One on-duty request is
+  // made for each working day in the range, sharing a batch id; weekly offs, holidays, days on
+  // leave and days already waiting for a decision are skipped. Planned trips may be up to 30
+  // days ahead.
+  router.post("/api/regularizations/batch", async ({ user, body, send }) => {
+    const b = await body();
+    const from = isoDate(b.from_date, "From date"),
+      to = isoDate(b.to_date, "To date");
+    if (!from || !to) throw new HttpError(400, "Choose the first and last day.");
+    if (to < from) throw new HttpError(400, "The last day cannot be before the first.");
+    if (daysBetween(from, to) + 1 > MAX_BATCH_DAYS)
+      throw new HttpError(400, `Ask for at most ${MAX_BATCH_DAYS} days at a time.`);
+    const reason = string(b.reason, "Purpose", 500);
+    const inTime = time(b.in_time, "In time"),
+      outTime = time(b.out_time, "Out time");
+    if (inTime && outTime && outTime <= inTime)
+      throw new HttpError(400, "Out time must be after in time.");
+    const t = today();
+    if (to > addDays(t, 30)) throw new HttpError(400, "Plan OD at most 30 days ahead.");
+    const settings = await companySettings(db, user.company_id);
+    if (from < t && daysBetween(from, t) > settings.regularizationWindowDays)
+      throw new HttpError(
+        422,
+        `OD for past days can only be asked for within ${settings.regularizationWindowDays} day(s).`,
+      );
+    const holidays = await holidayMap(db, user.company_id, user.branch_id, from, to, user.id);
+    const busy = new Set(
+      (
+        await db
+          .prepare(
+            `SELECT day FROM (SELECT day,COUNT(*) n FROM leave_days WHERE user_id=? AND day>=? AND day<=? GROUP BY day) x WHERE n>=2
+             UNION SELECT date FROM regularizations WHERE user_id=? AND status='pending' AND date>=? AND date<=?`,
+          )
+          .all(user.id, from, to, user.id, from, to)
+      ).map((r) => r.day ?? r.date),
+    );
+    const days = [...eachDay(from, to)].filter((d) => !dayKind(d, settings, holidays) && !busy.has(d));
+    if (!days.length)
+      throw new HttpError(409, "Every day in that range is off, on leave or already waiting for a decision.");
+    const batchId = randomBytes(8).toString("hex");
+    const ids = await transaction(async () => {
+      const out = [];
+      for (const date of days)
+        out.push(
+          await submitCorrection(app, user, {
+            kind: "on_duty",
+            date,
+            inTime,
+            outTime,
+            reason,
+            batchId,
+            quiet: true,
+          }),
+        );
+      return out;
+    });
+    const first = await db.prepare("SELECT step FROM regularizations WHERE id=?").get(ids[0]);
+    const chain = await chainOf(db, user.company_id, "correction");
+    await app.notify(await stepApprovers(db, user.company_id, user.id, chain[first.step]), {
+      companyId: user.company_id,
+      kind: "approval",
+      title: `${user.name} asked for OD on ${days.length} day${days.length === 1 ? "" : "s"} (${from} to ${to})`,
+      body: `${reason}. Waiting for: ${STEPS[chain[first.step]]}`,
+      link: "approvals",
+    });
+    return send(201, { batch_id: batchId, days, skipped: daysBetween(from, to) + 1 - days.length });
   });
 
   router.get("/api/regularizations", async ({ user, send }) =>

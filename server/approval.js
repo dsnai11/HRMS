@@ -94,7 +94,13 @@ export async function pendingApprovals(app, user) {
       ),
     );
   if (scope)
-    for (const table of ["leave_requests", "regularizations", "comp_off_credits", "reimbursement_claims"])
+    for (const table of [
+      "leave_requests",
+      "regularizations",
+      "comp_off_credits",
+      "reimbursement_claims",
+      "optional_holiday_choices",
+    ])
       parts.push(
         count(
           `SELECT COUNT(*) n FROM ${table} r WHERE r.company_id=? AND r.status='pending' AND r.user_id<>?${scope.sql}`,

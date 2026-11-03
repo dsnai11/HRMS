@@ -661,7 +661,7 @@ export function registerLeave(router, app) {
         400,
         "That range crosses into the next leave year. Split it into two requests.",
       );
-    const hol = await holidayMap(db, user.company_id, user.branch_id, from, to);
+    const hol = await holidayMap(db, user.company_id, user.branch_id, from, to, user.id);
     const slots = [];
     for (const day of eachDay(from, to)) {
       if (dayKind(day, settings, hol)) continue;
