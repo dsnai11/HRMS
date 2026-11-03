@@ -32,6 +32,8 @@ export const safeUser = (u) => ({
   active: Boolean(u.active),
   must_change_password: Boolean(u.must_change_password),
   od_punch: Boolean(u.od_punch),
+  // When the profile photo last changed (null: none), so screens can show and refresh it.
+  photo_at: u.photo ? (u.photo_updated_at ?? "1") : null,
   ...(u.role === "custom" ? { role_name: u.custom_role_name ?? null } : {}),
 });
 
@@ -215,7 +217,11 @@ export function registerAuth(router, app) {
       const stale = closeStaleShifts(app, user.id);
       const [company, job, manager, approvals, workplace, openShift, todayShift, openTrip, odOk, caseKinds, delegators, device, policy] =
         await Promise.all([
-          db.prepare("SELECT id,name,require_selfie,require_biometric,labels FROM companies WHERE id=?").get(companyId),
+          db
+            .prepare(
+              "SELECT id,name,require_selfie,require_biometric,labels,brand_primary,brand_accent,brand_logo,brand_updated_at FROM companies WHERE id=?",
+            )
+            .get(companyId),
           db
             .prepare("SELECT g.name designation FROM users u LEFT JOIN designations g ON g.id=u.designation_id WHERE u.id=?")
             .get(user.id),
@@ -238,7 +244,10 @@ export function registerAuth(router, app) {
         user: { ...safeUser(user), designation: job?.designation ?? null },
         ...(user.needs_2fa ? { needs_2fa: true } : {}),
         company: company && {
-          ...company,
+          id: company.id,
+          name: company.name,
+          // Colours and logo set under Appearance & branding; the app recolours itself from these.
+          branding: app.brandOf ? app.brandOf(company) : null,
           require_selfie: Boolean(company.require_selfie),
           require_biometric: Boolean(company.require_biometric),
           labels: JSON.parse(company.labels || "{}"),

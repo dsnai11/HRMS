@@ -15,6 +15,7 @@ const KIND = {
   education: "Education certificate",
   experience: "Experience / relieving letter",
   bank: "Cancelled cheque / passbook",
+  photo: "Passport-size photograph (needed; JPG or PNG)",
   other: "Other",
 };
 const fmt = (d) =>
@@ -307,6 +308,9 @@ function wire() {
         throw new Error("Files can be up to 2 MB.");
       if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type))
         throw new Error("Use a PDF, JPG or PNG file.");
+      // The photograph becomes the profile photo, so it has to be a picture.
+      if (box.querySelector("#doc-kind").value === "photo" && !["image/jpeg", "image/png"].includes(file.type))
+        throw new Error("Upload the photograph as a JPG or PNG.");
       // Keep what has been typed so far; the page redraws after an upload.
       await saveForm();
       await call("/documents", {

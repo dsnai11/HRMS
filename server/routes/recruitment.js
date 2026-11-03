@@ -823,6 +823,12 @@ export function registerRecruitment(router, app) {
             userId,
           );
         if (pre) {
+          // The joining photograph becomes the profile photo.
+          const photo = pre.documents.find((d) => d.kind === "photo" && ["image/jpeg", "image/png"].includes(d.mime));
+          if (photo)
+            await db
+              .prepare("UPDATE users SET photo=?,photo_mime=?,photo_updated_at=? WHERE id=?")
+              .run(photo.data, photo.mime, nowIso(), userId);
           // What the candidate gave before joining moves onto the new employee's record.
           for (const d of pre.documents)
             await db
