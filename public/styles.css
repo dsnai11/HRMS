@@ -4523,3 +4523,62 @@ th.num {
   max-width: 100%;
   object-fit: contain;
 }
+
+/* Resignation steps */
+.exit-steps {
+  list-style: none;
+  margin: 8px 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 0;
+}
+.exit-steps li {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 12px;
+  position: relative;
+  padding-bottom: 14px;
+}
+.exit-steps li:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 22px;
+  bottom: 0;
+  width: 2px;
+  background: var(--line);
+}
+.exit-steps li.done:not(:last-child)::before {
+  background: #1f7a4d;
+}
+.exit-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  background: #fff;
+}
+.exit-steps li.done .exit-dot {
+  background: #1f7a4d;
+  border-color: #1f7a4d;
+}
+.exit-steps li.now .exit-dot {
+  background: var(--red);
+  border-color: var(--red);
+  box-shadow: 0 0 0 4px var(--red-50);
+}
+.exit-steps li.next strong {
+  color: var(--muted);
+}
+.exit-steps small {
+  display: block;
+  color: var(--muted);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

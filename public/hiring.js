@@ -719,6 +719,22 @@ async function startExitDialog() {
     },
   );
 }
+// What the employee gave with the resignation, their exit interview, and a withdrawal request.
+function exitExtrasHtml(x) {
+  const kv = (l, v) => (v ? `<div class="kv"><span class="muted">${esc(l)}</span><strong>${esc(v)}</strong></div>` : "");
+  const iv = x.interview;
+  return `${kv("Reason", x.reason_label)}${x.early_release ? '<p><span class="pill warn">Early release asked</span></p>' : ""}${kv("Hand over to", x.handover_name)}${kv("Handover notes", x.handover_notes)}${kv("Personal email", x.personal_email)}${kv("Personal phone", x.personal_phone)}${
+    x.letter_document_id ? `<p><button type="button" class="ghost" data-open-doc="${x.letter_document_id}">Open the resignation letter</button></p>` : ""
+  }${
+    iv
+      ? `<h3>Exit interview (by the employee)</h3>${Object.entries(iv.ratings).map(([k, v]) => kv(k.replace(/_/g, " "), `${v} of 5`)).join("")}${Object.entries(iv.answers).map(([k, v]) => kv(k.replace(/_/g, " "), v)).join("")}${kv("Would rejoin", iv.would_rejoin == null ? null : iv.would_rejoin ? "Yes" : "No")}${kv("Would recommend", iv.would_recommend == null ? null : iv.would_recommend ? "Yes" : "No")}`
+      : ""
+  }${
+    x.withdraw_requested_at && x.status === "accepted"
+      ? `<div class="callout"><strong>Asks to withdraw the resignation</strong><p>${esc(x.withdraw_reason || "")}</p><div class="actions"><button class="secondary" id="wd-approve">Let them stay</button> <button class="ghost" id="wd-decline">Decline…</button></div></div>`
+      : ""
+  }`;
+}
 async function exitView(id) {
   const x = await api(`/admin/exits/${id}`);
   const canPay = has("payroll.manage");
@@ -729,7 +745,7 @@ async function exitView(id) {
     );
   const money = (l) =>
     `<div class="kv"><span>${esc(l.name)}${l.note ? `<small>${esc(l.note)}</small>` : ""}</span><strong>${l.kind === "deduction" ? "−" : ""}${inr(l.amount)}</strong></div>`;
-  const html = `<p class="muted">${esc(x.employee_name)} · ${EXIT_KIND[x.kind]} · notice ${fmtDate(x.notice_given_on)} (${x.notice_days} days) · last day ${x.last_working_day ? fmtDate(x.last_working_day) : "to be set"} · <span class="pill">${EXIT_STATUS[x.status]}</span></p>${x.reason ? `<p>${esc(x.reason)}${x.requested_last_day ? ` (asked to leave on ${fmtDate(x.requested_last_day)})` : ""}</p>` : ""}${exitManagerViewHtml(x)}
+  const html = `<p class="muted">${esc(x.employee_name)} · ${EXIT_KIND[x.kind]} · notice ${fmtDate(x.notice_given_on)} (${x.notice_days} days) · last day ${x.last_working_day ? fmtDate(x.last_working_day) : "to be set"} · <span class="pill">${EXIT_STATUS[x.status]}</span></p>${x.reason ? `<p>${esc(x.reason)}${x.requested_last_day ? ` (asked to leave on ${fmtDate(x.requested_last_day)})` : ""}</p>` : ""}${exitManagerViewHtml(x)}${exitExtrasHtml(x)}
   ${x.status === "pending" ? '<div class="actions"><button id="accept">Accept…</button> <button class="ghost" id="decline">Do not accept</button></div>' : ""}
   ${x.status === "accepted" ? `<h3>Clearance</h3>${x.clearance.map((c) => `<label class="check"><input type="checkbox" data-clear="${c.id}" ${c.cleared ? "checked" : ""}> ${esc(c.item)} <small>${esc(c.department)}</small></label>`).join("")}` : ""}
   ${x.status === "accepted" ? `<h3>Full and final settlement</h3>${x.settlement ? `<p class="muted">Posted to the ${monthLabel(x.settlement.pay_in_month)} payroll, where tax and net pay are worked out.</p>${x.settlement.data.lines.map(money).join("")}${x.settlement.data.info.map((i) => `<p class="muted">${esc(i)}</p>`).join("")}${canPay ? '<div class="actions"><button class="ghost" id="void-settle">Void and redo</button></div>' : ""}` : preview ? `${preview.lines.map(money).join("") || '<p class="muted">No earnings or recoveries calculated.</p>'}${preview.info.map((i) => `<p class="muted">${esc(i)}</p>`).join("")}${canPay ? '<div class="actions"><button id="post-settle">Post to payroll…</button></div>' : ""}` : '<p class="muted">Payroll staff prepare the settlement.</p>'}` : ""}
@@ -739,6 +755,23 @@ async function exitView(id) {
   const on = (s, fn) =>
     document.querySelector(`dialog ${s}`)?.addEventListener("click", fn);
   const reopen = () => exitView(id);
+  on("#wd-approve", async () => {
+    try {
+      await api(`/admin/exits/${id}/withdrawal`, { decision: "approved" });
+      notice("Resignation withdrawn. The employee stays.");
+      document.querySelector("dialog")?.remove();
+      render();
+    } catch (err) {
+      notice(err.message, true);
+    }
+  });
+  on("#wd-decline", () =>
+    dialog("Decline the withdrawal", '<label class="full">Why<input name="note" maxlength="300" required></label>', async (b) => {
+      await api(`/admin/exits/${id}/withdrawal`, { decision: "declined", note: b.note });
+      notice("The employee has been told.");
+    }),
+  );
+  document.querySelectorAll("dialog [data-open-doc]").forEach((b) => (b.onclick = () => openFile(`/api/documents/${b.dataset.openDoc}/file`)));
   document.querySelectorAll("dialog [data-clear]").forEach(
     (c) =>
       (c.onchange = async () => {
@@ -903,7 +936,7 @@ async function myEmploymentPage(id) {
       ? `<div class="card"><h2>Joining checklist</h2>${tasks.map((t) => `<label class="check"><input type="checkbox" data-task="${t.id}" ${t.done ? "checked" : ""} ${t.owner === "employee" ? "" : "disabled"}> ${esc(t.title)} <small>${OWNER[t.owner]}${t.due_date ? ` · due ${fmtDate(t.due_date)}` : ""}</small></label>`).join("")}</div>`
       : "") +
     `<div class="card"><h2>Company items with me</h2>${assets.length ? assets.map((a) => `<div class="activity"><strong>${esc(a.name)}</strong> · ${esc(a.tag)}<br><small>Since ${fmtDate(a.assigned_at.slice(0, 10))}</small></div>`).join("") : empty("Nothing issued", "Laptops, cards and other items issued to you will be listed here.")}</div>` +
-    `<div class="card"><h2>Resignation</h2>${live ? `<p>${x.status === "pending" ? "Your resignation is waiting for HR." : `Accepted. Your last working day is <strong>${fmtDate(x.last_working_day)}</strong>.`}</p>${x.status === "pending" && x.initiated_by === "employee" ? '<div class="actions"><button class="ghost" id="withdraw">Withdraw resignation</button></div>' : ""}` : `${x ? `<p class="muted">Last exit: ${EXIT_STATUS[x.status]}.</p>` : ""}<p class="muted">The notice period is ${exit.notice_days} days.</p><div class="actions"><button class="secondary" id="resign">Resign</button></div>`}</div>`;
+    resignationCardHtml(exit);
   document.querySelectorAll("[data-task]:not([disabled])").forEach(
     (c) =>
       (c.onchange = async () => {
@@ -913,23 +946,105 @@ async function myEmploymentPage(id) {
         notice("Updated.");
       }),
   );
-  document.querySelector("#withdraw")?.addEventListener("click", async () => {
-    await api("/exit/withdraw", {});
-    notice("Withdrawn.");
-    render();
-  });
   await myChangesCard(id);
   await myRosterCard(id);
-  document.querySelector("#resign")?.addEventListener("click", () =>
+  wireResignation(exit, colleaguesFor);
+}
+const colleaguesFor = () => api("/directory").catch(() => []);
+// The resignation card: the form when there is none, otherwise where it stands step by step,
+// the clearance checklist, the exit interview and withdrawal.
+function resignationCardHtml(m) {
+  const x = m.exit;
+  const live = x && ["pending", "accepted"].includes(x.status);
+  if (!live)
+    return `<div class="card"><h2>Resignation</h2>${x ? `<p class="muted">Last exit: ${EXIT_STATUS[x.status]}.</p>` : ""}<p class="muted">Your notice period is ${m.notice_days} days. Your manager gives a view first, then HR confirms your last working day. You can withdraw until HR decides.</p><div class="actions"><button class="secondary" id="resign">Resign…</button></div></div>`;
+  const accepted = x.status === "accepted";
+  const cleared = (m.clearance ?? []).filter((c) => c.cleared).length,
+    total = (m.clearance ?? []).length;
+  const steps = [
+    ["Resignation sent", fmtDate(x.notice_given_on), "done"],
+    ["Manager's view", x.manager_view ? (x.manager_view === "accept" ? "Agreed" : "Would like you to stay") : "Waiting", x.manager_view || accepted ? "done" : "now"],
+    ["HR decision", accepted ? `Last day ${fmtDate(x.last_working_day)}` : "Waiting", accepted ? "done" : x.manager_view ? "now" : "next"],
+    ["Notice period", accepted ? (m.days_left ? `${m.days_left} day(s) left` : "Last day") : "", accepted ? (m.days_left ? "now" : "done") : "next"],
+    ["Clearance", total ? `${cleared} of ${total} done` : "", accepted ? (total && cleared === total ? "done" : "now") : "next"],
+    ["Exit interview", m.interview ? "Sent, thank you" : accepted ? "Waiting for you" : "", m.interview ? "done" : accepted ? "now" : "next"],
+    ["Full & final", m.settlement ? `With the ${monthLabel(m.settlement.pay_in_month)} payroll` : "", m.settlement ? "done" : "next"],
+  ];
+  return `<div class="card"><div class="card-head"><div><h2>Resignation</h2><p class="muted">${accepted ? `Accepted. Last working day <strong>${fmtDate(x.last_working_day)}</strong>${m.shortfall ? ` · notice not served: ${m.shortfall} day(s), which may be recovered in the settlement` : ""}.` : `Sent on ${fmtDate(x.notice_given_on)}${x.early_release ? " · early release asked" : ""}.`}</p></div></div><ol class="exit-steps">${steps
+    .map(([t, n, st]) => `<li class="${st}"><span class="exit-dot" aria-hidden="true"></span><div><strong>${esc(t)}</strong>${n ? `<small>${esc(n)}</small>` : ""}</div><span class="sr-only">${st === "done" ? "done" : st === "now" ? "in progress" : "to come"}</span></li>`)
+    .join("")}</ol>${x.decision_note ? `<p class="muted">HR: ${esc(x.decision_note)}</p>` : ""}${
+    accepted && total
+      ? `<h3>Clearance</h3>${m.clearance.map((c) => `<div class="kv"><span>${esc(c.item)}<small>${esc(c.department)}</small></span><span class="pill ${c.cleared ? "" : "neutral"}">${c.cleared ? "Done" : "Pending"}</span></div>`).join("")}`
+      : ""
+  }<div class="actions">${accepted && !m.interview ? '<button id="exit-interview">Fill in the exit interview</button>' : ""}${
+    x.initiated_by === "employee"
+      ? x.withdraw_requested_at
+        ? `<span class="muted">You asked to withdraw on ${fmtDate(x.withdraw_requested_at.slice(0, 10))}. HR will reply.</span>`
+        : `<button class="ghost" id="withdraw">${accepted ? "Ask to withdraw…" : "Withdraw resignation"}</button>`
+      : ""
+  }</div></div>`;
+}
+function wireResignation(m, colleaguesFor) {
+  const x = m.exit;
+  document.querySelector("#resign")?.addEventListener("click", async () => {
+    const people = (await colleaguesFor()).filter((p) => p.id !== me.id);
+    const end = new Date(Date.now() + m.notice_days * 86400000).toISOString().slice(0, 10);
     dialog(
       "Resign",
-      `<p class="full muted">Your notice period is ${exit.notice_days} days. HR will confirm your last working day.</p>${input("requested_last_day", "Preferred last working day (optional)", "", `type="date" min="${today()}"`)}<label class="full">Reason<input name="reason" maxlength="500" required></label>`,
+      `<p class="full muted">If you resign today your ${m.notice_days}-day notice ends on ${fmtDate(end)}. A last day before that asks for early release; HR decides, and unserved notice may be recovered in your settlement.</p>${sel("reason_category", "Main reason", Object.entries(m.reasons))}<label class="full">In your words<textarea name="reason" rows="3" maxlength="1000" required></textarea></label>${input("requested_last_day", "Last working day you would like (optional)", "", `type="date" min="${today()}"`)}<label>Hand over to<select name="handover_to"><option value="">—</option>${people.map((p) => `<option value="${p.id}">${esc(p.name)}${p.employee_code ? ` (${esc(p.employee_code)})` : ""}</option>`).join("")}</select></label><label class="full">Handover notes (optional)<textarea name="handover_notes" rows="2" maxlength="2000"></textarea></label>${input("personal_email", "Personal email, for your relieving letter", "", 'type="email" maxlength="150"')}${input("personal_phone", "Personal phone (optional)", "", 'maxlength="20" inputmode="tel"')}<label class="full">Signed letter (optional; PDF, JPG or PNG up to 2 MB)<input type="file" name="letter" accept="application/pdf,image/jpeg,image/png"></label>`,
       async (b) => {
+        let letter;
+        const file = document.querySelector('dialog [name="letter"]')?.files[0];
+        if (file) {
+          if (file.size > 2 * 1024 * 1024) throw new Error("The letter can be up to 2 MB.");
+          letter = (await api("/documents", { kind: "other", name: "Resignation letter", mime: file.type, data: await toB64(file) })).id;
+        }
+        if (!confirm("Submit your resignation? Your manager and HR are told straight away.")) throw new Error("Not sent.");
         await api("/exit/resign", {
+          reason_category: b.reason_category,
           reason: b.reason,
           requested_last_day: b.requested_last_day || undefined,
+          handover_to: b.handover_to ? Number(b.handover_to) : undefined,
+          handover_notes: b.handover_notes || undefined,
+          personal_email: b.personal_email || undefined,
+          personal_phone: b.personal_phone || undefined,
+          letter_document_id: letter,
         });
-        notice("Your resignation has been sent to HR.");
+        notice("Your resignation has been sent to your manager and HR.");
+      },
+    );
+  });
+  document.querySelector("#withdraw")?.addEventListener("click", (e) => {
+    if (x.status === "pending")
+      return busy(e.currentTarget, async () => {
+        if (!confirm("Withdraw your resignation?")) return;
+        await api("/exit/withdraw", {});
+        notice("Your resignation was withdrawn.");
+        render();
+      });
+    dialog("Ask to withdraw your resignation", '<label class="full">Why would you like to stay?<textarea name="reason" rows="3" maxlength="500" required></textarea></label>', async (b) => {
+      await api("/exit/withdraw", { reason: b.reason });
+      notice("HR has your request.");
+    });
+  });
+  document.querySelector("#exit-interview")?.addEventListener("click", () =>
+    dialog(
+      "Exit interview",
+      `<p class="full muted">Your honest answers help the company improve. HR reads them; your manager does not. Rate at least three areas, 1 (poor) to 5 (excellent).</p>${Object.entries(m.areas)
+        .map(([k, l]) => sel(`r_${k}`, l, [["", "—"], ...[1, 2, 3, 4, 5].map((n) => [String(n), `${n}`])]))
+        .join("")}${Object.entries(m.questions)
+        .map(([k, l]) => `<label class="full">${esc(l)}<textarea name="q_${k}" rows="2" maxlength="2000" ${k === "main_reason" ? "required" : ""}></textarea></label>`)
+        .join("")}${sel("rejoin", "Would you work here again?", [["", "—"], ["yes", "Yes"], ["no", "No"]])}${sel("recommend", "Would you recommend us?", [["", "—"], ["yes", "Yes"], ["no", "No"]])}`,
+      async (b) => {
+        const ratings = Object.fromEntries(Object.keys(m.areas).filter((k) => b[`r_${k}`]).map((k) => [k, Number(b[`r_${k}`])]));
+        const answers = Object.fromEntries(Object.keys(m.questions).filter((k) => b[`q_${k}`]).map((k) => [k, b[`q_${k}`]]));
+        await api("/exit/interview", {
+          ratings,
+          answers,
+          would_rejoin: b.rejoin ? b.rejoin === "yes" : undefined,
+          would_recommend: b.recommend ? b.recommend === "yes" : undefined,
+        });
+        notice("Thank you for your feedback.");
       },
     ),
   );
