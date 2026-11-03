@@ -23,6 +23,16 @@ import { SupervisorScreen } from "./Supervisor";
 import { ClaimsScreen, TaxScreen } from "./Money";
 import { ResignationScreen } from "./Exit";
 import { LearningScreen, PerformanceScreen } from "./Growth";
+import {
+  AttLogScreen,
+  AttendanceSummaryScreen,
+  HolidaysScreen,
+  LeaveHub,
+  MultipleOdScreen,
+  OdScreen,
+  OptionalHolidayScreen,
+  RegularizationScreen,
+} from "./Daily";
 
 // Self-service screens for the phone: leave, messages, the Laxmi assistant,
 // payslips, attendance requests, directory, helpdesk, alerts and profile. Everything talks to the same API as
@@ -45,25 +55,6 @@ type Props = {
   onPassword: () => void;
 };
 
-type Balance = {
-  leave_type_id: number;
-  name: string;
-  code: string;
-  pending?: number;
-  balance: number | null;
-  available: number | null;
-  unlimited: boolean;
-};
-type LeaveRequest = {
-  id: number;
-  type_name: string;
-  from_date: string;
-  to_date: string;
-  days: number;
-  status: string;
-  half_day?: string | null;
-};
-type Holiday = { date: string; name: string };
 type Payslip = {
   run_id: number;
   month: string;
@@ -193,6 +184,11 @@ type BotEntry = { key: string; question?: string; answer?: BotAnswer; error?: st
 export const SECTIONS = [
   "Home",
   "My Attendance",
+  "Attendance Summary",
+  "OD",
+  "Multiple OD",
+  "Holidays",
+  "Optional Holiday",
   "Leave",
   "Messages",
   "Ask Laxmi",
@@ -222,32 +218,52 @@ export const MENU: [string, [Section | "Punch", string][]][] = [
     "Attendance",
     [
       ["Punch", "Punch In / Out"],
-      ["My Attendance", "My Attendance"],
+      ["My Attendance", "Attendance History"],
+      ["Attendance Summary", "Attendance Summary"],
       ["Requests", "Regularization"],
-      ["OD Log History", "OD Log History"],
       ["Overtime", "Overtime"],
     ],
   ],
-  ["Leave", [["Leave", "My Leaves"]]],
-  ["Supervisor", [["Supervisor", "Approvals & Team"]]],
   [
-    "TDS",
+    "On duty (OD)",
+    [
+      ["OD", "OD"],
+      ["Multiple OD", "Multiple OD"],
+      ["OD Log History", "OD Log History"],
+    ],
+  ],
+  [
+    "Leave & holidays",
+    [
+      ["Leave", "Leave"],
+      ["Holidays", "Holiday List"],
+      ["Optional Holiday", "Optional Holiday"],
+    ],
+  ],
+  ["Approvals", [["Supervisor", "Approvals & Team"]]],
+  [
+    "Pay & tax",
     [
       ["Payslips", "Payslips & Form 16"],
       ["Tax Declaration", "Declaration & Bills"],
+      ["My Claims", "My Claims"],
     ],
   ],
-  ["Reimbursement", [["My Claims", "My Claims"]]],
   [
     "Employee",
     [
-      ["Profile", "My Profile"],
-      ["Directory", "Directory & Referrals"],
+      ["Profile", "Profile"],
+      ["Directory", "Employee Directory"],
       ["Resignation", "Resignation"],
     ],
   ],
-  ["PMR", [["Performance", "Goals & Reviews"]]],
-  ["LMS", [["Learning", "My Learning"]]],
+  [
+    "Growth",
+    [
+      ["Performance", "Goals & Reviews"],
+      ["Learning", "My Learning"],
+    ],
+  ],
   [
     "Connect",
     [
@@ -276,12 +292,6 @@ const monthText = (m: string) =>
     year: "numeric",
     timeZone: "UTC",
   }).format(new Date(m + "-01T00:00:00Z"));
-const KIND: Record<string, string> = {
-  missed_punch: "Missed punch",
-  wrong_punch: "Wrong punch",
-  on_duty: "On duty",
-  work_from_home: "Work from home",
-};
 
 function Btn({
   title,
@@ -385,8 +395,13 @@ export default function More({
           onOdPunch={onPunch}
         />
       )}
-      {section === "My Attendance" && <MyAttendanceScreen api={api} />}
-      {section === "Leave" && <LeaveScreen api={api} />}
+      {section === "My Attendance" && <AttLogScreen api={api} />}
+      {section === "Attendance Summary" && <AttendanceSummaryScreen api={api} />}
+      {section === "OD" && <OdScreen api={api} onOdPunch={onPunch} onSection={onSection} />}
+      {section === "Multiple OD" && <MultipleOdScreen api={api} />}
+      {section === "Holidays" && <HolidaysScreen api={api} />}
+      {section === "Optional Holiday" && <OptionalHolidayScreen api={api} />}
+      {section === "Leave" && <LeaveHub api={api} />}
       {section === "Messages" && (
         <MessagesScreen
           api={api}
@@ -397,7 +412,7 @@ export default function More({
       )}
       {section === "Ask Laxmi" && <LaxmiScreen api={api} onGoto={onSection} />}
       {section === "Payslips" && <PayslipsScreen api={api} files={files} />}
-      {section === "Requests" && <RequestsScreen api={api} />}
+      {section === "Requests" && <RegularizationScreen api={api} />}
       {section === "OD Log History" && <OdLogScreen api={api} />}
       {section === "Directory" && <DirectoryScreen api={api} />}
       {section === "Helpdesk" && <HelpdeskScreen api={api} />}
@@ -414,6 +429,7 @@ export default function More({
       {section === "Profile" && (
         <ProfileWithDetails
           api={api}
+          files={files}
           onSignOut={onSignOut}
           onPassword={onPassword}
         />
@@ -505,16 +521,14 @@ function PunchButton({
   );
 }
 
-// The top of Home: the punch-in time, the punch button, and two tiles.
-// OD Punch In opens the punch screen, which asks for the purpose.
+// Today's attendance on Home: punch-in and punch-out times beside one punch button, with
+// the OD buttons underneath when OD is switched on for the person.
 function PunchHero({
   today,
-  leaves,
   onSlidePunch,
   onOdPunch,
 }: {
   today: TodayInfo | null;
-  leaves: number | null;
   onSlidePunch: () => Promise<void>;
   onOdPunch: () => void;
 }) {
@@ -522,36 +536,38 @@ function PunchHero({
     done = today?.todayShift;
   const odOpen = open?.source === "od_punch",
     odDone = !open && done?.od_purpose != null;
-  const date = new Intl.DateTimeFormat("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }).format(new Date());
+  const inAt = open?.in_at ?? done?.in_at ?? null;
   return (
     <View style={s.hero}>
       <View style={s.heroBlob} />
-      <View style={s.heroBlob2} />
-      <View style={s.timeBox}>
-        <Text style={s.timeLabel}>{open ? "Time In" : done ? "Time Out" : "Not punched in"}</Text>
-        <Text style={s.timeValue}>
-          {open ? clock(open.in_at) : done?.out_at ? clock(done.out_at) : "--:--"}
-        </Text>
+      <Text style={s.heroTitle}>Today&apos;s attendance</Text>
+      <View style={s.heroRow}>
+        <View style={{ flex: 1, gap: 6 }}>
+          <Text style={s.heroLine}>
+            ↓ Punch in <Text style={s.heroTime}>{inAt ? clock(inAt) : "--:--"}</Text>
+          </Text>
+          <Text style={s.heroLine}>
+            ↑ Punch out <Text style={s.heroTime}>{done?.out_at ? clock(done.out_at) : "--:--"}</Text>
+          </Text>
+        </View>
+        <View style={{ flex: 1, minWidth: 140 }}>
+          <PunchButton
+            label={
+              odOpen
+                ? "OD Punch Out"
+                : odDone
+                  ? "OD sent"
+                  : open
+                    ? "↑ Punch Out"
+                    : done
+                      ? "Update Punch Out"
+                      : "↓ Punch In"
+            }
+            disabled={!today || odDone}
+            onPress={onSlidePunch}
+          />
+        </View>
       </View>
-      <PunchButton
-        label={
-          odOpen
-            ? "OD Punch Out"
-            : odDone
-              ? "OD sent for approval"
-              : open
-                ? "Punch Out"
-                : done
-                  ? "Update Punch Out"
-                  : "Punch In"
-        }
-        disabled={!today || odDone}
-        onPress={onSlidePunch}
-      />
       {/* OD Punch In before the day starts; OD Out / OD In during a normal shift. */}
       {today?.od_allowed && ((!open && !done) || (open && !odOpen)) && (
         <Pressable
@@ -568,22 +584,57 @@ function PunchHero({
           </Text>
         </Pressable>
       )}
-      <View style={s.tiles}>
-        <View style={[s.tile, { backgroundColor: "#3aa0f0" }]}>
-          <Text style={s.tileLabel}>Leaves Remaining</Text>
-          <Text style={s.tileValue}>{leaves ?? "—"}</Text>
-        </View>
-        <View
-          style={[
-            s.tile,
-            { backgroundColor: open ? "#5fcf80" : done ? "#8f9bd9" : "#f0a04b" },
-          ]}
+    </View>
+  );
+}
+
+// Quick links on Home, a group per page, swiped sideways.
+const QUICK: [string, string, [Section, string, string][]][] = [
+  ["Attendance", "◷", [["My Attendance", "Att log", "▤"], ["Requests", "Regularize", "✎"], ["Attendance Summary", "Summary", "◔"]]],
+  ["On duty", "✈", [["OD", "OD", "✈"], ["Multiple OD", "Multiple OD", "▦"], ["OD Log History", "OD log", "↺"]]],
+  ["Leave", "☼", [["Leave", "Leave", "☼"], ["Holidays", "Holidays", "✦"], ["Optional Holiday", "Optional holiday", "☑"]]],
+  ["Pay", "₹", [["Payslips", "Payslip", "₹"], ["Tax Declaration", "Tax", "❒"], ["My Claims", "Claims", "⎘"]]],
+  ["Connect", "✆", [["Ask Laxmi", "Ask Laxmi", "✦"], ["Messages", "Messages", "✉"], ["Helpdesk", "Helpdesk", "?"]]],
+];
+function QuickLinks({ onSection }: { onSection: (s: Section) => void }) {
+  const [width, setWidth] = useState(0);
+  const [pageNo, setPageNo] = useState(0);
+  return (
+    <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)} style={{ gap: 10 }}>
+      <Text style={s.sectionTitle}>Quick links</Text>
+      {width > 0 && (
+        <ScrollView
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          onMomentumScrollEnd={(e) => setPageNo(Math.round(e.nativeEvent.contentOffset.x / width))}
         >
-          <Text style={s.tileLabel}>{date}</Text>
-          <Text style={s.tileValue}>
-            {open ? "Working" : done ? "Done" : "Not in"}
-          </Text>
-        </View>
+          {QUICK.map(([group, icon, links]) => (
+            <View key={group} style={[s.card, s.quickPage, { width }]}>
+              <View style={s.quickHead}>
+                <Text style={s.quickHeadIcon}>{icon}</Text>
+                <Text style={s.heading}>{group}</Text>
+              </View>
+              <View style={s.quickRow}>
+                {links.map(([id, label, glyph]) => (
+                  <Pressable key={id} accessibilityRole="button" style={s.quickLink} onPress={() => onSection(id)}>
+                    <View style={s.quickIcon}>
+                      <Text style={s.quickGlyph}>{glyph}</Text>
+                    </View>
+                    <Text style={s.quickText} numberOfLines={2}>
+                      {label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+      <View style={s.dots} accessibilityLabel={`Page ${pageNo + 1} of ${QUICK.length}`}>
+        {QUICK.map(([g], i) => (
+          <View key={g} style={[s.dotPage, i === pageNo && s.dotPageOn]} />
+        ))}
       </View>
     </View>
   );
@@ -615,12 +666,6 @@ type Announcement = {
   created_at: string;
   author: string | null;
 };
-type HolidayRow = {
-  date: string;
-  name: string;
-  optional?: boolean;
-  branch?: string;
-};
 type TodayInfo = {
   user?: { od_punch?: boolean };
   od_allowed?: boolean;
@@ -628,6 +673,7 @@ type TodayInfo = {
   openShift: { in_at: string; workplace_name: string; source?: string } | null;
   todayShift: { in_at: string; out_at: string | null; od_purpose?: string | null } | null;
   workplace: { name: string } | null;
+  shift?: { name: string; start: string; earliest_out: string } | null;
 };
 const MONTHS = [
   "January",
@@ -643,8 +689,6 @@ const MONTHS = [
   "November",
   "December",
 ];
-const DOTS = ["#222", "#c95bb8", "#d9303e", "#1e9be0", "#2f9d62", "#e08a1e"];
-const dmy = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
 const initialsOf = (name: string) =>
   name
     .split(" ")
@@ -671,188 +715,83 @@ function HomeScreen({
   onSlidePunch: () => Promise<void>;
   onOdPunch: () => void;
 }) {
-  const year = new Date().getFullYear();
   const home = useLoad(() => api<HomeData>("/home"));
-  const bal = useLoad(() => api<Balance[]>("/leave/balances"));
   const news = useLoad(() => api<Announcement[]>("/announcements"));
-  const hol = useLoad(() => api<HolidayRow[]>("/holidays?year=" + year));
   const today = useLoad(() => api<TodayInfo>("/me"));
-  const [optional, setOptional] = useState(false);
-  const [allHolidays, setAllHolidays] = useState(false);
-  const [code, setCode] = useState(""),
-    [name, setName] = useState("");
-  const [found, setFound] = useState<Person[] | null>(null);
-  const search = async () => {
-    const c = code.trim().toLowerCase(),
-      n = name.trim().toLowerCase();
-    if (!c && !n) return;
-    try {
-      const rows = await api<Person[]>(
-        "/directory?q=" + encodeURIComponent(c || n),
-      );
-      setFound(
-        rows.filter(
-          (p) =>
-            (!c || (p.employee_code ?? "").toLowerCase().includes(c)) &&
-            (!n || p.name.toLowerCase().includes(n)),
-        ),
-      );
-    } catch (e) {
-      Alert.alert("Could not search", errorText(e));
-    }
-  };
-  const list = bal.data ?? [];
-  const total = list
-    .filter((b) => !b.unlimited)
-    .reduce((n, b) => n + Number(b.available ?? 0), 0);
-  const holidays = (hol.data ?? []).filter((h) => !!h.optional === optional);
-  const node = (p: HomePerson, me?: boolean) => (
-    <View key={p.id} style={[s.orgNode, me && s.orgMe]}>
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const me = home.data?.me;
+  const t = today.data;
+  const status = t?.openShift
+    ? t.openShift.source === "od_punch"
+      ? "On OD"
+      : "Working"
+    : t?.todayShift
+      ? "Done for today"
+      : "Not punched in";
+  const node = (p: HomePerson, mine?: boolean) => (
+    <View key={p.id} style={[s.orgNode, mine && s.orgMe]}>
       <Text style={s.strong}>{p.name}</Text>
       <Text style={s.note}>{p.designation || p.employee_code || ""}</Text>
     </View>
   );
   return (
     <>
+      <View style={s.greetRow}>
+        <View style={s.greetAvatar}>
+          <Text style={s.greetAvatarText}>{me ? initialsOf(me.name) : ""}</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={s.note}>{greeting}</Text>
+          <Text style={s.greetName}>{me?.name ?? " "}</Text>
+        </View>
+      </View>
+      <View style={s.strip}>
+        <Text style={s.stripText}>
+          {new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date())}
+        </Text>
+        <View style={s.stripDivider} />
+        <Text style={s.stripText} numberOfLines={1}>
+          {t?.shift ? `${t.shift.name} ${t.shift.start}` : "—"}
+        </Text>
+        <View style={s.stripDivider} />
+        <Text style={[s.stripText, { color: "#c8102e" }]}>{status}</Text>
+      </View>
       <PunchHero
-        today={today.data}
-        leaves={bal.data ? total : null}
+        today={t}
         onSlidePunch={async () => {
           await onSlidePunch();
           void today.reload();
-          void bal.reload();
         }}
         onOdPunch={onOdPunch}
       />
+      <QuickLinks onSection={onSection} />
       <View style={s.card}>
-        <Text style={s.heading}>Employee Search</Text>
-        <Field label="Code" value={code} onChange={setCode} />
-        <Field label="Name" value={name} onChange={setName} />
-        <Btn title="Search" onPress={() => void search()} />
-        {found?.length === 0 && <Text style={s.note}>Nobody found.</Text>}
-        {(found ?? []).slice(0, 30).map((p) => (
-          <View key={p.id} style={s.row}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.strong}>
-                {p.name}
-                {p.employee_code ? " (" + p.employee_code + ")" : ""}
-              </Text>
-              <Text style={s.note}>
-                {[p.designation_name, p.department_name]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </Text>
-            </View>
-            {!!p.phone && (
-              <Text
-                style={s.link}
-                onPress={() => void Linking.openURL("tel:" + p.phone)}
-              >
-                Call
-              </Text>
-            )}
-          </View>
-        ))}
-      </View>
-      <View style={s.card}>
-        <Text style={s.heading}>My Leave Balance</Text>
-        <View style={s.row}>
-          <Text style={s.note}>Leave Summary For Year</Text>
-          <Text style={s.strong}>{year}</Text>
-        </View>
-        <Status loading={bal.loading} error={bal.error} />
-        {list.map((b, i) => (
-          <View key={b.leave_type_id} style={s.row}>
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <View
-                  style={[s.dot, { backgroundColor: DOTS[i % DOTS.length] }]}
-                />
-                <Text style={s.strong}>
-                  {b.code ? b.code + " (" + b.name + ")" : b.name}
-                </Text>
-              </View>
-              <Text style={[s.note, { marginLeft: 20 }]}>
-                {b.unlimited ? "No limit" : (b.available ?? 0) + " Leaves"}
-              </Text>
-            </View>
-            <Text style={s.applied}>{(b.pending ?? 0) + " Applied"}</Text>
-          </View>
-        ))}
-        <View style={s.row}>
-          <Text style={s.strong}>Total:</Text>
-          <Text style={s.strong}>{total} Days</Text>
-        </View>
-        <Btn title="Apply for leave" secondary onPress={() => onSection("Leave")} />
-      </View>
-      <View style={s.card}>
-        <Text style={s.heading}>Company Announcement</Text>
+        <Text style={s.heading}>📣 Announcements</Text>
         <Status loading={news.loading} error={news.error} />
         {(news.data ?? []).map((a) => (
           <View key={"a" + a.id} style={s.feed}>
             <Text style={s.feedTitle}>
-              {a.pinned ? "📌 " : "📣 "}
+              {a.pinned ? "📌 " : ""}
               {a.title}
             </Text>
             <Text style={s.body}>{a.body}</Text>
-            <Text style={s.note}>
-              {(a.author ?? "") + " · " + dateText(a.created_at)}
-            </Text>
+            <Text style={s.note}>{(a.author ?? "") + " · " + dateText(a.created_at)}</Text>
           </View>
         ))}
         {(home.data?.joiners ?? []).map((j) => (
           <View key={"j" + j.id} style={s.feed}>
-            <Text style={s.feedTitle}>👤 New Employee</Text>
+            <Text style={s.feedTitle}>👤 New colleague</Text>
             <Text style={s.body}>
               {j.name}
               {j.employee_code ? " (" + j.employee_code + ")" : ""} has joined
-              {j.department ? " in " + j.department + " department" : ""}
+              {j.department ? " in " + j.department : ""}
             </Text>
             <Text style={s.note}>{dateText(j.date_of_joining)}</Text>
           </View>
         ))}
-        {!news.loading &&
-          (news.data ?? []).length === 0 &&
-          (home.data?.joiners ?? []).length === 0 && (
-            <Text style={s.note}>No announcements yet.</Text>
-          )}
-      </View>
-      <View style={s.card}>
-        <Text style={s.heading}>Holiday List</Text>
-        <View style={s.wrap}>
-          {[false, true].map((o) => (
-            <Pressable
-              key={String(o)}
-              onPress={() => setOptional(o)}
-              style={[s.chip, optional === o && s.chipOn]}
-            >
-              <Text style={[s.chipText, optional === o && { color: "#fff" }]}>
-                {o ? "Optional Holiday" : "Fixed Holiday"}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-        <Status loading={hol.loading} error={hol.error} />
-        {holidays.slice(0, allHolidays ? undefined : 3).map((h) => (
-          <View key={h.date + h.name} style={s.row}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.strong}>{h.name}</Text>
-              <Text style={s.note}>{dmy(h.date)}</Text>
-            </View>
-            <Text style={s.note}>{h.branch ?? ""}</Text>
-          </View>
-        ))}
-        {holidays.length > 3 && (
-          <Btn
-            title={allHolidays ? "Show less" : "Expand (" + holidays.length + ")"}
-            secondary
-            onPress={() => setAllHolidays(!allHolidays)}
-          />
-        )}
-        {!hol.loading && holidays.length === 0 && (
-          <Text style={s.note}>
-            No {optional ? "optional " : ""}holidays added for {year}.
-          </Text>
+        {!news.loading && (news.data ?? []).length === 0 && (home.data?.joiners ?? []).length === 0 && (
+          <Text style={s.note}>No announcements yet.</Text>
         )}
       </View>
       <View style={s.card}>
@@ -865,9 +804,7 @@ function HomeScreen({
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.strong}>{p.name}</Text>
-              <Text style={s.note}>
-                {[p.designation, p.branch].filter(Boolean).join(" · ")}
-              </Text>
+              <Text style={s.note}>{[p.designation, p.branch].filter(Boolean).join(" · ")}</Text>
             </View>
             <Text style={s.note}>
               {p.day} {MONTHS[(home.data?.month ?? 1) - 1]}
@@ -875,22 +812,18 @@ function HomeScreen({
           </View>
         ))}
         {!home.loading && (home.data?.birthdays ?? []).length === 0 && (
-          <Text style={s.note}>
-            No birthdays in {MONTHS[(home.data?.month ?? 1) - 1]}.
-          </Text>
+          <Text style={s.note}>No birthdays in {MONTHS[(home.data?.month ?? 1) - 1]}.</Text>
         )}
       </View>
       <View style={s.card}>
-        <Text style={s.heading}>Organisation Structure</Text>
+        <Text style={s.heading}>My team</Text>
         {home.data && (
           <View style={{ alignItems: "center", gap: 6 }}>
             {home.data.org.manager && node(home.data.org.manager)}
             {home.data.org.manager && <View style={s.orgLine} />}
             {home.data.me && node(home.data.me, true)}
             {home.data.org.reports.length > 0 && <View style={s.orgLine} />}
-            <View style={[s.wrap, { justifyContent: "center" }]}>
-              {home.data.org.reports.map((p) => node(p))}
-            </View>
+            <View style={[s.wrap, { justifyContent: "center" }]}>{home.data.org.reports.map((p) => node(p))}</View>
           </View>
         )}
       </View>
@@ -900,386 +833,7 @@ function HomeScreen({
 }
 
 // ---- my attendance --------------------------------------------------------------------------
-type ShiftRow = {
-  id: number;
-  workplace_name: string;
-  in_at: string;
-  out_at: string | null;
-  day_type?: "full_day" | "half_day" | null;
-};
-function MyAttendanceScreen({ api }: { api: Api }) {
-  const home = useLoad(() => api<HomeData>("/home"));
-  const shifts = useLoad(() => api<ShiftRow[]>("/shifts"));
-  const [size, setSize] = useState(10);
-  const [pageNo, setPageNo] = useState(0);
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
-  const p = home.data?.me;
-  const all = shifts.data ?? [];
-  const pages = Math.max(1, Math.ceil(all.length / size));
-  const rows = all.slice(pageNo * size, pageNo * size + size);
-  const hhmm = (ms: number) =>
-    String(Math.floor(ms / 3600000)).padStart(2, "0") +
-    ":" +
-    String(Math.floor((ms % 3600000) / 60000)).padStart(2, "0");
-  return (
-    <>
-      <View style={s.card}>
-        <Text style={s.heading}>Attendance Details</Text>
-        {p && (
-          <>
-            <Text style={s.strong}>{p.name}</Text>
-            {(
-              [
-                ["Employee Code", p.employee_code],
-                ["Department", p.department],
-                ["Designation", p.designation],
-                ["Location", p.branch],
-              ] as const
-            ).map(([label, value]) => (
-              <View key={label} style={s.row}>
-                <Text style={s.note}>{label}</Text>
-                <Text style={s.strong}>{value || "—"}</Text>
-              </View>
-            ))}
-          </>
-        )}
-        <Text style={s.clock}>
-          {new Intl.DateTimeFormat("en-GB", {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          }).format(now)}
-        </Text>
-      </View>
-      <View style={s.card}>
-        <Status loading={shifts.loading} error={shifts.error} />
-        {!shifts.loading && all.length === 0 && (
-          <Text style={s.note}>Your punches appear here.</Text>
-        )}
-        {rows.map((r) => {
-          const code = !r.out_at ? "W" : r.day_type === "half_day" ? "HD" : "P";
-          return (
-            <View key={r.id} style={s.row}>
-              <View style={{ flex: 1 }}>
-                <Text style={s.strong}>{dateText(r.in_at)}</Text>
-                <Text style={s.note}>
-                  {"In " +
-                    clock(r.in_at) +
-                    " · Out " +
-                    (r.out_at ? clock(r.out_at) : "—") +
-                    (r.out_at
-                      ? " · " +
-                        hhmm(Date.parse(r.out_at) - Date.parse(r.in_at)) +
-                        " h"
-                      : "")}
-                </Text>
-                <Text style={s.note}>{r.workplace_name}</Text>
-              </View>
-              <Pill
-                text={
-                  code === "P" ? "Present" : code === "HD" ? "Half Day" : "Working"
-                }
-              />
-            </View>
-          );
-        })}
-        {all.length > 0 && (
-          <View style={[s.row, { borderBottomWidth: 0 }]}>
-            <Btn
-              title="Prev"
-              secondary
-              disabled={pageNo === 0}
-              onPress={() => setPageNo(pageNo - 1)}
-            />
-            <Text style={s.note}>
-              Page {pageNo + 1} of {pages}
-            </Text>
-            <Btn
-              title="Next"
-              secondary
-              disabled={pageNo + 1 >= pages}
-              onPress={() => setPageNo(pageNo + 1)}
-            />
-          </View>
-        )}
-        {all.length > 10 && (
-          <View style={s.wrap}>
-            {[10, 20, 50].map((n) => (
-              <Pressable
-                key={n}
-                onPress={() => {
-                  setSize(n);
-                  setPageNo(0);
-                }}
-                style={[s.chip, size === n && s.chipOn]}
-              >
-                <Text style={[s.chipText, size === n && { color: "#fff" }]}>
-                  {n} per page
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        )}
-      </View>
-    </>
-  );
-}
-
 // ---- leave ----------------------------------------------------------------------------------
-function LeaveScreen({ api }: { api: Api }) {
-  const year = new Date().getFullYear();
-  const bal = useLoad(() => api<Balance[]>("/leave/balances"));
-  const reqs = useLoad(() => api<LeaveRequest[]>("/leave/requests"));
-  const hol = useLoad(() => api<Holiday[]>("/holidays?year=" + year));
-  const [form, setForm] = useState(false);
-  const [typeId, setTypeId] = useState<number | null>(null);
-  const [from, setFrom] = useState(""),
-    [to, setTo] = useState(""),
-    [reason, setReason] = useState("");
-  const [half, setHalf] = useState<"" | "first" | "second">("");
-  const [address, setAddress] = useState(""),
-    [contact, setContact] = useState("");
-  const [cover, setCover] = useState<{ id: number; name: string } | null>(
-    null,
-  );
-  const [picking, setPicking] = useState(false);
-  const [medical, setMedical] = useState<Picked | null>(null);
-  const [working, setWorking] = useState(false);
-  const options =
-    bal.data?.map((b) => ({ id: b.leave_type_id, name: b.name })) ?? [];
-  const today = new Date().toISOString().slice(0, 10);
-  const upcoming = (hol.data ?? []).filter((h) => h.date >= today).slice(0, 6);
-  return (
-    <>
-      <View style={s.card}>
-        <Text style={s.heading}>Leave balance</Text>
-        <Status loading={bal.loading} error={bal.error} />
-        {(bal.data ?? []).map((b) => (
-          <View key={b.leave_type_id} style={s.row}>
-            <Text style={s.strong}>{b.name}</Text>
-            <Text style={s.note}>
-              {b.unlimited
-                ? "Unlimited"
-                : (b.available ?? 0) + " days available"}
-            </Text>
-          </View>
-        ))}
-        <Btn
-          title={form ? "Close" : "Apply for leave"}
-          secondary={form}
-          onPress={() => setForm(!form)}
-        />
-        {form && (
-          <View style={{ gap: 12 }}>
-            <Text style={s.label}>Leave type</Text>
-            <View style={s.wrap}>
-              {options.map((o) => (
-                <Pressable
-                  key={o.id}
-                  onPress={() => setTypeId(o.id)}
-                  style={[s.chip, typeId === o.id && s.chipOn]}
-                >
-                  <Text
-                    style={[s.chipText, typeId === o.id && { color: "#fff" }]}
-                  >
-                    {o.name}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-            <Field
-              label="From (YYYY-MM-DD)"
-              value={from}
-              onChange={setFrom}
-              placeholder={today}
-            />
-            <Field
-              label="To (YYYY-MM-DD)"
-              value={to}
-              onChange={setTo}
-              placeholder={today}
-            />
-            <View style={s.wrap}>
-              {(["", "first", "second"] as const).map((h) => (
-                <Pressable
-                  key={h}
-                  onPress={() => setHalf(h)}
-                  style={[s.chip, half === h && s.chipOn]}
-                >
-                  <Text style={[s.chipText, half === h && { color: "#fff" }]}>
-                    {h === ""
-                      ? "Full day(s)"
-                      : h === "first"
-                        ? "First half"
-                        : "Second half"}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-            <Field
-              label="For the following reason"
-              value={reason}
-              onChange={setReason}
-              multiline
-            />
-            <Field
-              label="My address on leave will be"
-              value={address}
-              onChange={setAddress}
-            />
-            <Field
-              label="Contact No."
-              value={contact}
-              onChange={setContact}
-              keyboardType="phone-pad"
-            />
-            <Text style={s.label}>In my absence, work handled by</Text>
-            <Pressable onPress={() => setPicking(!picking)} style={s.input}>
-              <Text style={{ color: cover ? "#2a2c3a" : "#9a9cab" }}>
-                {cover ? cover.name : "Choose a colleague (optional)"}
-              </Text>
-            </Pressable>
-            {picking && (
-              <PeoplePicker
-                api={api}
-                onPick={(id, name) => {
-                  setCover({ id, name });
-                  setPicking(false);
-                }}
-              />
-            )}
-            <Text style={s.label}>Upload Medical Document (optional)</Text>
-            <Pressable
-              style={s.input}
-              onPress={async () => {
-                try {
-                  const f = await pickFile();
-                  if (f) setMedical(f);
-                } catch (e) {
-                  Alert.alert("Could not attach", errorText(e));
-                }
-              }}
-            >
-              <Text style={{ color: medical ? "#2a2c3a" : "#9a9cab" }}>
-                {medical ? "📎 " + medical.name : "Choose a PDF or photo (up to 2 MB)"}
-              </Text>
-            </Pressable>
-            <Btn
-              title={working ? "Sending…" : "Send request"}
-              disabled={working || !typeId || !from}
-              onPress={async () => {
-                setWorking(true);
-                const ok = await attempt(
-                  async () =>
-                    api("/leave/requests", {
-                      document_id: medical
-                        ? (
-                            await api<{ id: number }>("/documents", {
-                              kind: "medical",
-                              name: "Medical, leave from " + from,
-                              mime: medical.mime,
-                              data: medical.data,
-                            })
-                          ).id
-                        : undefined,
-                      leave_type_id: typeId,
-                      from_date: from,
-                      to_date: half ? from : to || from,
-                      half_day: half || undefined,
-                      reason: reason || undefined,
-                      address_on_leave: address || undefined,
-                      contact_on_leave: contact || undefined,
-                      handover_to: cover?.id,
-                    }),
-                  "Leave request sent for approval.",
-                );
-                setWorking(false);
-                if (ok) {
-                  setForm(false);
-                  setFrom("");
-                  setTo("");
-                  setReason("");
-                  setHalf("");
-                  setAddress("");
-                  setContact("");
-                  setCover(null);
-                  setMedical(null);
-                  void reqs.reload();
-                  void bal.reload();
-                }
-              }}
-            />
-          </View>
-        )}
-      </View>
-      <View style={s.card}>
-        <Text style={s.heading}>My requests</Text>
-        <Status loading={reqs.loading} error={reqs.error} />
-        {(reqs.data ?? []).length === 0 && !reqs.loading && (
-          <Text style={s.note}>No leave requests yet.</Text>
-        )}
-        {(reqs.data ?? []).slice(0, 20).map((r) => (
-          <View key={r.id} style={s.row}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.strong}>
-                {r.type_name} · {r.days} day{r.days === 1 ? "" : "s"}
-              </Text>
-              <Text style={s.note}>
-                {dateText(r.from_date)}
-                {r.to_date !== r.from_date ? " – " + dateText(r.to_date) : ""}
-              </Text>
-            </View>
-            <Pill text={r.status} />
-            {["pending", "approved"].includes(r.status) &&
-              r.to_date >= today && (
-                <Pressable
-                  onPress={() =>
-                    Alert.alert("Cancel this request?", undefined, [
-                      { text: "Keep", style: "cancel" },
-                      {
-                        text: "Cancel request",
-                        style: "destructive",
-                        onPress: async () => {
-                          if (
-                            await attempt(() =>
-                              api("/leave/requests/" + r.id + "/cancel", {}),
-                            )
-                          ) {
-                            void reqs.reload();
-                            void bal.reload();
-                          }
-                        },
-                      },
-                    ])
-                  }
-                >
-                  <Text style={s.link}>Cancel</Text>
-                </Pressable>
-              )}
-          </View>
-        ))}
-      </View>
-      <View style={s.card}>
-        <Text style={s.heading}>Upcoming holidays</Text>
-        <Status loading={hol.loading} error={hol.error} />
-        {upcoming.map((h) => (
-          <View key={h.date} style={s.row}>
-            <Text style={s.strong}>{h.name}</Text>
-            <Text style={s.note}>{dateText(h.date)}</Text>
-          </View>
-        ))}
-        {!hol.loading && upcoming.length === 0 && (
-          <Text style={s.note}>No more holidays listed this year.</Text>
-        )}
-      </View>
-    </>
-  );
-}
-
 // ---- messages (internal chat) -----------------------------------------------------------------------
 // New messages arrive by polling /chat/updates every few seconds while this section
 // is open, the same as the web portal. Groups are created on the web; here people
@@ -2517,122 +2071,6 @@ function PayslipsScreen({ api, files }: { api: Api; files: Files }) {
 }
 
 // ---- attendance requests (missed punch, on duty, work from home) ---------------------------------------
-function RequestsScreen({ api }: { api: Api }) {
-  const list = useLoad(() => api<Correction[]>("/regularizations"));
-  const [form, setForm] = useState(false);
-  const [kind, setKind] = useState("on_duty");
-  const today = new Date().toISOString().slice(0, 10);
-  const [date, setDate] = useState(today),
-    [inT, setInT] = useState("09:30"),
-    [outT, setOutT] = useState("18:30"),
-    [reason, setReason] = useState("");
-  const [working, setWorking] = useState(false);
-  const self = kind === "missed_punch" || kind === "wrong_punch";
-  return (
-    <>
-      <View style={s.card}>
-        <Text style={s.heading}>Attendance requests</Text>
-        <Text style={s.note}>
-          Missed a punch, working from the field or from home? Ask your manager
-          to approve the day.
-        </Text>
-        <Btn
-          title={form ? "Close" : "New request"}
-          secondary={form}
-          onPress={() => setForm(!form)}
-        />
-        {form && (
-          <View style={{ gap: 12 }}>
-            <View style={s.wrap}>
-              {Object.entries(KIND).map(([k, label]) => (
-                <Pressable
-                  key={k}
-                  onPress={() => setKind(k)}
-                  style={[s.chip, kind === k && s.chipOn]}
-                >
-                  <Text style={[s.chipText, kind === k && { color: "#fff" }]}>
-                    {label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-            <Field label="Date (YYYY-MM-DD)" value={date} onChange={setDate} />
-            {self && (
-              <>
-                <Field label="In time (HH:MM)" value={inT} onChange={setInT} />
-                <Field
-                  label="Out time (HH:MM)"
-                  value={outT}
-                  onChange={setOutT}
-                />
-              </>
-            )}
-            <Field
-              label="Reason"
-              value={reason}
-              onChange={setReason}
-              multiline
-            />
-            <Btn
-              title={working ? "Sending…" : "Send request"}
-              disabled={working || !reason || !date}
-              onPress={async () => {
-                setWorking(true);
-                const ok = await attempt(
-                  () =>
-                    api("/regularizations", {
-                      kind,
-                      date,
-                      reason,
-                      ...(self ? { in_time: inT, out_time: outT } : {}),
-                    }),
-                  "Request sent to your manager.",
-                );
-                setWorking(false);
-                if (ok) {
-                  setForm(false);
-                  setReason("");
-                  void list.reload();
-                }
-              }}
-            />
-          </View>
-        )}
-      </View>
-      <View style={s.card}>
-        <Text style={s.heading}>My requests</Text>
-        <Status loading={list.loading} error={list.error} />
-        {(list.data ?? []).length === 0 && !list.loading && (
-          <Text style={s.note}>None yet.</Text>
-        )}
-        {(list.data ?? []).slice(0, 25).map((r) => (
-          <View key={r.id} style={s.row}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.strong}>{KIND[r.kind] ?? r.kind}</Text>
-              <Text style={s.note}>{dateText(r.date)}</Text>
-            </View>
-            <Pill text={r.status} />
-            {r.status === "pending" && (
-              <Pressable
-                onPress={async () => {
-                  if (
-                    await attempt(() =>
-                      api("/regularizations/" + r.id + "/cancel", {}),
-                    )
-                  )
-                    void list.reload();
-                }}
-              >
-                <Text style={s.link}>Cancel</Text>
-              </Pressable>
-            )}
-          </View>
-        ))}
-      </View>
-    </>
-  );
-}
-
 // ---- on-duty log: the days marked on duty and how each was decided ------------------------
 type OdTrip = {
   id: number;
@@ -3389,48 +2827,104 @@ function AlertsScreen({
 // ---- profile ----------------------------------------------------------------------------------------------
 function ProfileScreen({
   api,
+  files,
   onSignOut,
   onPassword,
 }: {
   api: Api;
+  files: Files;
   onSignOut: () => void;
   onPassword: () => void;
 }) {
   const me = useLoad(() => api<Profile>("/profile"));
-  const rows: [string, string | null | undefined][] = me.data
+  const [doc, setDoc] = useState<"" | "payslip" | "form16">("");
+  const p = me.data;
+  const work: [string, string | null | undefined][] = p
     ? [
-        ["Name", me.data.name],
-        ["Employee code", me.data.employee_code],
-        ["Designation", me.data.designation_name],
-        ["Department", me.data.department_name],
-        ["Branch", me.data.branch_name],
-        ["Reports to", me.data.manager_name],
-        ["Email", me.data.email],
-        ["Phone", me.data.phone],
-        [
-          "Joined",
-          me.data.date_of_joining ? dateText(me.data.date_of_joining) : null,
-        ],
+        ["Designation", p.designation_name],
+        ["Branch", p.branch_name],
+        ["Department", p.department_name],
+        ["Supervisor", p.manager_name],
+        ["Joined", p.date_of_joining ? dateText(p.date_of_joining) : null],
       ]
     : [];
   return (
-    <View style={s.card}>
-      <Text style={s.heading}>My profile</Text>
+    <>
       <Status loading={me.loading} error={me.error} />
-      {rows.map(([label, value]) => (
-        <View key={label} style={s.row}>
-          <Text style={s.note}>{label}</Text>
-          <Text style={s.strong}>{value || "—"}</Text>
-        </View>
-      ))}
+      {p && (
+        <>
+          <View style={s.profileHead}>
+            <View style={s.profileBand} />
+            <View style={s.profileTop}>
+              <View style={s.profileAvatar}>
+                <Text style={s.profileAvatarText}>{initialsOf(p.name)}</Text>
+              </View>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={s.profileName}>{p.name}</Text>
+                <Text style={s.note}>{p.designation_name || ""}</Text>
+                {p.department_name ? <Text style={s.profileDept}>{p.department_name}</Text> : null}
+              </View>
+            </View>
+            <View style={s.profileId}>
+              <Text style={s.note}>Employee ID</Text>
+              <Text style={s.strong}>{p.employee_code || "—"}</Text>
+            </View>
+          </View>
+          <View style={s.contactRow}>
+            <Pressable style={s.contactTile} accessibilityRole="button" onPress={() => p.email && void Linking.openURL("mailto:" + p.email)}>
+              <Text style={s.contactIcon}>✉</Text>
+              <Text style={s.contactLabel}>EMAIL</Text>
+              <Text style={s.strong} numberOfLines={1}>{p.email || "—"}</Text>
+            </Pressable>
+            <Pressable style={s.contactTile} accessibilityRole="button" onPress={() => p.phone && void Linking.openURL("tel:" + p.phone)}>
+              <Text style={s.contactIcon}>✆</Text>
+              <Text style={s.contactLabel}>PHONE</Text>
+              <Text style={s.strong} numberOfLines={1}>{p.phone || "—"}</Text>
+            </Pressable>
+          </View>
+          <View style={s.card}>
+            <Text style={s.heading}>Work information</Text>
+            {work.map(([label, value]) => (
+              <View key={label} style={s.row}>
+                <Text style={s.note}>{label}</Text>
+                <Text style={[s.strong, { flexShrink: 1, textAlign: "right" }]}>{value || "—"}</Text>
+              </View>
+            ))}
+          </View>
+        </>
+      )}
+      <Text style={s.sectionTitle}>Documents</Text>
+      <View style={s.contactRow}>
+        {(
+          [
+            ["payslip", "Pay slip", "₹"],
+            ["form16", "Form 16", "❒"],
+          ] as const
+        ).map(([id, label, glyph]) => (
+          <Pressable
+            key={id}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: doc === id }}
+            style={[s.contactTile, doc === id && s.docOn]}
+            onPress={() => setDoc(doc === id ? "" : id)}
+          >
+            <Text style={[s.contactIcon, doc === id && { color: "#fff" }]}>{glyph}</Text>
+            <Text style={[s.strong, doc === id && { color: "#fff" }]}>{label}</Text>
+            <Text style={[s.note, doc === id && { color: "#fde7ea" }]}>{doc === id ? "Tap to close" : "Tap to open"}</Text>
+          </Pressable>
+        ))}
+      </View>
+      {doc === "payslip" && <PayslipsScreen api={api} files={files} />}
+      {doc === "form16" && <Form16Card api={api} files={files} />}
       <Btn title="Change password" secondary onPress={onPassword} />
       <Btn title="Sign out" secondary onPress={onSignOut} />
-    </View>
+    </>
   );
 }
 // My profile with its extra sections underneath.
 function ProfileWithDetails(props: {
   api: Api;
+  files: Files;
   onSignOut: () => void;
   onPassword: () => void;
 }) {
@@ -3582,6 +3076,124 @@ const s = StyleSheet.create({
     justifyContent: "center",
   },
   odBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  heroTitle: { color: "#fff", fontSize: 18, fontWeight: "800" },
+  heroRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 14 },
+  heroLine: { color: "#fde7ea", fontSize: 15, fontWeight: "600" },
+  heroTime: { color: "#fff", fontSize: 20, fontWeight: "800" },
+  sectionTitle: { color: "#2a2c3a", fontSize: 18, fontWeight: "700", textAlign: "center" },
+  quickPage: { gap: 14 },
+  quickHead: { flexDirection: "row", alignItems: "center", gap: 10 },
+  quickHeadIcon: {
+    fontSize: 20,
+    color: "#c8102e",
+    backgroundColor: "#fde7ea",
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    textAlign: "center",
+    textAlignVertical: "center",
+    lineHeight: 40,
+    overflow: "hidden",
+  },
+  quickRow: { flexDirection: "row", justifyContent: "space-around", gap: 8 },
+  quickLink: { flex: 1, alignItems: "center", gap: 8, paddingVertical: 6, minHeight: 88 },
+  quickIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: "#fff1f3",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quickGlyph: { fontSize: 24, color: "#c8102e" },
+  quickText: { color: "#2a2c3a", fontSize: 13, fontWeight: "600", textAlign: "center" },
+  dots: { flexDirection: "row", justifyContent: "center", gap: 6 },
+  dotPage: { width: 8, height: 6, borderRadius: 3, backgroundColor: "#e1e0e8" },
+  dotPageOn: { width: 24, backgroundColor: "#c8102e" },
+  greetRow: { flexDirection: "row", alignItems: "center", gap: 14 },
+  greetAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#c8102e",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  greetAvatarText: { color: "#fff", fontSize: 20, fontWeight: "800" },
+  greetName: { color: "#2a2c3a", fontSize: 22, fontWeight: "800" },
+  strip: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#eceaf1",
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  stripText: { color: "#2a2c3a", fontSize: 14, fontWeight: "700", flexShrink: 1 },
+  stripDivider: { width: 1, height: 18, backgroundColor: "#e1e0e8" },
+  profileHead: {
+    backgroundColor: "#fff",
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "#eceaf1",
+    overflow: "hidden",
+    paddingBottom: 16,
+    gap: 14,
+  },
+  profileBand: { position: "absolute", top: 0, left: 0, right: 0, height: 70, backgroundColor: "#ac051b" },
+  profileTop: { flexDirection: "row", alignItems: "flex-end", gap: 14, paddingHorizontal: 16, paddingTop: 30 },
+  profileAvatar: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: "#c8102e",
+    borderWidth: 4,
+    borderColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileAvatarText: { color: "#fff", fontSize: 30, fontWeight: "800" },
+  profileName: { color: "#2a2c3a", fontSize: 21, fontWeight: "800" },
+  profileDept: {
+    alignSelf: "flex-start",
+    color: "#ac051b",
+    backgroundColor: "#fde7ea",
+    fontWeight: "700",
+    fontSize: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  profileId: {
+    marginHorizontal: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#f8f7fa",
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  contactRow: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  contactTile: {
+    flex: 1,
+    minWidth: 140,
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#eceaf1",
+    padding: 14,
+    gap: 4,
+    minHeight: 96,
+  },
+  contactIcon: { fontSize: 22, color: "#c8102e" },
+  contactLabel: { color: "#6b6e7c", fontSize: 11, fontWeight: "700", letterSpacing: 1 },
+  docOn: { backgroundColor: "#c8102e", borderColor: "#c8102e" },
   tiles: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   tile: { flex: 1, minWidth: 130, borderRadius: 14, padding: 14, gap: 2 },
   tileLabel: { color: "#fff", fontWeight: "700", fontSize: 12 },

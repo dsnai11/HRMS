@@ -15,6 +15,7 @@ const REG_KINDS = {
   wrong_punch: "Wrong punch",
   on_duty: "On duty",
   work_from_home: "Work from home",
+  short_leave: "Short leave",
 };
 const STATUS_PILL = (s) =>
   `<span class="pill ${s === "approved" ? "" : "neutral"}">${esc(s)}</span>`;
@@ -93,7 +94,7 @@ async function timeOffPage(id) {
   if (id !== renderId) return;
   document.querySelector("#content").innerHTML =
     crumb("Leave / My Leave") +
-    `<div class="leave-layout"><div class="card"><div class="card-head"><h2>Leave Request</h2><button class="secondary" id="correct">Request attendance correction</button></div>${
+    `<div class="leave-layout"><div class="card"><div class="card-head"><h2>Leave Request</h2><div class="actions"><button class="secondary" id="correct">Request attendance correction</button><button class="secondary" id="multi-od">Multiple OD</button></div></div>${
       bal.length
         ? `<form id="leave-form" class="form-grid"><label>Please grant me<select name="leave_type_id" required><option value="">-Select-</option>${bal.map((b) => `<option value="${b.leave_type_id}" data-half="${b.allow_half_day ? 1 : 0}">${esc(b.name)}${b.unlimited ? "" : ` (${b.available} available)`}</option>`).join("")}</select></label><label class="check"><input type="checkbox" name="is_half"> Is Half Day</label><label id="half-which" hidden>Which half<select name="half_day"><option value="first">First half</option><option value="second">Second half</option></select></label>${input("from_date", "From", "", 'type="date" required')}<label id="to-wrap">To<input name="to_date" type="date"></label><p class="full muted" id="leave-days">Total Days:</p><label class="full">For the following reason<textarea name="reason" rows="3" maxlength="500"></textarea></label><label class="full">My Address on leave will be<input name="address_on_leave" maxlength="300"></label>${input("contact_on_leave", "Contact No.", "", 'maxlength="20" inputmode="tel"')}<label>In my absence, work handled by<select name="handover_to"><option value="">-Select-</option>${colleagues
             .filter((p) => p.id !== me.id)
@@ -121,7 +122,7 @@ async function timeOffPage(id) {
     }</div>` +
     `<div class="card"><h2>Attendance corrections</h2>${
       regs.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th>Times</th><th>Status</th><th></th></tr></thead><tbody>${regs.map((r) => `<tr><td>${fmtDate(r.date)}</td><td>${esc(REG_KINDS[r.kind])}<small>${esc(r.reason)}</small></td><td>${esc([r.in_time, r.out_time].filter(Boolean).join(" – ") || "Standard day")}</td><td>${STATUS_PILL(r.status)}${r.decision_note ? `<small>${esc(r.decision_note)}</small>` : ""}</td><td>${r.status === "pending" ? `<button class="ghost" data-cancel-reg="${r.id}">Cancel</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+        ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th>Times</th><th>Status</th><th></th></tr></thead><tbody>${regs.map((r) => `<tr><td>${fmtDate(r.date)}</td><td>${esc(REG_KINDS[r.kind])}${r.batch_id ? ' <span class="pill neutral">Multiple OD</span>' : ""}<small>${esc(r.reason)}</small></td><td>${esc([r.in_time, r.out_time].filter(Boolean).join(" – ") || "Standard day")}</td><td>${STATUS_PILL(r.status)}${r.decision_note ? `<small>${esc(r.decision_note)}</small>` : ""}</td><td>${r.status === "pending" ? `<button class="ghost" data-cancel-reg="${r.id}">Cancel</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
         : empty(
             "No corrections",
             "Missed a punch? Request a correction within the allowed window.",
@@ -132,6 +133,7 @@ async function timeOffPage(id) {
   document.querySelector("#prev").onclick = go(-1);
   document.querySelector("#next").onclick = go(1);
   document.querySelector("#correct").onclick = () => correctionDialog();
+  document.querySelector("#multi-od").onclick = () => multipleOdDialog();
   const form = document.querySelector("#leave-form");
   if (form) {
     // Calendar days in the range; the server leaves out holidays and weekly offs.
@@ -210,12 +212,50 @@ async function timeOffPage(id) {
     );
   cancel("data-cancel-leave", "/leave/requests");
   cancel("data-cancel-reg", "/regularizations");
+  await optionalHolidayCard(id);
   await compOffCard(id);
+}
+// Out on duty for several days: one request, one on-duty day per working day.
+function multipleOdDialog() {
+  dialog(
+    "Multiple OD",
+    `${input("from_date", "From", today(), 'type="date" required')}${input("to_date", "To", today(), 'type="date" required')}<label class="full">Purpose and place<input name="reason" maxlength="500" required placeholder="e.g. Branch audit, Kota"></label><p class="full muted">Weekly offs, holidays and days on leave are left out. Up to 31 days at a time, and up to 30 days ahead.</p>`,
+    async (b) => {
+      const r = await api("/regularizations/batch", b);
+      notice(`OD asked for ${r.days.length} day(s)${r.skipped ? `; ${r.skipped} left out (off, holiday or leave)` : ""}.`);
+    },
+  );
+}
+// Optional holidays: choose up to the yearly limit; new choices go to the manager.
+async function optionalHolidayCard(id) {
+  const y = (timeOffMonth || thisMonth()).slice(0, 4);
+  const s = await api(`/optional-holidays?year=${y}`);
+  if (id !== renderId || !s.holidays.length) return;
+  const word = { pending: "Waiting", approved: "Approved", rejected: "Not approved" };
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<div class="card-head"><div><h2>Optional holidays ${s.year}</h2><p class="muted">Choose up to ${s.limit}. An approved choice is a holiday for you only. ${s.counts.approved} approved, ${s.counts.applied} waiting, ${s.counts.remaining} left to choose.</p></div></div><form id="oh-form"><div class="check-grid">${s.holidays
+    .map((h) => {
+      const on = ["pending", "approved"].includes(h.choice?.status);
+      const locked = h.choice?.status === "approved" || (h.past && !on);
+      return `<label class="check"><input type="checkbox" name="d" value="${h.date}" ${on ? "checked" : ""} ${locked ? "disabled" : ""}> ${esc(h.name)} · ${fmtDate(h.date)}${h.choice ? ` <span class="pill ${h.choice.status === "approved" ? "" : "neutral"}">${word[h.choice.status] ?? esc(h.choice.status)}</span>` : ""}</label>`;
+    })
+    .join("")}</div><div class="actions"><button>Save selections</button></div></form>`;
+  document.querySelector("#content").append(card);
+  card.querySelector("#oh-form").onsubmit = (e) => {
+    e.preventDefault();
+    busy(e.submitter, async () => {
+      const dates = [...card.querySelectorAll('[name="d"]')].filter((x) => x.checked).map((x) => x.value);
+      await api("/optional-holidays", { year: Number(y), dates }, "PUT");
+      notice("Saved. New choices go to your manager for approval.");
+      render();
+    });
+  };
 }
 function correctionDialog() {
   dialog(
     "Request an attendance correction",
-    `${sel("kind", "Type", Object.entries(REG_KINDS))}${input("date", "Date", today(), 'type="date" required')}${input("in_time", "In time", "09:30", 'type="time"')}${input("out_time", "Out time", "18:30", 'type="time"')}<label class="full">Reason<input name="reason" maxlength="500" required></label><p class="full muted">On duty and work-from-home days count as full days; in and out times are optional for them.</p>`,
+    `${sel("kind", "Type", Object.entries(REG_KINDS))}${input("date", "Date", today(), 'type="date" required')}${input("in_time", "In time", "09:30", 'type="time"')}${input("out_time", "Out time", "18:30", 'type="time"')}<label class="full">Reason<input name="reason" maxlength="500" required></label><p class="full muted">On duty and work-from-home days count as full days; in and out times are optional for them. Short leave: give the times you worked; once approved, the day counts in full.</p>`,
     async (b) => {
       if (["on_duty", "work_from_home"].includes(b.kind)) {
         if (!b.in_time) delete b.in_time;
@@ -243,8 +283,12 @@ function decideDialog(kind, row, decision) {
   );
 }
 async function approvalsPage(id) {
-  const data = await api("/approvals");
+  const [data, optional] = await Promise.all([api("/approvals"), api("/optional-holidays/inbox").catch(() => [])]);
   if (id !== renderId) return;
+  // Multiple OD: the days of one request are shown and decided together.
+  const batches = new Map();
+  for (const r of data.regularizations) if (r.batch_id) batches.set(r.batch_id, [...(batches.get(r.batch_id) ?? []), r]);
+  data.regularizations = data.regularizations.filter((r) => !r.batch_id);
   const buttons = (kind, r) =>
     `<button class="secondary" data-act="approved" data-kind="${kind}" data-id="${r.id}">Approve</button> <button class="ghost" data-act="rejected" data-kind="${kind}" data-id="${r.id}">Reject</button>`;
   document.querySelector("#content").innerHTML =
@@ -257,7 +301,45 @@ async function approvalsPage(id) {
       data.regularizations.length
         ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th>Date</th><th>Times</th><th></th></tr></thead><tbody>${data.regularizations.map((r) => `<tr><td>${esc(r.employee_name)}<small>${esc(r.employee_code || "")}</small></td><td>${esc(REG_KINDS[r.kind])}<small>${esc(r.reason)}</small>${r.steps > 1 ? `<small>Step ${r.step_number} of ${r.steps}: ${esc(r.step_name)}</small>` : ""}</td><td>${fmtDate(r.date)}</td><td>${esc([r.in_time, r.out_time].filter(Boolean).join(" – ") || "Standard day")}</td><td>${buttons("reg", r)}</td></tr>`).join("")}</tbody></table></div>`
         : empty("Nothing waiting", "No corrections need your decision.")
-    }</div>`;
+    }</div>${
+      batches.size
+        ? `<div class="card"><h2>Multiple OD</h2><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Days</th><th>Purpose</th><th></th></tr></thead><tbody>${[...batches.entries()]
+            .map(([key, rows]) => `<tr><td>${esc(rows[0].employee_name)}<small>${esc(rows[0].employee_code || "")}</small></td><td>${rows.length} day(s)<small>${fmtDate(rows[0].date)} – ${fmtDate(rows[rows.length - 1].date)}</small></td><td>${esc(rows[0].reason)}</td><td><button class="secondary" data-batch="${esc(key)}" data-batch-act="approved">Approve all</button> <button class="ghost" data-batch="${esc(key)}" data-batch-act="rejected">Reject all</button></td></tr>`)
+            .join("")}</tbody></table></div></div>`
+        : ""
+    }${
+      optional.length
+        ? `<div class="card"><h2>Optional holidays</h2><div class="table-wrap"><table><thead><tr><th>Employee</th><th>Holiday</th><th>Date</th><th></th></tr></thead><tbody>${optional
+            .map((r) => `<tr><td>${esc(r.employee_name)}<small>${esc(r.employee_code || "")}</small></td><td>${esc(r.name)}</td><td>${fmtDate(r.date)}</td><td><button class="secondary" data-oh="${r.id}" data-oh-act="approved">Approve</button> <button class="ghost" data-oh="${r.id}" data-oh-act="rejected">Reject</button></td></tr>`)
+            .join("")}</tbody></table></div></div>`
+        : ""
+    }`;
+  document.querySelectorAll("[data-batch]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const rows = batches.get(b.dataset.batch);
+        const decision = b.dataset.batchAct;
+        dialog(
+          `${decision === "approved" ? "Approve" : "Reject"} Multiple OD`,
+          `<div class="full muted">${esc(rows[0].employee_name)} · ${rows.length} day(s), ${fmtDate(rows[0].date)} – ${fmtDate(rows[rows.length - 1].date)} · ${esc(rows[0].reason)}</div><label class="full">Note${decision === "rejected" ? "" : " (optional)"}<input name="note" maxlength="300" ${decision === "rejected" ? "required" : ""}></label>`,
+          async (f) => {
+            for (const r of rows) await api(`/regularizations/${r.id}/decision`, { decision, note: f.note || undefined });
+            notice(decision === "approved" ? "Approved." : "Rejected.");
+            await loadMe();
+          },
+        );
+      }),
+  );
+  document.querySelectorAll("[data-oh]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        busy(b, async () => {
+          await api(`/optional-holidays/${b.dataset.oh}/decision`, { decision: b.dataset.ohAct });
+          notice(b.dataset.ohAct === "approved" ? "Approved." : "Rejected.");
+          await loadMe();
+          render();
+        })),
+  );
   document.querySelectorAll("[data-act]").forEach(
     (b) =>
       (b.onclick = () => {
@@ -428,12 +510,18 @@ async function leaveAdminTabHtml(tab) {
   }
   if (tab === "holidays") {
     holidayYear ||= Number(today().slice(0, 4));
-    const list = await api(`/admin/holidays?year=${holidayYear}`);
+    const [list, limit] = await Promise.all([
+      api(`/admin/holidays?year=${holidayYear}`),
+      api("/admin/optional-holiday-limit").catch(() => null),
+    ]);
+    const limitForm = limit
+      ? `<form id="oh-limit" class="filters"><label>Optional holidays each person may choose a year<input name="limit" type="number" min="0" max="30" value="${limit.limit}" required></label><button class="secondary">Save</button></form>`
+      : "";
     return `<div class="card"><div class="card-head"><div><h2>Holidays ${holidayYear}</h2><p class="muted">Holidays and weekly offs are not deducted from leave.</p></div><div class="actions"><button class="secondary" id="hy-prev">←</button><button class="secondary" id="hy-next">→</button><button id="add-holidays">+ Add holidays</button></div></div>${
       list.length
         ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Holiday</th><th>Applies to</th><th></th></tr></thead><tbody>${list.map((h) => `<tr><td>${fmtDate(h.date)}</td><td>${esc(h.name)}${h.optional ? ' <span class="pill neutral">Optional</span>' : ""}</td><td>${esc(h.branch_name || "All branches")}</td><td><button class="ghost" data-del-holiday="${h.id}">Remove</button></td></tr>`).join("")}</tbody></table></div>`
         : empty("No holidays", "Add the year's holidays.")
-    }</div>`;
+    }${limitForm}</div>`;
   }
   if (tab === "settings") {
     const s = await api("/admin/leave-settings");
@@ -605,6 +693,15 @@ async function leaveAdminWire(tab) {
   } else if (tab === "holidays") {
     on("#hy-prev", () => ((holidayYear -= 1), render()));
     on("#hy-next", () => ((holidayYear += 1), render()));
+    const ohLimit = document.querySelector("#oh-limit");
+    if (ohLimit)
+      ohLimit.onsubmit = (e) => {
+        e.preventDefault();
+        busy(e.submitter, async () => {
+          await api("/admin/optional-holiday-limit", { limit: Number(ohLimit.limit.value) }, "PUT");
+          notice("Saved.");
+        });
+      };
     on("#add-holidays", async () => {
       const org = await api("/admin/org");
       dialog(

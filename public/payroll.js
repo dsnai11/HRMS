@@ -702,7 +702,7 @@ async function form16AdminCard(id) {
   if (id !== renderId) return;
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = `<div class="card-head"><div><h2>Form 16</h2><p class="muted">Upload the signed Form 16 PDFs from TRACES. Name each file by employee code, for example E1002.pdf or E1002_Form16.pdf. Employees are told and download it from Payslips.</p></div></div><form id="f16" class="form-grid">${input("fy", "Financial year", fy, 'required pattern="20[0-9]{2}-[0-9]{2}"')}<label>PDF files<input type="file" name="files" accept="application/pdf" multiple required></label><div class="actions full"><button>Upload</button></div></form><div id="f16-out"></div><p class="muted">${list.length} uploaded for FY ${esc(fy)}.</p>`;
+  card.innerHTML = `<div class="card-head"><div><h2>Form 16</h2><p class="muted">Upload the signed Form 16 PDFs from TRACES, as many at once as you like. Files are matched by the PAN in their name, as TRACES names them (NAME_ABCDE1234F_FY202526_PartB_SIGNED.pdf), or else by employee code (E1002.pdf). Employees are told and download it from Payslips.</p></div></div><form id="f16" class="form-grid">${input("fy", "Financial year", fy, 'required pattern="20[0-9]{2}-[0-9]{2}"')}<label>PDF files<input type="file" name="files" accept="application/pdf" multiple required></label><div class="actions full"><button>Upload</button></div></form><div id="f16-out"></div><p class="muted">${list.length} uploaded for FY ${esc(fy)}.</p>`;
   document.querySelector("#content").append(card);
   card.querySelector("#f16").onsubmit = (e) => {
     e.preventDefault();
@@ -710,12 +710,13 @@ async function form16AdminCard(id) {
     busy(e.submitter, async () => {
       const results = [];
       for (const file of f.files.files) {
+        const pan = file.name.toUpperCase().match(/(?:^|[^A-Z])([A-Z]{5}[0-9]{4}[A-Z])(?:[^A-Z0-9]|$)/)?.[1];
         const code = file.name.replace(/\.pdf$/i, "").split(/[_\s]/)[0];
         try {
           if (file.size > 2 * 1024 * 1024) throw new Error("larger than 2 MB");
           const r = await api("/admin/form16", {
             fy: f.fy.value.trim(),
-            employee_code: code,
+            ...(pan ? { pan } : { employee_code: code }),
             mime: "application/pdf",
             data: await toB64(file),
           });

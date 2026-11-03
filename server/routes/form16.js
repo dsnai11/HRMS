@@ -1,5 +1,6 @@
 import { HttpError, integer, string } from "../http.js";
 import { checkFile } from "./documents.js";
+import { decryptJson, encryptionKey } from "../crypto-store.js";
 
 // Form 16: the TDS certificate an employer downloads from TRACES and signs. Payroll
 // uploads each employee's PDF for a financial year; the employee downloads it. A new
@@ -38,7 +39,28 @@ export function registerForm16(router, app) {
     },
   );
 
-  // One PDF for one employee, named by employee code (or by user_id).
+  // The employee whose PAN this is (PANs are kept encrypted, so each is read in turn).
+  async function byPan(companyId, pan) {
+    const key = encryptionKey();
+    if (!key) throw new HttpError(503, "Matching by PAN needs DATA_ENCRYPTION_KEY on the server.");
+    for (const row of await db
+      .prepare(
+        "SELECT p.user_id,p.data,u.name FROM employee_private p JOIN users u ON u.id=p.user_id WHERE p.company_id=?",
+      )
+      .all(companyId)) {
+      try {
+        if (String(decryptJson(row.data, key).pan ?? "").toUpperCase() === pan)
+          return { id: row.user_id, name: row.name };
+      } catch {
+        /* a row that does not decrypt is skipped */
+      }
+    }
+    return null;
+  }
+
+  // One PDF for one employee, found by employee code, user id, or PAN. The bulk upload on the
+  // payroll page sends the TRACES files one by one with the PAN read from each file name
+  // (NAME_PAN_FY202526_PartB_SIGNED.pdf).
   router.post(
     "/api/admin/form16",
     { perm: "payroll.manage" },
@@ -47,7 +69,11 @@ export function registerForm16(router, app) {
       const fy = string(b.fy, "Financial year", 7);
       if (!FY.test(fy) || Number(fy.slice(5)) !== (Number(fy.slice(2, 4)) + 1) % 100)
         throw new HttpError(400, "Write the financial year like 2025-26.");
-      const target = b.user_id
+      const pan = b.pan ? String(b.pan).toUpperCase() : null;
+      if (pan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) throw new HttpError(400, "PAN must look like ABCDE1234F.");
+      const target = pan
+        ? await byPan(companyId, pan)
+        : b.user_id
         ? await db
             .prepare("SELECT id,name FROM users WHERE id=? AND company_id=?")
             .get(integer(Number(b.user_id)), companyId)
@@ -55,7 +81,10 @@ export function registerForm16(router, app) {
             .prepare("SELECT id,name FROM users WHERE lower(employee_code)=lower(?) AND company_id=?")
             .get(string(b.employee_code, "Employee code", 30), companyId);
       if (!target)
-        throw new HttpError(404, `No employee with code ${b.employee_code ?? b.user_id}.`);
+        throw new HttpError(
+          404,
+          pan ? `No employee has PAN ${pan} on record.` : `No employee with code ${b.employee_code ?? b.user_id}.`,
+        );
       const file = checkFile(b);
       if (file.mime !== "application/pdf")
         throw new HttpError(400, "Form 16 must be a PDF.");

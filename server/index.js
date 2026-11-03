@@ -50,6 +50,7 @@ import { registerOvertime } from "./routes/overtime.js";
 import { registerSeparation } from "./routes/separation.js";
 import { registerSalaryBills } from "./routes/salary-bills.js";
 import { registerBudgets } from "./routes/budgets.js";
+import { registerOptionalHolidays } from "./routes/optional-holidays.js";
 import { registerCompetencies } from "./routes/competencies.js";
 import { registerTrainingSessions } from "./routes/training-sessions.js";
 import { registerSso } from "./routes/sso.js";
@@ -276,6 +277,7 @@ export function createApp({
     registerSeparation,
     registerSalaryBills,
     registerBudgets,
+    registerOptionalHolidays,
     registerCompetencies,
     registerTrainingSessions,
     registerSso,

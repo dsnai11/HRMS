@@ -23,6 +23,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import MapView, { Circle, Marker } from "react-native-maps";
 import { StatusBar } from "expo-status-bar";
 import * as Location from "expo-location";
 import * as SecureStore from "expo-secure-store";
@@ -69,7 +70,12 @@ type Profile = {
     require_selfie?: boolean;
     require_biometric?: boolean;
   } | null;
-  workplace: { name: string; radius: number } | null;
+  workplace: {
+    name: string;
+    radius: number;
+    latitude?: number;
+    longitude?: number;
+  } | null;
   openShift: Shift | null;
   // Out of the office on duty during the open shift (OD Out), if so.
   openTrip?: { id: number; purpose: string; out_at: string } | null;
@@ -212,6 +218,8 @@ export default function Attendance() {
     action: "in" | "out" | "od_out" | "od_in";
     address: string;
     accuracy: number;
+    latitude: number;
+    longitude: number;
   } | null>(null);
   const fixResolver = useRef<((ok: boolean) => void) | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -231,6 +239,8 @@ export default function Attendance() {
       action,
       address: coords,
       accuracy: Math.round(position.coords.accuracy ?? 0),
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
     });
     Location.reverseGeocodeAsync(position.coords)
       .then(([a]) => {
@@ -1280,9 +1290,9 @@ export default function Attendance() {
           {(
             [
               ["Home", "⌂", "Home"],
-              ["Leave", "☼", "Leave"],
-              ["My Attendance", "▤", "Attendance"],
               ["Profile", "☺", "Profile"],
+              ["OD", "✈", "OD"],
+              ["My Attendance", "◷", "Att Log"],
             ] as const
           ).map(([id, icon, label]) => (
             <Pressable
@@ -1292,9 +1302,11 @@ export default function Attendance() {
               onPress={() => setView(id)}
               style={[s.tabItem, view === id && s.tabItemOn]}
             >
-              <Text style={[s.tabIcon, view === id && { color: "#ac051b" }]}>
-                {icon}
-              </Text>
+              <View style={[s.tabBubble, view === id && s.tabBubbleOn]}>
+                <Text style={[s.tabIcon, view === id && { color: "#fff" }]}>
+                  {icon}
+                </Text>
+              </View>
               <Text
                 numberOfLines={1}
                 style={[s.tabLabel, view === id && { color: "#ac051b" }]}
@@ -1322,6 +1334,42 @@ export default function Attendance() {
                     ? "Mark OUT"
                     : "Mark IN"}
             </Text>
+            {/* iPhone shows Apple Maps. Android shows the address only until the app
+                has a Google Maps key (set it in app.config.js before launch). */}
+            {Platform.OS === "ios" && fix && (
+              <MapView
+                style={s.map}
+                accessibilityLabel={"Map of where you are: " + fix.address}
+                initialRegion={{
+                  latitude: fix.latitude,
+                  longitude: fix.longitude,
+                  latitudeDelta: 0.006,
+                  longitudeDelta: 0.006,
+                }}
+                scrollEnabled={false}
+                zoomEnabled={false}
+                rotateEnabled={false}
+                pitchEnabled={false}
+              >
+                <Marker
+                  coordinate={{ latitude: fix.latitude, longitude: fix.longitude }}
+                  pinColor="#c8102e"
+                />
+                {profile?.workplace?.latitude != null &&
+                  profile.workplace.longitude != null &&
+                  fix.action !== "od_out" && (
+                    <Circle
+                      center={{
+                        latitude: profile.workplace.latitude,
+                        longitude: profile.workplace.longitude,
+                      }}
+                      radius={profile.workplace.radius}
+                      strokeColor="rgba(200,16,46,0.7)"
+                      fillColor="rgba(200,16,46,0.12)"
+                    />
+                  )}
+              </MapView>
+            )}
             <View style={s.pinRow}>
               <Text style={s.pin}>📍</Text>
               <View style={{ flex: 1 }}>
@@ -1504,8 +1552,25 @@ const s = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 14,
   },
-  tabItemOn: { backgroundColor: "#fde7ea" },
-  tabIcon: { fontSize: 18, color: "#7a7d8c" },
+  tabItemOn: {},
+  // The chosen tab's icon sits raised in a red circle.
+  tabBubble: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tabBubbleOn: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    marginTop: -26,
+    backgroundColor: "#c8102e",
+    borderWidth: 4,
+    borderColor: "#fff",
+  },
+  tabIcon: { fontSize: 20, color: "#7a7d8c" },
   tabLabel: { fontSize: 11, color: "#7a7d8c", fontWeight: "600" },
   sheetWrap: {
     flex: 1,
@@ -1525,6 +1590,7 @@ const s = StyleSheet.create({
   },
   sheetTitle: { fontSize: 22, fontWeight: "800", color: "#2a2c3a" },
   pinRow: { flexDirection: "row", gap: 12, alignItems: "center" },
+  map: { width: "100%", height: 260, borderRadius: 16, overflow: "hidden" },
   pin: { fontSize: 34 },
   sheetAddress: { fontSize: 15, fontWeight: "700", color: "#2a2c3a" },
   menuWrap: {

@@ -90,9 +90,25 @@ export async function computeMuster(
     return holidayCache.get(key);
   };
 
+  // Optional holidays a person chose and had approved are holidays for them alone.
+  const chosenOf = new Map();
+  for (const c of await db
+    .prepare(
+      `SELECT user_id,date,name FROM optional_holiday_choices WHERE status='approved' AND user_id IN ${inIds} AND date>=? AND date<=?`,
+    )
+    .all(...ids, from, to))
+    chosenOf.set(`${c.user_id}|${c.date}`, c.name);
+
   const out = [];
   for (const p of people) {
-    const holidays = await holidaysFor(p.branch_id);
+    const branchHolidays = await holidaysFor(p.branch_id);
+    let holidays = branchHolidays;
+    for (const [key, name] of chosenOf)
+      if (key.startsWith(`${p.id}|`)) {
+        if (holidays === branchHolidays) holidays = new Map(branchHolidays);
+        const date = key.slice(key.indexOf("|") + 1);
+        if (!holidays.has(date)) holidays.set(date, name);
+      }
     const days = [];
     const t = {
       present: 0,

@@ -40,6 +40,7 @@ type Fix = {
   in_time: string | null;
   out_time: string | null;
   reason: string;
+  batch_id?: string | null;
 };
 type Od = {
   id: number;
@@ -102,6 +103,14 @@ const FIX_KIND: Record<string, string> = {
   wrong_punch: "Wrong punch",
   on_duty: "On duty",
   work_from_home: "Work from home",
+  short_leave: "Short leave",
+};
+type OptionalChoice = {
+  id: number;
+  employee_name: string;
+  employee_code: string | null;
+  date: string;
+  name: string;
 };
 const SEP_STATUS: Record<string, string> = {
   pending: "With HR",
@@ -159,13 +168,20 @@ function Decide({
 
 function Approvals({ api }: { api: Api }) {
   const inbox = useLoad(async () => {
-    const [a, od, ot, claims] = await Promise.all([
+    const [a, od, ot, claims, optional] = await Promise.all([
       api<{ leave: Leave[]; regularizations: Fix[] }>("/approvals"),
       api<Od[]>("/od-visits/pending").catch(() => [] as Od[]),
       api<Ot[]>("/overtime/pending").catch(() => [] as Ot[]),
       api<Claim[]>("/claims/inbox").catch(() => [] as Claim[]),
+      api<OptionalChoice[]>("/optional-holidays/inbox").catch(() => [] as OptionalChoice[]),
     ]);
-    return { ...a, od, ot, claims };
+    // Multiple OD: the days of one request are decided together.
+    const singles: Fix[] = [];
+    const batches = new Map<string, Fix[]>();
+    for (const f of a.regularizations)
+      if (f.batch_id) batches.set(f.batch_id, [...(batches.get(f.batch_id) ?? []), f]);
+      else singles.push(f);
+    return { ...a, regularizations: singles, batches: [...batches.values()], od, ot, claims, optional };
   });
   const decide =
     (path: string) => (decision: "approved" | "rejected", note?: string) =>
@@ -173,10 +189,18 @@ function Approvals({ api }: { api: Api }) {
         await api(path, { decision, note });
         await inbox.reload();
       });
+  const decideAll =
+    (ids: number[]) => (decision: "approved" | "rejected", note?: string) =>
+      attempt(async () => {
+        for (const id of ids) await api(`/regularizations/${id}/decision`, { decision, note });
+        await inbox.reload();
+      });
   const d = inbox.data;
   const total = d
     ? d.leave.length +
       d.regularizations.length +
+      d.batches.length +
+      d.optional.length +
       d.od.length +
       d.ot.length +
       d.claims.length
@@ -219,6 +243,27 @@ function Approvals({ api }: { api: Api }) {
           ) : null}
           <Text style={k.body}>{r.reason}</Text>
           <Decide onDecide={decide(`/regularizations/${r.id}/decision`)} />
+        </View>
+      ))}
+      {d?.batches.map((rows) => (
+        <View key={`b${rows[0].batch_id}`} style={k.item}>
+          <Pill text={`Multiple OD · ${rows.length} day${rows.length === 1 ? "" : "s"}`} />
+          <Text style={k.strong}>
+            {rows[0].employee_name} · {dateText(rows[0].date)}
+            {rows.length > 1 ? ` – ${dateText(rows[rows.length - 1].date)}` : ""}
+          </Text>
+          <Text style={k.body}>{rows[0].reason}</Text>
+          <Decide onDecide={decideAll(rows.map((x) => x.id))} />
+        </View>
+      ))}
+      {d?.optional.map((r) => (
+        <View key={`h${r.id}`} style={k.item}>
+          <Pill text="Optional holiday" />
+          <Text style={k.strong}>
+            {r.employee_name} · {r.name}
+          </Text>
+          <Text style={k.note}>{dateText(r.date)}</Text>
+          <Decide onDecide={decide(`/optional-holidays/${r.id}/decision`)} />
         </View>
       ))}
       {d?.od.map((r) => (
