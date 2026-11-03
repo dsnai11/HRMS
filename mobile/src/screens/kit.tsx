@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Linking,
   Pressable,
@@ -12,6 +11,8 @@ import {
 import * as DocumentPicker from "expo-document-picker";
 import { File } from "expo-file-system";
 
+import { T, themed } from "../theme";
+import { PressScale, SkeletonCard } from "../ui";
 // Shared building blocks for the phone's work screens (Supervisor, claims, resignation,
 // performance, learning, tax): the same look and behaviour as the screens in More.tsx.
 export type Api = <T>(
@@ -58,16 +59,17 @@ export function Btn({
   disabled?: boolean;
 }) {
   return (
-    <Pressable
+    <PressScale
       accessibilityRole="button"
+      accessibilityState={{ disabled: !!disabled }}
       disabled={disabled}
       onPress={onPress}
       style={[k.btn, secondary && k.btnSecondary, disabled && { opacity: 0.5 }]}
     >
-      <Text style={[k.btnText, secondary && { color: "#c8102e" }]}>
+      <Text style={[k.btnText, secondary && { color: T.primary }]}>
         {title}
       </Text>
-    </Pressable>
+    </PressScale>
   );
 }
 export function Field({
@@ -148,7 +150,7 @@ export const Status = ({
   error: string;
 }) =>
   loading ? (
-    <ActivityIndicator color="#c8102e" />
+    <SkeletonCard />
   ) : error ? (
     <Text style={k.error}>{error}</Text>
   ) : null;
@@ -239,7 +241,7 @@ export async function pickAndUpload(
   return doc.id;
 }
 
-export const k = StyleSheet.create({
+export const k = themed(() => StyleSheet.create({
   card: {
     backgroundColor: "#fff",
     borderWidth: 1,
@@ -268,20 +270,20 @@ export const k = StyleSheet.create({
   btn: {
     paddingVertical: 15,
     paddingHorizontal: 20,
-    backgroundColor: "#c8102e",
+    backgroundColor: T.primary,
     borderRadius: 12,
     alignItems: "center",
   },
-  btnSecondary: { backgroundColor: "#fff1f3" },
+  btnSecondary: { backgroundColor: T.softer },
   btnText: { fontSize: 15, color: "#fff", fontWeight: "600" },
   chip: {
     paddingVertical: 9,
     paddingHorizontal: 14,
     borderRadius: 18,
-    backgroundColor: "#fff1f3",
+    backgroundColor: T.softer,
   },
-  chipOn: { backgroundColor: "#c8102e" },
-  chipText: { color: "#c8102e", fontWeight: "600", fontSize: 13 },
+  chipOn: { backgroundColor: T.primary },
+  chipText: { color: T.primary, fontWeight: "600", fontSize: 13 },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   // Wraps instead of overflowing on narrow phones and with large text sizes.
   row: {
@@ -304,7 +306,7 @@ export const k = StyleSheet.create({
   strong: { fontWeight: "600", color: "#3a3c4a", fontSize: 14 },
   note: { color: "#7a7d8c", fontSize: 12, lineHeight: 18 },
   body: { color: "#3a3c4a", fontSize: 14, lineHeight: 21 },
-  link: { color: "#c8102e", fontWeight: "600", fontSize: 13 },
+  link: { color: T.primary, fontWeight: "600", fontSize: 13 },
   error: {
     color: "#894a35",
     backgroundColor: "#f9eae3",
@@ -312,8 +314,8 @@ export const k = StyleSheet.create({
     borderRadius: 10,
   },
   pill: {
-    backgroundColor: "#fff1f3",
-    color: "#c8102e",
+    backgroundColor: T.softer,
+    color: T.primary,
     fontSize: 11,
     fontWeight: "600",
     paddingVertical: 3,
@@ -322,4 +324,4 @@ export const k = StyleSheet.create({
     overflow: "hidden",
     alignSelf: "flex-start",
   },
-});
+}));

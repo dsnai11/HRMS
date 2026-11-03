@@ -36,6 +36,14 @@ module.exports = {
     plugins: [
       "expo-router",
       "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          photosPermission: "Your photos are used only when you choose a profile photo.",
+          cameraPermission: "The camera is used only to take a selfie at punch time or a profile photo.",
+          microphonePermission: false,
+        },
+      ],
       "expo-notifications",
       [
         "expo-local-authentication",

@@ -10,6 +10,7 @@ import {
 import * as LocalAuthentication from "expo-local-authentication";
 import * as SecureStore from "expo-secure-store";
 
+import { T, themed } from "./theme";
 // Fingerprint / face unlock. When it is on and a session is saved, the app opens behind a lock
 // that only the phone's biometrics (or its screen-lock PIN, as the system fallback) remove,
 // and locks again after it has been in the background for a while. Turning it on needs a
@@ -172,7 +173,7 @@ export function BiometricGate({ children }: { children: React.ReactNode }) {
   );
 }
 
-const s = StyleSheet.create({
+const s = themed(() => StyleSheet.create({
   cover: {
     position: "absolute",
     top: 0,
@@ -188,15 +189,15 @@ const s = StyleSheet.create({
   logo: { width: 150, height: 58, marginBottom: 12 },
   title: { fontSize: 22, fontWeight: "700", color: "#2a2c3a" },
   note: { fontSize: 15, color: "#6d6f7d", textAlign: "center" },
-  error: { fontSize: 14, color: "#ac051b", textAlign: "center" },
+  error: { fontSize: 14, color: T.primaryDark, textAlign: "center" },
   button: {
     marginTop: 12,
-    backgroundColor: "#ac051b",
+    backgroundColor: T.primaryDark,
     borderRadius: 12,
     paddingVertical: 14,
     paddingHorizontal: 48,
   },
   buttonText: { color: "#ffffff", fontSize: 16, fontWeight: "600" },
   link: { padding: 10 },
-  linkText: { color: "#c8102e", fontSize: 14 },
-});
+  linkText: { color: T.primary, fontSize: 14 },
+}));
