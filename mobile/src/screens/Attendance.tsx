@@ -114,6 +114,59 @@ function Button({
     </Pressable>
   );
 }
+// The phone's position for a punch. A reading the phone took in the last 20 seconds that
+// is accurate enough is used at once; otherwise a new one (High is about 10 m, and much
+// quicker to get than Highest).
+async function locate(): Promise<Location.LocationObject> {
+  const permission = await Location.requestForegroundPermissionsAsync();
+  if (permission.status !== "granted")
+    throw new Error(
+      "Allow precise location in phone settings to record attendance.",
+    );
+  if (!(await Location.hasServicesEnabledAsync()))
+    throw new Error("Turn on location services and retry.");
+  const recent = await Location.getLastKnownPositionAsync({
+    maxAge: 20000,
+    requiredAccuracy: 30,
+  }).catch(() => null);
+  if (recent) return recent;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("GPS took too long. Move outdoors and retry.")),
+          25000,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+// Wakes the GPS when the app opens, so a punch a moment later finds a fresh reading.
+// Only when location is already allowed: it never asks.
+let warming = false;
+function warmGps() {
+  if (warming) return;
+  warming = true;
+  void Location.getForegroundPermissionsAsync()
+    .then((p) =>
+      p.granted
+        ? Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High })
+        : null,
+    )
+    .catch(() => null)
+    .finally(() => {
+      warming = false;
+    });
+}
+// Checked once per app start: it does not change while the app runs.
+let rooted: Promise<boolean | null> | null = null;
+const rootedCheck = () =>
+  (rooted ??= Device.isRootedExperimentalAsync().catch(() => null));
+
 export default function Attendance() {
   // Narrow phones (320–360 points wide) get less side padding.
   const narrow = useWindowDimensions().width < 380;
@@ -124,6 +177,8 @@ export default function Attendance() {
     pushRegistered = useRef(false),
     identity = useRef<Identity | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  // When the profile was last read from the server: a punch within a minute uses it as is.
+  const profileAt = useRef(0);
   const [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(true);
   const [email, setEmail] = useState(""),
@@ -166,29 +221,28 @@ export default function Attendance() {
     position: Location.LocationObject,
     action: "in" | "out" | "od_out" | "od_in",
   ): Promise<boolean> {
-    let address = "";
-    try {
-      const [a] = await Promise.race([
-        Location.reverseGeocodeAsync(position.coords),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("slow")), 5000),
-        ),
-      ]);
-      address = [a?.name, a?.street, a?.district, a?.city, a?.postalCode]
-        .filter(Boolean)
-        .join(", ");
-    } catch {
-      /* the coordinates are shown instead */
-    }
+    // The sheet opens at once with the coordinates; the street address replaces them
+    // when the phone has looked it up (that can take a few seconds on a slow network).
+    const coords =
+      position.coords.latitude.toFixed(5) +
+      ", " +
+      position.coords.longitude.toFixed(5);
     setFix({
       action,
-      address:
-        address ||
-        position.coords.latitude.toFixed(5) +
-          ", " +
-          position.coords.longitude.toFixed(5),
+      address: coords,
       accuracy: Math.round(position.coords.accuracy ?? 0),
     });
+    Location.reverseGeocodeAsync(position.coords)
+      .then(([a]) => {
+        const address = [a?.name, a?.street, a?.district, a?.city, a?.postalCode]
+          .filter(Boolean)
+          .join(", ");
+        if (address)
+          setFix((f) => (f && f.address === coords ? { ...f, address } : f));
+      })
+      .catch(() => {
+        /* the coordinates stay */
+      });
     return new Promise((resolve) => {
       fixResolver.current = resolve;
     });
@@ -343,6 +397,8 @@ export default function Attendance() {
     if (!session) return;
     const p = await api<Profile>("/me", undefined, session);
     setProfile(p);
+    profileAt.current = Date.now();
+    warmGps();
     if (!p.user.must_change_password && p.user.role !== "super_admin") {
       if (!pushRegistered.current) {
         pushRegistered.current = true;
@@ -378,13 +434,11 @@ export default function Attendance() {
         if (!mounted) return;
         sessionRef.current = saved;
         setToken(saved);
-        const config = await api<{ timezone: string }>(
-          "/config",
-          undefined,
-          null,
-        );
+        const [config] = await Promise.all([
+          api<{ timezone: string }>("/config", undefined, null),
+          saved ? refresh(saved) : null,
+        ]);
         setTimezone(config.timezone);
-        if (saved) await refresh(saved);
       } catch (e) {
         if (mounted)
           setMessage(
@@ -471,15 +525,24 @@ export default function Attendance() {
     trip?: { action: "od_out" | "od_in"; purpose?: string },
   ) =>
     run(async () => {
-      const current = await api<Profile>("/me");
-      setProfile(current);
-      if (
-        current.openShift?.id !== profile?.openShift?.id ||
-        current.todayShift?.id !== profile?.todayShift?.id
-      )
-        throw new Error(
-          "Attendance changed on another device. Review your status and tap again.",
-        );
+      // The GPS starts now, while the status check, fingerprint and selfie happen.
+      const early = (await Location.getForegroundPermissionsAsync()).granted
+        ? locate()
+        : null;
+      early?.catch(() => {});
+      let current = profile;
+      if (!current || Date.now() - profileAt.current > 60000) {
+        current = await api<Profile>("/me");
+        setProfile(current);
+        profileAt.current = Date.now();
+        if (
+          current.openShift?.id !== profile?.openShift?.id ||
+          current.todayShift?.id !== profile?.todayShift?.id
+        )
+          throw new Error(
+            "Attendance changed on another device. Review your status and tap again.",
+          );
+      }
       if (current.device?.status !== "approved")
         throw new Error(
           current.device?.status === "pending"
@@ -520,33 +583,7 @@ export default function Attendance() {
         if (!photo) throw new Error("A selfie is needed to punch.");
         selfie = photo;
       }
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (permission.status !== "granted")
-        throw new Error(
-          "Allow precise location in phone settings to record attendance.",
-        );
-      if (!(await Location.hasServicesEnabledAsync()))
-        throw new Error("Turn on location services and retry.");
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      let position: Location.LocationObject;
-      try {
-        position = await Promise.race([
-          Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Highest,
-          }),
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(
-              () =>
-                reject(
-                  new Error("GPS took too long. Move outdoors and retry."),
-                ),
-              25000,
-            );
-          }),
-        ]);
-      } finally {
-        if (timer) clearTimeout(timer);
-      }
+      let position = await (early ?? locate());
       if (AppState.currentState !== "active")
         throw new Error("Keep the app open while recording attendance.");
       const action = trip?.action ?? (ending ? "out" : "in");
@@ -556,10 +593,13 @@ export default function Attendance() {
       // The server takes readings up to a minute old; take a new one after a long pause.
       if (Date.now() - position.timestamp > 40000)
         position = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Highest,
+          accuracy: Location.Accuracy.High,
         });
+      let recorded: Shift & {
+        trip?: { id: number; purpose: string; out_at: string; status: string };
+      };
       try {
-        await api("/punch", {
+        recorded = await api("/punch", {
           action,
           ...(od ? { od: { purpose: od } } : {}),
           ...(trip?.purpose ? { purpose: trip.purpose } : {}),
@@ -574,7 +614,7 @@ export default function Attendance() {
           },
           signals: {
             emulator: !Device.isDevice,
-            rooted: await Device.isRootedExperimentalAsync().catch(() => null),
+            rooted: await rootedCheck(),
             platform: Platform.OS,
             osVersion: Device.osVersion ?? undefined,
             appVersion: Constants.expoConfig?.version,
@@ -584,7 +624,21 @@ export default function Attendance() {
         await refresh().catch(() => {});
         throw e;
       }
-      await refresh();
+      // Show the new state straight away; the full status reloads behind it.
+      setProfile((p) => {
+        if (!p) return p;
+        const { trip: visit, ...shift } = recorded;
+        if (trip)
+          return {
+            ...p,
+            openShift: shift,
+            openTrip: visit?.status === "open" ? visit : null,
+          };
+        return action === "in"
+          ? { ...p, openShift: shift, todayShift: null }
+          : { ...p, openShift: null, openTrip: null, todayShift: shift };
+      });
+      void refresh().catch(() => {});
       const odShift = od || ending?.source === "od_punch";
       if (od || trip) setOdPurpose("");
       if (trip) {

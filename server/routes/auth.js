@@ -208,16 +208,30 @@ export function registerAuth(router, app) {
     "/api/me",
     { allowTemp: true },
     async ({ req, user, companyId, send }) => {
-      const company = await db
-        .prepare(
-          "SELECT id,name,require_selfie,require_biometric,labels FROM companies WHERE id=?",
-        )
-        .get(companyId);
-      const job = await db
-        .prepare(
-          "SELECT g.name designation FROM users u LEFT JOIN designations g ON g.id=u.designation_id WHERE u.id=?",
-        )
-        .get(user.id);
+      // The phone opens with this and checks it before every punch. The parts do not depend
+      // on each other, so they are read at the same time: one wait for the database instead
+      // of nineteen in a row. A shift left open past its limit is closed first, and the
+      // shift and trip reads wait for that.
+      const stale = closeStaleShifts(app, user.id);
+      const [company, job, manager, approvals, workplace, openShift, todayShift, openTrip, odOk, caseKinds, delegators, device] =
+        await Promise.all([
+          db.prepare("SELECT id,name,require_selfie,require_biometric,labels FROM companies WHERE id=?").get(companyId),
+          db
+            .prepare("SELECT g.name designation FROM users u LEFT JOIN designations g ON g.id=u.designation_id WHERE u.id=?")
+            .get(user.id),
+          db.prepare("SELECT id FROM users WHERE manager_id=? AND active=1 LIMIT 1").get(user.id),
+          pendingApprovals(app, user),
+          user.workplace_id ? db.prepare("SELECT * FROM workplaces WHERE id=?").get(user.workplace_id) : null,
+          stale.then(() => db.prepare("SELECT * FROM shifts WHERE user_id=? AND out_at IS NULL").get(user.id)),
+          stale.then(() => finishedToday(app, user.id, clock())),
+          stale.then(() =>
+            db.prepare("SELECT id,purpose,out_at FROM od_visits WHERE user_id=? AND status='open'").get(user.id),
+          ),
+          odAllowed(app, user),
+          caseKindsHandled(db, user),
+          delegatorsOf(db, user.id),
+          deviceFromHeaders(app, user, req),
+        ]);
       return send(200, {
         user: { ...safeUser(user), designation: job?.designation ?? null },
         ...(user.needs_2fa ? { needs_2fa: true } : {}),
@@ -228,38 +242,19 @@ export function registerAuth(router, app) {
           labels: JSON.parse(company.labels || "{}"),
         },
         permissions: permissionsOf(user),
-        is_manager: Boolean(
-          await db
-            .prepare(
-              "SELECT id FROM users WHERE manager_id=? AND active=1 LIMIT 1",
-            )
-            .get(user.id),
-        ),
-        approvals_pending: await pendingApprovals(app, user),
-        workplace: user.workplace_id
-          ? await db
-              .prepare("SELECT * FROM workplaces WHERE id=?")
-              .get(user.workplace_id)
-          : null,
-        openShift:
-          (await closeStaleShifts(app, user.id),
-          await db
-            .prepare("SELECT * FROM shifts WHERE user_id=? AND out_at IS NULL")
-            .get(user.id)) || null,
-        todayShift: await finishedToday(app, user.id, clock()),
+        is_manager: Boolean(manager),
+        approvals_pending: approvals,
+        workplace,
+        openShift: openShift || null,
+        todayShift,
         // An OD trip out of the office in the open shift, if any.
-        openTrip:
-          (await db
-            .prepare("SELECT id,purpose,out_at FROM od_visits WHERE user_id=? AND status='open'")
-            .get(user.id)) || null,
-        od_allowed: await odAllowed(app, user),
+        openTrip: openTrip || null,
+        od_allowed: odOk,
         // Which kinds of case (grievance, POSH, whistleblower) this person handles.
-        case_kinds: await caseKindsHandled(db, user),
+        case_kinds: caseKinds,
         // Standing in today for a manager who handed over their approvals.
-        stands_in: (await delegatorsOf(db, user.id)).length > 0,
-        device: await deviceFromHeaders(app, user, req).then((d) =>
-          d ? { status: d.status } : null,
-        ),
+        stands_in: delegators.length > 0,
+        device: device ? { status: device.status } : null,
       });
     },
   );
