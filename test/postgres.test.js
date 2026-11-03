@@ -65,3 +65,24 @@ test("hosted deployments refuse ephemeral local storage when PostgreSQL is missi
     }
   }
 });
+
+test("an insert hands back the new id for any table with an id column, and works without one", async () => {
+  const db = await openTestDatabase();
+  try {
+    const company = await db.prepare("INSERT INTO companies(name,code,created_at) VALUES(?,?,?)").run("Id Co", "IDCO", "2026-01-01");
+    assert.equal(typeof company.lastInsertRowid, "number");
+    // A table added after the old fixed list was written.
+    const head = await db
+      .prepare("INSERT INTO budget_heads(company_id,name,code,source,created_at) VALUES(?,?,?,?,?)")
+      .run(company.lastInsertRowid, "Rent", "RENT", "manual", "2026-01-01");
+    assert.equal(typeof head.lastInsertRowid, "number");
+    // A table without an id column.
+    const plain = await db
+      .prepare("INSERT INTO schema_migrations(name,applied_at) VALUES(?,?)")
+      .run("zz_test", "2026-01-01");
+    assert.equal(plain.changes, 1);
+    assert.equal(plain.lastInsertRowid, undefined);
+  } finally {
+    await db.close();
+  }
+});

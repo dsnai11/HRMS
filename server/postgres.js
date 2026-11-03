@@ -26,6 +26,26 @@ export function createPostgresStore(pool) {
     (context.getStore() || pool).query(sql, params);
   const normalize = (row) =>
     row && { ...row, ...("n" in row ? { n: Number(row.n) } : {}) };
+  // Tables with an id column, so an INSERT can hand back the new row's id. Read from the
+  // database itself (and again when a table is not known yet, as after a migration), so
+  // new tables never need listing by hand.
+  let idTables = null;
+  const loadIdTables = async () =>
+    new Set(
+      (
+        await pool.query(
+          "SELECT table_name FROM information_schema.columns WHERE table_schema = current_schema() AND column_name = 'id'",
+        )
+      ).rows.map((r) => r.table_name),
+    );
+  const noId = new Set();
+  const hasId = async (table) => {
+    if (idTables?.has(table)) return true;
+    if (noId.has(table)) return false;
+    idTables = await loadIdTables();
+    if (!idTables.has(table)) noId.add(table);
+    return idTables.has(table);
+  };
   return serializedStore({
     dialect: "postgres",
     prepare(sql) {
@@ -40,10 +60,8 @@ export function createPostgresStore(pool) {
           return (await query(statement, params)).rows.map(normalize);
         },
         async run(...params) {
-          const returning =
-            /^INSERT\s+INTO\s+(users|workplaces|shifts|audit|devices|punch_events|companies|branches|departments|designations|holidays|leave_types|leave_ledger|leave_requests|leave_days|regularizations|salary_components|employee_salaries|employee_salary_lines|pt_slabs|payroll_opening|payroll_adjustments|payroll_runs|payroll_items|payroll_loans|payroll_loan_schedule|claim_types|reimbursement_claims|job_openings|candidates|candidate_events|interviews|offers|onboarding_template|onboarding_tasks|assets|exits|exit_clearance|settlements|notifications|email_outbox|announcements|tickets|ticket_messages|policies|policy_acks|documents|review_cycles|reviews|goals|trainings|training_records|punch_photos|employee_changes|password_resets|shift_policies|lwf_rules|kra_templates|feedback|roster_entries|push_tokens|preboarding|preboarding_documents|training_lessons|training_questions|training_progress|training_attempts|candidate_files|recruitment_templates|question_bank|interview_questions|credit_consents|credit_checks|joining_documents|joining_acks|grades|cost_centres|business_units|custom_fields|employee_education|employee_experience|employee_skills|employee_certifications|comp_off_credits|tax_declarations|tax_declaration_items|payroll_budgets|bank_change_requests|chat_rooms|chat_messages|bot_knowledge|bot_log|custom_roles|report_schedules|feedback_rounds|feedback_requests|sms_outbox|gallery_photos|chat_files|intake_sources|candidate_sources|saved_reports|od_visits|cases|case_messages|surveys|survey_responses|approval_delegations|overtime_requests|interview_invites|separation_requests|salary_bills|competencies|review_competencies|goal_changes|training_sessions|session_attendees)\b/i.test(
-              statement,
-            );
+          const table = /^\s*INSERT\s+INTO\s+([a-z_][a-z0-9_]*)/i.exec(statement)?.[1]?.toLowerCase();
+          const returning = table && !/\bRETURNING\b/i.test(statement) && (await hasId(table));
           const result = await query(
             statement + (returning ? " RETURNING id" : ""),
             params,
