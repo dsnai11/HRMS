@@ -3,6 +3,7 @@
 // routes, no morning clock, no menu.
 import { registerActivation, runActivation } from "./activation.js";
 import { registerChannels, runCalls, sendWhatsapp } from "./channels.js";
+import { registerTracking, runTracking } from "./tracking.js";
 
 export const fieldForceEnabled = (env = process.env) => String(env.FIELD_FORCE ?? "on").trim().toLowerCase() !== "off";
 
@@ -11,6 +12,7 @@ export function registerFieldForce(router, app, env = process.env) {
   app.features.field_force = true;
   registerActivation(router, app);
   registerChannels(router, app, env);
+  registerTracking(router, app);
 }
 
 // One pass of every scheduled Field Force step; the tests call this with their own clock.
@@ -18,6 +20,7 @@ export async function runFieldForce(app) {
   // The phone notification goes first; WhatsApp follows for the same people.
   for (const sent of await runActivation(app)) await sendWhatsapp(app, sent);
   await runCalls(app);
+  await runTracking(app);
 }
 
 export function scheduleFieldForce(app, env = process.env) {

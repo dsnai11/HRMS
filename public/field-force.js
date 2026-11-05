@@ -89,10 +89,130 @@ async function fieldActivationPage(id) {
     Object.assign(document.createElement("a"), { href: url, download: `field-activation-${data.date}.csv` }).click();
     URL.revokeObjectURL(url);
   };
+  await faMovementCard(id, hrView);
   if (hrView) {
     await faClockCard(id);
+    await faTrackingCard(id);
     await faTeamCard(id, org);
   }
+}
+
+// ---- Phase 3: movement during the day, and one person's route on a map -------------------------------
+let faLeaflet = null;
+function faLoadLeaflet() {
+  // The map library the app already serves; the pictures come from OpenStreetMap.
+  const loaded = (el) =>
+    new Promise((resolve, reject) => {
+      el.onload = resolve;
+      el.onerror = reject;
+      document.head.append(el);
+    });
+  if (window.L) return Promise.resolve();
+  faLeaflet ??= Promise.all([
+    loaded(Object.assign(document.createElement("link"), { rel: "stylesheet", href: "/vendor/leaflet.css" })),
+    loaded(Object.assign(document.createElement("script"), { src: "/vendor/leaflet.js" })),
+  ]).catch(() => {
+    faLeaflet = null;
+    throw new Error("The map could not be loaded. Refresh the page.");
+  });
+  return faLeaflet;
+}
+async function faMovementCard(id, hrView) {
+  const data = await api(`/field-force/movement?date=${faState.date}`);
+  if (id !== renderId || !data.settings.tracking) return;
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>Movement</h2><p class="muted">Location is shared only by field staff who agreed in the app, only while punched in. Someone who moves less than ${data.settings.still_meters} m in ${Math.round(data.settings.still_minutes / 6) / 10} hours, without logging a customer visit, gets a nudge; if it happens again before they move, their manager is told. Opening a route is recorded in the activity log.</p><div id="fa-move"></div><div id="fa-route"></div>`;
+  document.querySelector("#content").append(card);
+  pagedList(card.querySelector("#fa-move"), data.people, {
+    head: "<tr><th>Employee</th><th>Branch</th><th>Sharing</th><th>Last location</th><th>Distance</th><th>Visits</th><th>Alerts</th><th></th></tr>",
+    row: (p) =>
+      `<tr><td>${faWho(p)}</td><td>${esc(p.branch_name || "—")}</td><td>${p.consent ? '<span class="pill">Agreed</span>' : '<span class="pill neutral">Not agreed</span>'}</td><td>${faTime(p.last_at) || "—"}</td><td>${p.points ? `${p.km} km` : "—"}</td><td>${p.visits || "—"}</td><td>${p.alerts ? `<span class="pill ${p.alert_open ? "" : "neutral"}">${p.alerts}${p.alert_open ? " open" : ""}</span>` : "—"}</td><td>${p.points || p.visits ? `<button class="ghost" data-fa-route="${p.id}">Route</button>` : ""}</td></tr>`,
+    text: (p) => `${p.name} ${p.employee_code || ""} ${p.branch_name || ""}`,
+    label: "people",
+    wire: (el) =>
+      el.querySelectorAll("[data-fa-route]").forEach((b) =>
+        b.addEventListener("click", () => busy(b, () => faRoute(card.querySelector("#fa-route"), Number(b.dataset.faRoute)))),
+      ),
+  });
+}
+async function faRoute(el, userId) {
+  const [r] = await Promise.all([api(`/field-force/route?user_id=${userId}&date=${faState.date}`), faLoadLeaflet()]);
+  el.innerHTML = `<h3>${faWho(r.person)}, ${esc(r.date)}</h3><p class="muted">${r.points.length} locations · ${r.visits.length} visits · ${r.alerts.length} alerts. Green: punch in; blue: punch out; red: customer visits.</p><div id="fa-map" class="pm-map" role="region" aria-label="Route map"></div>`;
+  const map = L.map("fa-map", { scrollWheelZoom: false }).setView([22.5, 79], 5);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors',
+  }).addTo(map);
+  const bounds = [];
+  const line = r.points.map((p) => [p.latitude, p.longitude]);
+  if (line.length) {
+    L.polyline(line, { color: "#2f6fd6", weight: 3 }).addTo(map);
+    bounds.push(...line);
+  }
+  const dot = (lat, lng, color, text) => {
+    if (lat == null || lng == null) return;
+    L.circleMarker([lat, lng], { radius: 7, color, fillColor: color, fillOpacity: 0.9 }).bindPopup(text).addTo(map);
+    bounds.push([lat, lng]);
+  };
+  for (const sh of r.shifts) {
+    dot(sh.in_latitude, sh.in_longitude, "#146c53", `Punch in ${esc(faTime(sh.in_at))}`);
+    if (sh.out_at) dot(sh.out_latitude, sh.out_longitude, "#2f6fd6", `Punch out ${esc(faTime(sh.out_at))}`);
+  }
+  for (const v of r.visits) dot(v.latitude, v.longitude, "#c0392b", `Visit ${esc(faTime(v.at))}${v.customer ? `: ${esc(v.customer)}` : ""}`);
+  if (bounds.length) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 16 });
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ---- Phase 3 setup: tracking ---------------------------------------------------------------------------
+async function faTrackingCard(id) {
+  const s = await api("/field-force/tracking/settings");
+  if (id !== renderId) return;
+  const editable = has("employees.write");
+  const dis = editable ? "" : "disabled";
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>Location during the day</h2><p class="muted">When on, field staff are asked in the app to agree to sharing their location while punched in (they can say no, or withdraw later). It stops at punch-out, the phone shows a notification while it is on, and locations are deleted after the number of days below. Staff need the new app version. Tell staff about it, and confirm the wording with HR and legal before switching it on.</p><label class="check"><input type="checkbox" id="fa-track" ${s.tracking ? "checked" : ""} ${dis}> Ask field staff to share their location while punched in, and check for no movement</label><div class="actions"><label>Location every (minutes)<input type="number" id="fa-ping" min="5" max="60" value="${s.ping_minutes}" ${dis}></label><label>No-movement check (minutes)<input type="number" id="fa-still" min="30" max="480" value="${s.still_minutes}" ${dis}></label><label>Counts as moved (metres)<input type="number" id="fa-metres" min="50" max="5000" value="${s.still_meters}" ${dis}></label><label>Keep locations (days)<input type="number" id="fa-keep" min="7" max="365" value="${s.keep_days}" ${dis}></label>${editable ? '<button class="secondary" id="fa-track-save">Save</button>' : ""}</div>${
+    editable
+      ? `<h3>Upload from a tracker</h3><p class="muted">A CSV with the columns employee_code, time (date and time), latitude and longitude. Only points inside the person's punched-in time are kept.</p><div class="actions"><button class="secondary" id="fa-import">Choose a CSV file</button></div><input type="file" id="fa-import-file" accept=".csv,text/csv" hidden>`
+      : ""
+  }`;
+  document.querySelector("#content").append(card);
+  card.querySelector("#fa-track-save")?.addEventListener("click", (e) =>
+    busy(e.currentTarget, async () => {
+      const n = (sel) => Number(card.querySelector(sel).value);
+      const saved = await api(
+        "/field-force/tracking/settings",
+        { tracking: card.querySelector("#fa-track").checked, ping_minutes: n("#fa-ping"), still_minutes: n("#fa-still"), still_meters: n("#fa-metres"), keep_days: n("#fa-keep") },
+        "PATCH",
+      );
+      notice(saved.tracking ? "Location during the day is on. Field staff are asked in the app." : "Location during the day is off.");
+      await render();
+    }),
+  );
+  const file = card.querySelector("#fa-import-file");
+  card.querySelector("#fa-import")?.addEventListener("click", () => file.click());
+  file?.addEventListener("change", async () => {
+    const f = file.files[0];
+    if (!f) return;
+    try {
+      const table = parseCsv(await f.text());
+      const head = (table.shift() ?? []).map((h) => h.trim().toLowerCase().replace(/[^a-z]+/g, "_"));
+      const col = (name) => head.indexOf(name);
+      const at = col("time") >= 0 ? col("time") : col("at");
+      const rows = table.map((r) => ({
+        employee_code: r[col("employee_code")],
+        time: r[at] ? new Date(r[at]).toISOString() : null,
+        latitude: Number(r[col("latitude")]),
+        longitude: Number(r[col("longitude")]),
+      }));
+      const r = await api("/field-force/pings/import", { rows });
+      notice(`${r.saved} locations saved. ${r.unknown} with an unknown employee code, ${r.outside_shift_or_duplicate} outside punched-in time or already there.`);
+    } catch (err) {
+      notice(err.message, true);
+    }
+    file.value = "";
+  });
 }
 
 // ---- setup: the morning clock ---------------------------------------------------------------------------

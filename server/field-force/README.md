@@ -16,11 +16,11 @@ Morning messages), which is off until HR turns it on.
 
 | Part | Where |
 | --- | --- |
-| Server code | `server/field-force/` (this folder): `index.js` is the only entry point; `activation.js` (Phase 1), `channels.js` (Phase 2) |
-| Database | `server/migrations/067_field_force.sql`, `068_field_force_escalation.sql`: tables `ff_staff`, `ff_settings`, `ff_days`, `ff_reports`, `ff_contacts` (no columns on shared tables) |
+| Server code | `server/field-force/` (this folder): `index.js` is the only entry point; `activation.js` (Phase 1), `channels.js` (Phase 2), `tracking.js` (Phase 3) |
+| Database | `server/migrations/067_field_force.sql`, `068_field_force_escalation.sql`, `069_field_force_tracking.sql`: tables `ff_staff`, `ff_settings`, `ff_days`, `ff_reports`, `ff_contacts`, `ff_consents`, `ff_pings`, `ff_visits`, `ff_alerts` (no columns on shared tables) |
 | API | everything under `/api/field-force/` |
 | Portal | `public/field-force.js`, the **Field Force** menu group |
-| Phone app | `mobile/src/screens/FieldForce.tsx` |
+| Phone app | `mobile/src/screens/FieldForce.tsx` (Home card), `mobile/src/fieldForceTask.ts` (background location) |
 | Tests | `test/field-force-*.test.js` |
 
 ## Where it plugs into the rest (the only shared lines)
@@ -30,7 +30,10 @@ Morning messages), which is off until HR turns it on.
 2. `public/index.html`: the `<script src="/field-force.js">` tag.
 3. `public/app.js`: the **Field Force** menu group (shown only when `config.features.field_force`),
    its icon, and the `fieldforce` page line.
-4. `mobile/src/screens/More.tsx`: `<FieldForceCard … />` on the Home screen.
+4. `mobile/src/screens/More.tsx`: `<FieldForceCard … />` on the Home screen; `mobile/index.js`: the
+   import of `./src/fieldForceTask` (Expo needs background tasks defined at start-up);
+   `mobile/app.config.js`: the `expo-location` options for tracking while punched in
+   ("Allow all the time" stays blocked); the `expo-task-manager` package.
 5. Generic hooks it uses, not specific to it: `app.features` (listed in `GET /api/config`),
    `app.whatsappHandlers` (the shared WhatsApp webhook offers each incoming message to these
    first; Field Force takes only its own reason buttons, `ff:` payloads), `app.notify`, and
@@ -65,6 +68,18 @@ the report time. Report only: no automatic leave.
   vendor). `APP_URL` must be set so the provider knows where to call back.
 - Every message and call, and its outcome, is kept in `ff_contacts` and shown per person.
 
+**Phase 3, tracking (built, off until switched on).** Field staff are asked in the app to
+agree to sharing their location while punched in (they can refuse or withdraw; both are
+logged). The phone sends a point every few minutes (default 15) only while the server says
+so: company switch on, agreement given, shift open. It stops at punch-out. Android shows a
+"Field tracking is on" notification; iPhone shows its location indicator; "Allow all the
+time" is never asked. Every check period (default 2 hours) someone who moved less than the
+set distance (default 200 m) without logging a customer visit gets a nudge; if it happens
+again before they move, their manager is told; no points at all is reported as "no
+signal". HR and the person's own manager see distance, visits and alerts per day and the
+route on a map (each view logged). Points can also come from a tracker CSV. Points are
+deleted after the retention period (default 90 days); visits are kept.
+
 **Not built yet (needs outside access or decisions):** the 9:30 day-plan check (CLU /
-Synoriq access), all-day location tracking and 2-hour no-movement alerts, and customer visit
-verification (customer and loan data, consent, calling-hour rules).
+Synoriq access) and customer visit verification calls (customer and loan phone numbers,
+customer consent, RBI calling-hour rules). Visits logged in the app are the starting point.
