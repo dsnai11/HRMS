@@ -711,6 +711,57 @@ const clock = (iso: string) =>
     minute: "2-digit",
   }).format(new Date(iso));
 
+// Field staff who have not punched in by the morning message see this card: punch in, or
+// tell their manager why. The answer goes into the day's activation report.
+type ActivationToday = {
+  field_team: string | null;
+  show: boolean;
+  reason?: string | null;
+  reason_label?: string | null;
+  reasons?: { value: string; label: string }[];
+};
+function ActivationCard({
+  api,
+  activation,
+  onSection,
+}: {
+  api: Api;
+  activation: { data: ActivationToday | null; reload: () => Promise<void> };
+  onSection: (s: Section) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const a = activation.data;
+  if (!a?.show) return null;
+  const choose = async (value: string) => {
+    tick();
+    setSaving(true);
+    const ok = await attempt(() => api("/activation/reason", { reason: value }));
+    setSaving(false);
+    if (!ok) return;
+    success();
+    await activation.reload();
+    if (value === "on_leave") onSection("Leave");
+  };
+  return (
+    <View style={[s.card, { borderColor: T.primary }]} accessibilityLabel="You have not punched in yet">
+      <View style={s.headRow}>
+        <Icon name="alarm-outline" size={22} color={T.primary} />
+        <Text style={s.heading}>You have not punched in yet</Text>
+      </View>
+      <Text style={s.body}>
+        {a.reason
+          ? `You told your manager: ${a.reason_label}. Punch in as soon as you start.`
+          : "Please punch in. If you cannot start yet, tell your manager why:"}
+      </Text>
+      <View style={{ gap: 8 }}>
+        {(a.reasons ?? []).map((r) => (
+          <Btn key={r.value} title={(a.reason === r.value ? "✓ " : "") + r.label} secondary={a.reason !== r.value} disabled={saving} onPress={() => void choose(r.value)} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function HomeScreen({
   api,
   files,
@@ -727,6 +778,7 @@ function HomeScreen({
   const home = useLoad(() => api<HomeData>("/home"));
   const news = useLoad(() => api<Announcement[]>("/announcements"));
   const today = useLoad(() => api<TodayInfo>("/me"));
+  const activation = useLoad(() => api<ActivationToday>("/activation/today"));
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const me = home.data?.me;
@@ -775,10 +827,12 @@ function HomeScreen({
         onSlidePunch={async () => {
           await onSlidePunch();
           void today.reload();
+          void activation.reload();
         }}
         onOdPunch={onOdPunch}
       />
       </Appear>
+      <ActivationCard api={api} activation={activation} onSection={onSection} />
       <Appear index={3}>
         <QuickLinks onSection={onSection} />
       </Appear>

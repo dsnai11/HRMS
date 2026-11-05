@@ -71,6 +71,7 @@ import {
   scheduleLearningReminders,
 } from "./routes/learning.js";
 import { registerCompOff, scheduleCompOffExpiry } from "./routes/compoff.js";
+import { registerFieldActivation, scheduleActivation } from "./routes/field-activation.js";
 import { registerTaxDeclarations } from "./routes/tax-declarations.js";
 import { registerPayrollReports } from "./routes/payroll-reports.js";
 import { registerChat } from "./routes/chat.js";
@@ -107,6 +108,7 @@ const STATIC = {
   "/recruit.js": ["recruit.js", "text/javascript"],
   "/profile360.js": ["profile360.js", "text/javascript"],
   "/designation-grades.js": ["designation-grades.js", "text/javascript"],
+  "/field-activation.js": ["field-activation.js", "text/javascript"],
   "/timeplus.js": ["timeplus.js", "text/javascript"],
   "/ess-plus.js": ["ess-plus.js", "text/javascript"],
   "/chat.js": ["chat.js", "text/javascript"],
@@ -227,6 +229,7 @@ export function createApp({
     registerAttendance,
     registerOrg,
     registerDesignationGrades,
+    registerFieldActivation,
     registerEmployees,
     registerReports,
     registerAdmin,
@@ -518,6 +521,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   scheduleReports(app);
   scheduleLearningReminders(app);
   scheduleCompOffExpiry(app);
+  scheduleActivation(app);
   server.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () =>
     console.log(`HRMS listening on port ${process.env.PORT || 3000}`),
   );

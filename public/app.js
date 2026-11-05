@@ -288,6 +288,7 @@ function navGroups() {
       [
         staff && ["myattendance", "My Attendance"],
         me.is_manager && ["team", "Supervisor"],
+        me.is_manager && !has("attendance.read") && ["fieldactivation", "Field activation"],
         (me.is_manager || has("leave.approve")) && ["teamcal", "Team calendar"],
       ],
     ],
@@ -354,6 +355,7 @@ function navGroups() {
         has("org.read") && ["organization", "Organization"],
         has("attendance.read") && ["attendance", "Attendance records"],
         has("attendance.read") && ["punchmap", "Punch map"],
+        has("attendance.read") && ["fieldactivation", "Field activation"],
         has("org.read") && ["workplaces", "Workplaces"],
         has("attendance.read") && ["muster", "Monthly muster"],
         has("leave.manage") && ["leaveadmin", "Leave & holidays"],
@@ -684,6 +686,7 @@ async function render() {
     if (page === "insights") return await insightsPage(id);
     if (page === "customreports") return await customReportsPage(id);
     if (page === "punchmap") return await punchMapPage(id);
+    if (page === "fieldactivation") return await fieldActivationPage(id);
     if (page === "concerns") return await concernsPage(id);
     if (page === "cases") return await casesPage(id);
     if (page === "surveys") return await surveysPage(id);
