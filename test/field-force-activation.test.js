@@ -85,9 +85,10 @@ test("Field Force activation: morning nudge, reminder, reasons and the 12:30 rep
   await at("2026-11-09T08:30:00");
   assert.equal((await notes()).length, 0);
   assert.equal((await call("/field-force/settings", { on: true, remind: "08:00" }, admin, "PATCH")).status, 400, "times out of order");
+  const clock = (await call("/field-force/settings", { on: true }, admin, "PATCH")).data;
   assert.deepEqual(
-    (await call("/field-force/settings", { on: true }, admin, "PATCH")).data,
-    { on: true, nudge: "08:30", remind: "10:00", report: "12:30" },
+    { on: clock.on, nudge: clock.nudge, remind: clock.remind, report: clock.report, ivr: clock.ivr, ai: clock.ai, whatsapp: clock.whatsapp },
+    { on: true, nudge: "08:30", remind: "10:00", report: "12:30", ivr: null, ai: null, whatsapp: false },
   );
 
   // Asha punches in at 8:10 from her phone.

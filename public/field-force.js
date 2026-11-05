@@ -5,6 +5,16 @@ let faState = { date: null, team: "", branch: "" };
 const FA_PILL = { on_time: "", late: "", reason: "", no_reply: "", waiting: "neutral", leave: "neutral", od: "neutral", off: "neutral" };
 const faTime = (iso) =>
   iso ? new Intl.DateTimeFormat("en-IN", { hour: "2-digit", minute: "2-digit" }).format(new Date(iso)) : "";
+// Where a reason came from, and how each message or call went.
+const FA_VIA = { app: "in the app", whatsapp: "by WhatsApp", ivr: "on the IVR call", ai: "on the AI call" };
+const FA_CHANNEL = { whatsapp: "WhatsApp", ivr: "IVR call", ai: "AI call" };
+const FA_CONTACT = { sent: "sent", failed: "failed", answered: "answered", no_answer: "no answer", skipped: "no mobile number" };
+const faContacts = (list = []) =>
+  list.length
+    ? list
+        .map((c) => `<small>${esc(FA_CHANNEL[c.channel])}${c.channel === "whatsapp" ? (c.step === "nudge" ? " (morning)" : " (reminder)") : ""}: ${esc(FA_CONTACT[c.status])}</small>`)
+        .join("")
+    : "—";
 const faWho = (p) => `${esc(p.name)}${p.employee_code ? ` (${esc(p.employee_code)})` : ""}`;
 
 async function fieldActivationPage(id) {
@@ -44,9 +54,9 @@ async function fieldActivationPage(id) {
     `<div class="stats">${tile("Punched in on time", c.on_time, `of ${working} working today`, true)}${tile("Punched in late", c.late)}${tile("Gave a reason", c.reason, reasons)}${tile(c.waiting ? "Not punched in yet" : "Not punched in, no reason", c.no_reply + c.waiting, c.leave || c.od ? `${c.leave} on leave · ${c.od} on duty` : "")}</div>` +
     `<div class="card"><h2>Field staff (${data.total})</h2><div id="fa-list"></div></div>`;
   pagedList(document.querySelector("#fa-list"), data.people, {
-    head: "<tr><th>Employee</th><th>Team</th><th>Branch</th><th>Manager</th><th>Today</th><th>Punched in</th><th>Reason</th></tr>",
+    head: "<tr><th>Employee</th><th>Team</th><th>Branch</th><th>Manager</th><th>Today</th><th>Punched in</th><th>Reason</th><th>Contacted</th></tr>",
     row: (p) =>
-      `<tr><td>${faWho(p)}</td><td>${esc(p.team_label)}</td><td>${esc(p.branch_name || "—")}</td><td>${esc(p.manager_name || "—")}</td><td><span class="pill ${FA_PILL[p.status]}">${esc(p.status_label)}</span></td><td>${faTime(p.first_in) || "—"}</td><td>${p.reason_label ? `${esc(p.reason_label)}${p.reason_note ? `<small>${esc(p.reason_note)}</small>` : ""}<small>at ${faTime(p.reason_at)}</small>` : "—"}</td></tr>`,
+      `<tr><td>${faWho(p)}</td><td>${esc(p.team_label)}</td><td>${esc(p.branch_name || "—")}</td><td>${esc(p.manager_name || "—")}</td><td><span class="pill ${FA_PILL[p.status]}">${esc(p.status_label)}</span></td><td>${faTime(p.first_in) || "—"}</td><td>${p.reason_label ? `${esc(p.reason_label)}${p.reason_note ? `<small>${esc(p.reason_note)}</small>` : ""}<small>at ${faTime(p.reason_at)}${p.reason_via ? ` · ${esc(FA_VIA[p.reason_via] ?? p.reason_via)}` : ""}</small>` : "—"}</td><td>${faContacts(p.contacts)}</td></tr>`,
     text: (p) => `${p.name} ${p.employee_code || ""} ${p.branch_name || ""} ${p.manager_name || ""} ${p.status_label} ${p.reason_label || ""}`,
     label: "people",
   });
@@ -59,8 +69,21 @@ async function fieldActivationPage(id) {
   document.querySelector("#fa-export").onclick = () => {
     const field = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const lines = [
-      ["Employee code", "Name", "Team", "Branch", "Manager", "Today", "Punched in", "Reason", "Note", "Reason given at"],
-      ...data.people.map((p) => [p.employee_code, p.name, p.team_label, p.branch_name, p.manager_name, p.status_label, faTime(p.first_in), p.reason_label, p.reason_note, faTime(p.reason_at)]),
+      ["Employee code", "Name", "Team", "Branch", "Manager", "Today", "Punched in", "Reason", "Note", "Reason given at", "Reason given", "Contacted"],
+      ...data.people.map((p) => [
+        p.employee_code,
+        p.name,
+        p.team_label,
+        p.branch_name,
+        p.manager_name,
+        p.status_label,
+        faTime(p.first_in),
+        p.reason_label,
+        p.reason_note,
+        faTime(p.reason_at),
+        FA_VIA[p.reason_via] ?? "",
+        (p.contacts ?? []).map((c) => `${FA_CHANNEL[c.channel]} ${c.step}: ${FA_CONTACT[c.status]}`).join("; "),
+      ]),
     ];
     const url = URL.createObjectURL(new Blob(["﻿" + lines.map((l) => l.map(field).join(",")).join("\r\n")], { type: "text/csv" }));
     Object.assign(document.createElement("a"), { href: url, download: `field-activation-${data.date}.csv` }).click();
@@ -74,19 +97,37 @@ async function fieldActivationPage(id) {
 
 // ---- setup: the morning clock ---------------------------------------------------------------------------
 async function faClockCard(id) {
-  const s = await api("/field-force/settings");
+  const [s, ready] = await Promise.all([api("/field-force/settings"), api("/field-force/channels")]);
   if (id !== renderId) return;
   const editable = has("employees.write");
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = `<h2>Morning messages</h2><p class="muted">Field staff who have not punched in get a phone notification at the first time, and a reminder at the second asking for a reason, which they give on the app's Home screen (on the way, on leave, app or network issue, or call me). At the third time each manager gets the list of their people who have not started, and HR gets everyone. Weekly offs, holidays, rest days, leave and on-duty days are skipped. Phone notifications reach phones only once push is set up (FCM); until then people see the reminder when they open the app. The report is emailed once email is set up.</p><label class="check"><input type="checkbox" id="fa-on" ${s.on ? "checked" : ""} ${editable ? "" : "disabled"}> Send the morning messages and the report</label><div class="actions"><label>Morning message<input type="time" id="fa-nudge" value="${esc(s.nudge)}" ${editable ? "" : "disabled"}></label><label>Reminder and reason<input type="time" id="fa-remind" value="${esc(s.remind)}" ${editable ? "" : "disabled"}></label><label>Report to managers and HR<input type="time" id="fa-report" value="${esc(s.report)}" ${editable ? "" : "disabled"}></label>${editable ? '<button class="secondary" id="fa-save">Save</button>' : ""}</div>`;
+  card.innerHTML = `<h2>Morning messages</h2><p class="muted">Field staff who have not punched in get a phone notification at the first time, and a reminder at the second asking for a reason, which they give on the app's Home screen (on the way, on leave, app or network issue, or call me). At the third time each manager gets the list of their people who have not started, and HR gets everyone. Weekly offs, holidays, rest days, leave and on-duty days are skipped. Phone notifications reach phones only once push is set up (FCM); until then people see the reminder when they open the app. The report is emailed once email is set up.</p><label class="check"><input type="checkbox" id="fa-on" ${s.on ? "checked" : ""} ${editable ? "" : "disabled"}> Send the morning messages and the report</label><div class="actions"><label>Morning message<input type="time" id="fa-nudge" value="${esc(s.nudge)}" ${editable ? "" : "disabled"}></label><label>Reminder and reason<input type="time" id="fa-remind" value="${esc(s.remind)}" ${editable ? "" : "disabled"}></label><label>Report to managers and HR<input type="time" id="fa-report" value="${esc(s.report)}" ${editable ? "" : "disabled"}></label></div>
+  <h3>Escalation (optional)</h3>
+  <p class="muted">Set up: phone notifications ${ready.push_ready ? "✓" : "✗ (not set up)"} · email ${ready.email_ready ? "✓" : "✗ (not set up)"} · WhatsApp ${ready.whatsapp_ready ? "✓" : "✗ (needs FF_WHATSAPP_PHONE_ID and the WhatsApp token)"} · calls ${ready.calls_ready ? "✓" : "✗ (needs a calling provider: FF_CALL_URL and FF_CALL_TOKEN)"}.</p>
+  <label class="check"><input type="checkbox" id="fa-wa" ${s.whatsapp ? "checked" : ""} ${editable ? "" : "disabled"}> Also send the morning message and the reminder by WhatsApp, with reason buttons</label>
+  <div class="actions"><label>Morning template<input id="fa-wa-nudge" value="${esc(s.wa_nudge_template)}" ${editable ? "" : "disabled"}></label><label>Reminder template<input id="fa-wa-remind" value="${esc(s.wa_remind_template)}" ${editable ? "" : "disabled"}></label><label>Language<input id="fa-wa-lang" value="${esc(s.wa_language)}" maxlength="6" ${editable ? "" : "disabled"}></label></div>
+  <p class="muted">Register both templates with Meta first. Morning: one variable, the first name ("Good morning {{1}}, please punch in to start your day."). Reminder: the first name and four quick-reply buttons in this order: On the way, On leave, App or network issue, Call me.</p>
+  <div class="actions"><label>IVR call (press a key)<input type="time" id="fa-ivr" value="${esc(s.ivr || "")}" ${editable ? "" : "disabled"}></label><label>AI voice call<input type="time" id="fa-ai" value="${esc(s.ai || "")}" ${editable ? "" : "disabled"}></label>${editable ? '<button class="secondary" id="fa-save">Save</button>' : ""}</div>
+  <p class="muted">Leave a call time blank to skip that call. Calls go only to people still not punched in and without a reason, once each, between the reminder and the report. Answers (key 1 to 4) are saved as their reason.</p>`;
   document.querySelector("#content").append(card);
   card.querySelector("#fa-save")?.addEventListener("click", (e) =>
     busy(e.currentTarget, async () => {
       const v = (sel) => card.querySelector(sel).value;
       const saved = await api(
         "/field-force/settings",
-        { on: card.querySelector("#fa-on").checked, nudge: v("#fa-nudge"), remind: v("#fa-remind"), report: v("#fa-report") },
+        {
+          on: card.querySelector("#fa-on").checked,
+          nudge: v("#fa-nudge"),
+          remind: v("#fa-remind"),
+          report: v("#fa-report"),
+          whatsapp: card.querySelector("#fa-wa").checked,
+          wa_nudge_template: v("#fa-wa-nudge").trim(),
+          wa_remind_template: v("#fa-wa-remind").trim(),
+          wa_language: v("#fa-wa-lang").trim(),
+          ivr: v("#fa-ivr") || null,
+          ai: v("#fa-ai") || null,
+        },
         "PATCH",
       );
       notice(saved.on ? `Morning messages on: ${saved.nudge}, ${saved.remind}, report at ${saved.report}.` : "Morning messages are off.");

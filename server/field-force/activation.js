@@ -31,15 +31,48 @@ export const STATUS = {
   od: "On duty / work from home",
   off: "Not a working day",
 };
-const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+export const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-const localTime = (ms, tz) =>
+export const localTime = (ms, tz) =>
   new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(ms));
 
-const DEFAULT_CLOCK = { on: false, nudge: "08:30", remind: "10:00", report: "12:30" };
+const DEFAULT_CLOCK = {
+  on: false,
+  nudge: "08:30",
+  remind: "10:00",
+  report: "12:30",
+  whatsapp: false,
+  wa_nudge_template: "ff_morning_activation",
+  wa_remind_template: "ff_activation_reason",
+  wa_language: "en",
+  ivr: null,
+  ai: null,
+};
 export async function clockOf(db, companyId) {
   const c = await db.prepare("SELECT * FROM ff_settings WHERE company_id=?").get(companyId);
-  return c ? { on: Boolean(c.active), nudge: c.nudge_at, remind: c.remind_at, report: c.report_at } : { ...DEFAULT_CLOCK };
+  if (!c) return { ...DEFAULT_CLOCK };
+  return {
+    on: Boolean(c.active),
+    nudge: c.nudge_at,
+    remind: c.remind_at,
+    report: c.report_at,
+    whatsapp: Boolean(c.whatsapp),
+    wa_nudge_template: c.wa_nudge_template,
+    wa_remind_template: c.wa_remind_template,
+    wa_language: c.wa_language,
+    ivr: c.ivr_at ?? null,
+    ai: c.ai_at ?? null,
+  };
+}
+// A reason given by the person (app, WhatsApp button, or a key pressed on a call). The latest
+// answer counts. `via` says where it came from, for the audit trail.
+export async function recordReason(db, { companyId, userId, day, reason, note = null, via, at }) {
+  await db
+    .prepare(
+      `INSERT INTO ff_days(company_id,user_id,day,reason,reason_note,reason_at,reason_via) VALUES(?,?,?,?,?,?,?)
+       ON CONFLICT (user_id,day) DO UPDATE SET reason=EXCLUDED.reason,reason_note=EXCLUDED.reason_note,reason_at=EXCLUDED.reason_at,reason_via=EXCLUDED.reason_via`,
+    )
+    .run(companyId, userId, day, reason, note, at, via);
 }
 // The person's team, or null when they are not field staff.
 export async function teamOf(db, userId) {
@@ -75,7 +108,7 @@ export async function dayStatus(app, companyId, day, { only = null, team = null,
   const inIds = `(${ids.map(() => "?").join(",")})`;
   const from = new Date(localToUtcMs(day, "00:00", timezone)).toISOString();
   const to = new Date(localToUtcMs(addDays(day, 1), "00:00", timezone)).toISOString();
-  const [holidays, chosen, roster, leave, onDuty, punches, log] = await Promise.all([
+  const [holidays, chosen, roster, leave, onDuty, punches, log, contacts] = await Promise.all([
     db
       .prepare("SELECT branch_id FROM holidays WHERE company_id=? AND date=? AND optional=0")
       .all(companyId, day),
@@ -94,7 +127,12 @@ export async function dayStatus(app, companyId, day, { only = null, team = null,
       .prepare(`SELECT user_id,MIN(in_at) first_in FROM shifts WHERE in_at>=? AND in_at<? AND user_id IN ${inIds} GROUP BY user_id`)
       .all(from, to, ...ids),
     db.prepare(`SELECT * FROM ff_days WHERE day=? AND user_id IN ${inIds}`).all(day, ...ids),
+    db
+      .prepare(`SELECT user_id,channel,step,status,reason,created_at FROM ff_contacts WHERE day=? AND user_id IN ${inIds} ORDER BY id`)
+      .all(day, ...ids),
   ]);
+  const contactsOf = new Map();
+  for (const c of contacts) contactsOf.set(c.user_id, [...(contactsOf.get(c.user_id) ?? []), c]);
   const companyHoliday = holidays.some((h) => h.branch_id === null);
   const branchHolidays = new Set(holidays.filter((h) => h.branch_id !== null).map((h) => h.branch_id));
   const chose = new Set(chosen.map((r) => r.user_id));
@@ -142,14 +180,17 @@ export async function dayStatus(app, companyId, day, { only = null, team = null,
         reason: e?.reason ?? null,
         reason_note: e?.reason_note ?? null,
         reason_at: e?.reason_at ?? null,
+        reason_via: e?.reason_via ?? null,
         nudged_at: e?.nudged_at ?? null,
         reminded_at: e?.reminded_at ?? null,
+        // WhatsApp messages and calls, oldest first.
+        contacts: (contactsOf.get(p.id) ?? []).map(({ user_id, ...c }) => c),
       };
     }),
   };
 }
 // Still to start today: a working day, not punched in, not on leave or OD.
-const pending = (p) => ["waiting", "no_reply", "reason"].includes(p.status);
+export const pending = (p) => ["waiting", "no_reply", "reason"].includes(p.status);
 
 // Marks a step for these people once; answers with those it was newly marked for.
 async function mark(db, companyId, day, column, ids, at) {
@@ -186,8 +227,11 @@ function reportText(list) {
 }
 
 // One pass of the morning clock for every company that has it switched on.
+// Answers with what it sent ({ companyId, day, step, people }), so the module can follow
+// the phone notification with WhatsApp (see index.js).
 export async function runActivation(app) {
   const { db, timezone } = app;
+  const events = [];
   const now = app.clock();
   const at = new Date(now).toISOString();
   const day = app.dayOf(at);
@@ -202,6 +246,7 @@ export async function runActivation(app) {
     const due = people.filter(pending);
     if (hhmm < times.remind) {
       const ids = await mark(db, companyId, day, "nudged_at", due.filter((p) => !p.nudged_at).map((p) => p.id), at);
+      if (ids.length) events.push({ companyId, day, step: "nudge", people: due.filter((p) => ids.includes(p.id)) });
       if (ids.length)
         await app.notify(ids, {
           companyId,
@@ -212,6 +257,7 @@ export async function runActivation(app) {
         });
     } else if (hhmm < times.report) {
       const ids = await mark(db, companyId, day, "reminded_at", due.filter((p) => !p.reason && !p.reminded_at).map((p) => p.id), at);
+      if (ids.length) events.push({ companyId, day, step: "remind", people: due.filter((p) => ids.includes(p.id)) });
       if (ids.length)
         await app.notify(ids, {
           companyId,
@@ -251,6 +297,7 @@ export async function runActivation(app) {
         });
     }
   }
+  return events;
 }
 
 
@@ -308,12 +355,7 @@ export function registerActivation(router, app) {
     if (p.status === "on_time" || p.status === "late") throw new HttpError(409, "You have already punched in today.");
     if (!pending(p)) throw new HttpError(409, "Today is not a working day for you, or you are already on leave or on duty.");
     const at = new Date(app.clock()).toISOString();
-    await db
-      .prepare(
-        `INSERT INTO ff_days(company_id,user_id,day,reason,reason_note,reason_at,reason_via) VALUES(?,?,?,?,?,?,'app')
-         ON CONFLICT (user_id,day) DO UPDATE SET reason=EXCLUDED.reason,reason_note=EXCLUDED.reason_note,reason_at=EXCLUDED.reason_at,reason_via=EXCLUDED.reason_via`,
-      )
-      .run(user.company_id, user.id, day, reason, note, at);
+    await recordReason(db, { companyId: user.company_id, userId: user.id, day, reason, note, via: "app", at });
     await audit("activation_reason_given", { day, reason });
     // "Call me" is passed on at once: to the manager, or HR when there is none.
     if (reason === "call_me") {
@@ -357,19 +399,52 @@ export function registerActivation(router, app) {
       if (typeof b.on !== "boolean") throw new HttpError(400, "On must be true or false.");
       next.on = b.on;
     }
-    for (const k of ["nudge", "remind", "report"])
+    const time = (v) => {
+      if (typeof v !== "string" || !TIME.test(v)) throw new HttpError(400, "Write times as HH:MM, for example 08:30.");
+      return v;
+    };
+    for (const k of ["nudge", "remind", "report"]) if (b[k] !== undefined) next[k] = time(b[k]);
+    // The calls are optional: blank or null means that call is not made.
+    for (const k of ["ivr", "ai"]) if (b[k] !== undefined) next[k] = b[k] === null || b[k] === "" ? null : time(b[k]);
+    if (b.whatsapp !== undefined) {
+      if (typeof b.whatsapp !== "boolean") throw new HttpError(400, "WhatsApp must be true or false.");
+      next.whatsapp = b.whatsapp;
+    }
+    for (const k of ["wa_nudge_template", "wa_remind_template"])
       if (b[k] !== undefined) {
-        if (typeof b[k] !== "string" || !TIME.test(b[k])) throw new HttpError(400, "Write times as HH:MM, for example 08:30.");
+        if (typeof b[k] !== "string" || !/^[a-z0-9_]{1,512}$/.test(b[k]))
+          throw new HttpError(400, "WhatsApp template names use small letters, numbers and _ only, as registered with Meta.");
         next[k] = b[k];
       }
-    if (!(next.nudge < next.remind && next.remind < next.report))
-      throw new HttpError(400, "The times must run in order: morning message, then reminder, then report.");
+    if (b.wa_language !== undefined) {
+      if (typeof b.wa_language !== "string" || !/^[a-z]{2,3}(_[A-Z]{2})?$/.test(b.wa_language))
+        throw new HttpError(400, "Write the template language as Meta does, for example en or hi.");
+      next.wa_language = b.wa_language;
+    }
+    const order = [next.nudge, next.remind, next.ivr, next.ai, next.report].filter(Boolean);
+    if (order.some((t, i) => i > 0 && t <= order[i - 1]))
+      throw new HttpError(400, "The times must run in order: morning message, reminder, IVR call, AI call, then report.");
     await db
       .prepare(
-        `INSERT INTO ff_settings(company_id,active,nudge_at,remind_at,report_at) VALUES(?,?,?,?,?)
-         ON CONFLICT (company_id) DO UPDATE SET active=EXCLUDED.active,nudge_at=EXCLUDED.nudge_at,remind_at=EXCLUDED.remind_at,report_at=EXCLUDED.report_at`,
+        `INSERT INTO ff_settings(company_id,active,nudge_at,remind_at,report_at,whatsapp,wa_nudge_template,wa_remind_template,wa_language,ivr_at,ai_at)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?)
+         ON CONFLICT (company_id) DO UPDATE SET active=EXCLUDED.active,nudge_at=EXCLUDED.nudge_at,remind_at=EXCLUDED.remind_at,
+           report_at=EXCLUDED.report_at,whatsapp=EXCLUDED.whatsapp,wa_nudge_template=EXCLUDED.wa_nudge_template,
+           wa_remind_template=EXCLUDED.wa_remind_template,wa_language=EXCLUDED.wa_language,ivr_at=EXCLUDED.ivr_at,ai_at=EXCLUDED.ai_at`,
       )
-      .run(companyId, next.on ? 1 : 0, next.nudge, next.remind, next.report);
+      .run(
+        companyId,
+        next.on ? 1 : 0,
+        next.nudge,
+        next.remind,
+        next.report,
+        next.whatsapp ? 1 : 0,
+        next.wa_nudge_template,
+        next.wa_remind_template,
+        next.wa_language,
+        next.ivr,
+        next.ai,
+      );
     await audit("activation_settings_updated", next);
     return send(200, next);
   });

@@ -172,6 +172,8 @@ export function createApp({
     db,
     // Optional modules that are switched on, for the portal (GET /api/config).
     features: {},
+    // Modules that take some incoming WhatsApp messages: (value, message) => true if taken.
+    whatsappHandlers: [],
     production,
     company,
     timezone,

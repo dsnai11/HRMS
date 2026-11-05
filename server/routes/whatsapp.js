@@ -116,19 +116,30 @@ export function registerWhatsapp(router, app, env = process.env, fetchFn = (...a
       .prepare("SELECT * FROM intake_sources WHERE kind='whatsapp' AND active=1 ORDER BY id LIMIT 1")
       .get();
     const outcome = [];
-    if (source)
-      for (const entry of payload.entry ?? [])
-        for (const change of entry.changes ?? []) {
-          const value = change.value ?? {};
-          for (const m of (value.messages ?? []).slice(0, 20)) {
+    for (const entry of payload.entry ?? [])
+      for (const change of entry.changes ?? []) {
+        const value = change.value ?? {};
+        messages: for (const m of (value.messages ?? []).slice(0, 20)) {
+          // Other modules first (such as Field Force reason buttons); the rest are resumes.
+          for (const take of app.whatsappHandlers ?? [])
             try {
-              outcome.push(await takeMessage(source, value, m));
-            } catch (e) {
+              if (await take(value, m)) {
+                outcome.push("handled");
+                continue messages;
+              }
+            } catch {
               outcome.push("failed");
-              await db.prepare("UPDATE intake_sources SET last_error=? WHERE id=?").run(String(e.message).slice(0, 300), source.id);
+              continue messages;
             }
+          if (!source) continue;
+          try {
+            outcome.push(await takeMessage(source, value, m));
+          } catch (e) {
+            outcome.push("failed");
+            await db.prepare("UPDATE intake_sources SET last_error=? WHERE id=?").run(String(e.message).slice(0, 300), source.id);
           }
         }
+      }
     // Meta retries anything but a 200, so problems are recorded on the source instead.
     return send(200, { ok: true, outcome });
   });
