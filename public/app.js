@@ -288,7 +288,6 @@ function navGroups() {
       [
         staff && ["myattendance", "My Attendance"],
         me.is_manager && ["team", "Supervisor"],
-        me.is_manager && !has("attendance.read") && ["fieldactivation", "Field activation"],
         (me.is_manager || has("leave.approve")) && ["teamcal", "Team calendar"],
       ],
     ],
@@ -341,6 +340,17 @@ function navGroups() {
         staff && ["surveys", "Surveys"],
       ],
     ],
+    // Field Force is a separate module: its menu appears only when the server has it on.
+    [
+      "Field Force",
+      "⚑",
+      config.features?.field_force
+        ? [
+            has("attendance.read") && ["fieldforce", "Activation"],
+            me.is_manager && !has("attendance.read") && ["fieldforce", "My field team"],
+          ]
+        : [],
+    ],
     [
       "Administration",
       "⚙",
@@ -355,7 +365,6 @@ function navGroups() {
         has("org.read") && ["organization", "Organization"],
         has("attendance.read") && ["attendance", "Attendance records"],
         has("attendance.read") && ["punchmap", "Punch map"],
-        has("attendance.read") && ["fieldactivation", "Field activation"],
         has("org.read") && ["workplaces", "Workplaces"],
         has("attendance.read") && ["muster", "Monthly muster"],
         has("leave.manage") && ["leaveadmin", "Leave & holidays"],
@@ -394,6 +403,7 @@ const NAV_ICONS = {
   LMS: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2 9 2 12 0v-5"/>',
   Reimbursement: '<path d="M6 4h12M6 9h12M9 4c6 0 6 10 0 10H6l8 7"/>',
   Connect: '<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>',
+  "Field Force": '<path d="M12 21s-7-6.1-7-11.5A7 7 0 0 1 19 9.5C19 14.9 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
   Administration: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
@@ -686,7 +696,7 @@ async function render() {
     if (page === "insights") return await insightsPage(id);
     if (page === "customreports") return await customReportsPage(id);
     if (page === "punchmap") return await punchMapPage(id);
-    if (page === "fieldactivation") return await fieldActivationPage(id);
+    if (page === "fieldforce") return await fieldActivationPage(id);
     if (page === "concerns") return await concernsPage(id);
     if (page === "cases") return await casesPage(id);
     if (page === "surveys") return await surveysPage(id);

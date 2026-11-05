@@ -1,10 +1,10 @@
-// Field force activation (Phase 1). Field staff (a per-person Field team: Collection or
+// Field Force: activation (Phase 1). Field staff (a per-person Field team: Collection or
 // Sales) are nudged each working morning to punch in. At the reminder time anyone not yet
 // punched in is asked for a reason, which they give from the phone app's Home screen. At
 // the report time their manager and HR get the list of who has not started. Nobody's
 // attendance or leave is changed by any of this: "activated" simply means punched in.
 //
-// The clock runs per company (Workplaces → Field activation), off until HR switches it on.
+// The clock runs per company (Field Force → Activation), off until HR switches it on.
 // Each step happens once per person per day, whatever the server does in between: if it was
 // asleep at 8:30 the nudge still goes at wake-up, but never after the reminder time.
 import { HttpError, integer, oneOf, optionalString, optionalId, isoDate } from "../http.js";
@@ -36,11 +36,14 @@ const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const localTime = (ms, tz) =>
   new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(ms));
 
-async function clockOf(db, companyId) {
-  const c = await db
-    .prepare("SELECT activation_on,activation_nudge_at,activation_remind_at,activation_report_at FROM companies WHERE id=?")
-    .get(companyId);
-  return { on: Boolean(c.activation_on), nudge: c.activation_nudge_at, remind: c.activation_remind_at, report: c.activation_report_at };
+const DEFAULT_CLOCK = { on: false, nudge: "08:30", remind: "10:00", report: "12:30" };
+export async function clockOf(db, companyId) {
+  const c = await db.prepare("SELECT * FROM ff_settings WHERE company_id=?").get(companyId);
+  return c ? { on: Boolean(c.active), nudge: c.nudge_at, remind: c.remind_at, report: c.report_at } : { ...DEFAULT_CLOCK };
+}
+// The person's team, or null when they are not field staff.
+export async function teamOf(db, userId) {
+  return (await db.prepare("SELECT team FROM ff_staff WHERE user_id=?").get(userId))?.team ?? null;
 }
 
 // Every field person's day: whether it is a working day for them, when they first punched
@@ -56,14 +59,14 @@ export async function dayStatus(app, companyId, day, { only = null, team = null,
     filters.push(` AND u.id IN (${only.map(() => "?").join(",")})`);
     params.push(...only);
   }
-  if (team) filters.push(" AND u.field_team=?"), params.push(team);
+  if (team) filters.push(" AND f.team=?"), params.push(team);
   if (branchId) filters.push(" AND u.branch_id=?"), params.push(branchId);
   if (scope?.sql) filters.push(scope.sql), params.push(...scope.params);
   const people = await db
     .prepare(
-      `SELECT u.id,u.name,u.employee_code,u.field_team,u.branch_id,b.name branch_name,u.manager_id,m.name manager_name,u.date_of_joining
-       FROM users u LEFT JOIN branches b ON b.id=u.branch_id LEFT JOIN users m ON m.id=u.manager_id
-       WHERE u.company_id=? AND u.active=1 AND u.role<>'super_admin' AND u.field_team IS NOT NULL${filters.join("")}
+      `SELECT u.id,u.name,u.employee_code,u.phone,f.team field_team,u.branch_id,b.name branch_name,u.manager_id,m.name manager_name,u.date_of_joining
+       FROM ff_staff f JOIN users u ON u.id=f.user_id LEFT JOIN branches b ON b.id=u.branch_id LEFT JOIN users m ON m.id=u.manager_id
+       WHERE u.company_id=? AND u.active=1 AND u.role<>'super_admin'${filters.join("")}
        ORDER BY b.name,u.name,u.id`,
     )
     .all(...params);
@@ -90,7 +93,7 @@ export async function dayStatus(app, companyId, day, { only = null, team = null,
     db
       .prepare(`SELECT user_id,MIN(in_at) first_in FROM shifts WHERE in_at>=? AND in_at<? AND user_id IN ${inIds} GROUP BY user_id`)
       .all(from, to, ...ids),
-    db.prepare(`SELECT * FROM activation_days WHERE day=? AND user_id IN ${inIds}`).all(day, ...ids),
+    db.prepare(`SELECT * FROM ff_days WHERE day=? AND user_id IN ${inIds}`).all(day, ...ids),
   ]);
   const companyHoliday = holidays.some((h) => h.branch_id === null);
   const branchHolidays = new Set(holidays.filter((h) => h.branch_id !== null).map((h) => h.branch_id));
@@ -153,8 +156,8 @@ async function mark(db, companyId, day, column, ids, at) {
   if (!ids.length) return [];
   const rows = await db
     .prepare(
-      `INSERT INTO activation_days(company_id,user_id,day,${column}) VALUES ${ids.map(() => "(?,?,?,?)").join(",")}
-       ON CONFLICT (user_id,day) DO UPDATE SET ${column}=EXCLUDED.${column} WHERE activation_days.${column} IS NULL
+      `INSERT INTO ff_days(company_id,user_id,day,${column}) VALUES ${ids.map(() => "(?,?,?,?)").join(",")}
+       ON CONFLICT (user_id,day) DO UPDATE SET ${column}=EXCLUDED.${column} WHERE ff_days.${column} IS NULL
        RETURNING user_id`,
     )
     .all(...ids.flatMap((id) => [companyId, id, day, at]));
@@ -189,7 +192,9 @@ export async function runActivation(app) {
   const at = new Date(now).toISOString();
   const day = app.dayOf(at);
   const hhmm = localTime(now, timezone);
-  const companies = await db.prepare("SELECT id FROM companies WHERE active=1 AND activation_on=1").all();
+  const companies = await db
+    .prepare("SELECT c.id FROM ff_settings s JOIN companies c ON c.id=s.company_id WHERE c.active=1 AND s.active=1")
+    .all();
   for (const { id: companyId } of companies) {
     const times = await clockOf(db, companyId);
     if (hhmm < times.nudge) continue;
@@ -217,7 +222,7 @@ export async function runActivation(app) {
         });
     } else {
       const fresh = await db
-        .prepare("INSERT INTO activation_reports(company_id,day,sent_at) VALUES(?,?,?) ON CONFLICT DO NOTHING RETURNING day")
+        .prepare("INSERT INTO ff_reports(company_id,day,sent_at) VALUES(?,?,?) ON CONFLICT DO NOTHING RETURNING day")
         .get(companyId, day, at);
       if (!fresh) continue;
       await mark(db, companyId, day, "reported_at", due.map((p) => p.id), at);
@@ -231,7 +236,7 @@ export async function runActivation(app) {
           kind: "activation",
           title: `${list.length} of your field team ${list.length === 1 ? "has" : "have"} not punched in today`,
           body: reportText(list),
-          link: "fieldactivation",
+          link: "fieldforce",
           email: true,
         });
       const hr = (await staffWith(db, companyId, ["attendance.read"])).map((r) => r.id);
@@ -241,18 +246,13 @@ export async function runActivation(app) {
           kind: "activation",
           title: `Field activation ${day}: ${due.length} not punched in by ${times.report}`,
           body: reportText(due),
-          link: "fieldactivation",
+          link: "fieldforce",
           email: true,
         });
     }
   }
 }
 
-export function scheduleActivation(app) {
-  const run = () => runActivation(app).catch((e) => console.error("Field activation failed:", e.message));
-  void run();
-  setInterval(run, 60000).unref();
-}
 
 const summary = (people) => {
   const counts = Object.fromEntries(Object.keys(STATUS).map((k) => [k, 0]));
@@ -271,20 +271,21 @@ const withLabels = (people) =>
     reason_label: p.reason ? REASONS[p.reason] : null,
   }));
 
-export function registerFieldActivation(router, app) {
+export function registerActivation(router, app) {
   const { db } = app;
   const today = () => app.dayOf(new Date(app.clock()).toISOString());
   const dateOf = (query) => (query.get("date") ? isoDate(query.get("date"), "Date") : today());
 
   // ---- the person's own morning (phone app Home screen) ------------------------------------
   const mine = async (user) => {
-    if (!user.field_team) return { field_team: null, show: false };
+    const fieldTeam = await teamOf(db, user.id);
+    if (!fieldTeam) return { field_team: null, show: false };
     const day = today();
     const { times, people } = await dayStatus(app, user.company_id, day, { only: [user.id] });
     const p = people[0];
     const started = times.on && localTime(app.clock(), app.timezone) >= times.nudge;
     return {
-      field_team: user.field_team,
+      field_team: fieldTeam,
       day,
       status: p?.status ?? "off",
       // The reason card shows from the morning nudge until they punch in.
@@ -295,12 +296,12 @@ export function registerFieldActivation(router, app) {
       reasons: Object.entries(REASONS).map(([value, label]) => ({ value, label })),
     };
   };
-  router.get("/api/activation/today", async ({ user, send }) => send(200, await mine(user)));
-  router.post("/api/activation/reason", { lane: "self" }, async ({ user, body, send, audit }) => {
+  router.get("/api/field-force/today", async ({ user, send }) => send(200, await mine(user)));
+  router.post("/api/field-force/reason", { lane: "self" }, async ({ user, body, send, audit }) => {
     const b = await body();
     const reason = oneOf(b.reason, "Reason", Object.keys(REASONS));
     const note = optionalString(b.note, "Note", 300);
-    if (!user.field_team) throw new HttpError(403, "This is for field staff.");
+    if (!(await teamOf(db, user.id))) throw new HttpError(403, "This is for field staff.");
     const day = today();
     const { people } = await dayStatus(app, user.company_id, day, { only: [user.id] });
     const p = people[0];
@@ -309,8 +310,8 @@ export function registerFieldActivation(router, app) {
     const at = new Date(app.clock()).toISOString();
     await db
       .prepare(
-        `INSERT INTO activation_days(company_id,user_id,day,reason,reason_note,reason_at) VALUES(?,?,?,?,?,?)
-         ON CONFLICT (user_id,day) DO UPDATE SET reason=EXCLUDED.reason,reason_note=EXCLUDED.reason_note,reason_at=EXCLUDED.reason_at`,
+        `INSERT INTO ff_days(company_id,user_id,day,reason,reason_note,reason_at,reason_via) VALUES(?,?,?,?,?,?,'app')
+         ON CONFLICT (user_id,day) DO UPDATE SET reason=EXCLUDED.reason,reason_note=EXCLUDED.reason_note,reason_at=EXCLUDED.reason_at,reason_via=EXCLUDED.reason_via`,
       )
       .run(user.company_id, user.id, day, reason, note, at);
     await audit("activation_reason_given", { day, reason });
@@ -322,21 +323,21 @@ export function registerFieldActivation(router, app) {
         kind: "activation",
         title: `${user.name} has not started and asked to be called`,
         body: `${note ? `"${note}" ` : ""}${user.phone ? `Phone: ${user.phone}` : ""}`.trim() || null,
-        link: "fieldactivation",
+        link: "fieldforce",
       });
     }
     return send(200, await mine(user));
   });
 
   // ---- reports: HR (everyone) and managers (their team) ---------------------------------------
-  router.get("/api/admin/activation", { perm: "attendance.read" }, async ({ user, companyId, query, send }) => {
+  router.get("/api/field-force/day", { perm: "attendance.read" }, async ({ user, companyId, query, send }) => {
     const day = dateOf(query);
     const team = query.get("team") ? oneOf(query.get("team"), "Team", Object.keys(TEAMS)) : null;
     const branchId = optionalId(query.get("branch_id") ? Number(query.get("branch_id")) : null, "Branch");
     const { times, people } = await dayStatus(app, companyId, day, { team, branchId, scope: branchScope(user) });
     return send(200, { date: day, times, ...summary(people), people: withLabels(people) });
   });
-  router.get("/api/team/activation", async ({ user, query, send }) => {
+  router.get("/api/field-force/team-day", async ({ user, query, send }) => {
     const day = dateOf(query);
     const team = (await db.prepare(TEAM_SQL).all(user.id)).map((r) => r.id);
     if (!team.length) throw new HttpError(403, "This is for managers.");
@@ -345,10 +346,10 @@ export function registerFieldActivation(router, app) {
   });
 
   // ---- setup: the clock, and who is field staff -------------------------------------------------
-  router.get("/api/admin/activation/settings", { perm: "attendance.read" }, async ({ companyId, send }) =>
+  router.get("/api/field-force/settings", { perm: "attendance.read" }, async ({ companyId, send }) =>
     send(200, await clockOf(db, companyId)),
   );
-  router.patch("/api/admin/activation/settings", { perm: "employees.write" }, async ({ companyId, body, send, audit }) => {
+  router.patch("/api/field-force/settings", { perm: "employees.write" }, async ({ companyId, body, send, audit }) => {
     const b = await body();
     const current = await clockOf(db, companyId);
     const next = { ...current };
@@ -364,29 +365,32 @@ export function registerFieldActivation(router, app) {
     if (!(next.nudge < next.remind && next.remind < next.report))
       throw new HttpError(400, "The times must run in order: morning message, then reminder, then report.");
     await db
-      .prepare("UPDATE companies SET activation_on=?,activation_nudge_at=?,activation_remind_at=?,activation_report_at=? WHERE id=?")
-      .run(next.on ? 1 : 0, next.nudge, next.remind, next.report, companyId);
+      .prepare(
+        `INSERT INTO ff_settings(company_id,active,nudge_at,remind_at,report_at) VALUES(?,?,?,?,?)
+         ON CONFLICT (company_id) DO UPDATE SET active=EXCLUDED.active,nudge_at=EXCLUDED.nudge_at,remind_at=EXCLUDED.remind_at,report_at=EXCLUDED.report_at`,
+      )
+      .run(companyId, next.on ? 1 : 0, next.nudge, next.remind, next.report);
     await audit("activation_settings_updated", next);
     return send(200, next);
   });
   // Without ?q: the field staff. With ?q: up to 20 others matching, to add.
-  router.get("/api/admin/field-team", { perm: "attendance.read" }, async ({ user, companyId, query, send }) => {
+  router.get("/api/field-force/staff", { perm: "attendance.read" }, async ({ user, companyId, query, send }) => {
     const scope = branchScope(user);
     const words = String(query.get("q") ?? "").toLowerCase().split(/\s+/).filter(Boolean).slice(0, 5);
     const rows = await db
       .prepare(
-        `SELECT u.id,u.name,u.employee_code,u.field_team,b.name branch_name,g.name designation_name
-         FROM users u LEFT JOIN branches b ON b.id=u.branch_id LEFT JOIN designations g ON g.id=u.designation_id
-         WHERE u.company_id=? AND u.active=1 AND u.role<>'super_admin' AND u.field_team IS ${words.length ? "NULL" : "NOT NULL"}
+        `SELECT u.id,u.name,u.employee_code,f.team field_team,b.name branch_name,g.name designation_name
+         FROM users u LEFT JOIN ff_staff f ON f.user_id=u.id LEFT JOIN branches b ON b.id=u.branch_id LEFT JOIN designations g ON g.id=u.designation_id
+         WHERE u.company_id=? AND u.active=1 AND u.role<>'super_admin' AND f.team IS ${words.length ? "NULL" : "NOT NULL"}
          ${words.map(() => " AND LOWER(CONCAT_WS(' ',u.name,u.employee_code,b.name,g.name)) LIKE ?").join("")}${scope.sql}
-         ORDER BY u.field_team,b.name,u.name${words.length ? " LIMIT 20" : ""}`,
+         ORDER BY f.team,b.name,u.name${words.length ? " LIMIT 20" : ""}`,
       )
       .all(companyId, ...words.map((w) => `%${w}%`), ...scope.params);
     return send(200, rows.map((p) => ({ ...p, team_label: TEAMS[p.field_team] ?? null })));
   });
   // Sets the team for chosen people, or for everyone active with a designation, department
   // and/or branch. team: null takes people off field staff.
-  router.patch("/api/admin/field-team", { perm: "employees.write" }, async ({ user, companyId, body, send, audit }) => {
+  router.patch("/api/field-force/staff", { perm: "employees.write" }, async ({ user, companyId, body, send, audit }) => {
     const b = await body();
     const team = b.team === null ? null : oneOf(b.team, "Team", Object.keys(TEAMS));
     const where = ["u.company_id=?", "u.active=1", "u.role<>'super_admin'"];
@@ -408,8 +412,14 @@ export function registerFieldActivation(router, app) {
     const ids = (
       await db.prepare(`SELECT u.id FROM users u WHERE ${where.join(" AND ")}${scope.sql}`).all(...params, ...scope.params)
     ).map((r) => r.id);
-    if (ids.length)
-      await db.prepare(`UPDATE users SET field_team=? WHERE id IN (${ids.map(() => "?").join(",")})`).run(team, ...ids);
+    if (ids.length && team)
+      await db
+        .prepare(
+          `INSERT INTO ff_staff(user_id,company_id,team,created_at) VALUES ${ids.map(() => "(?,?,?,?)").join(",")}
+           ON CONFLICT (user_id) DO UPDATE SET team=EXCLUDED.team`,
+        )
+        .run(...ids.flatMap((id) => [id, companyId, team, new Date(app.clock()).toISOString()]));
+    else if (ids.length) await db.prepare(`DELETE FROM ff_staff WHERE user_id IN (${ids.map(() => "?").join(",")})`).run(...ids);
     await audit("field_team_set", { team, count: ids.length, userIds: ids.slice(0, 200) });
     return send(200, { updated: ids.length });
   });

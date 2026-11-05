@@ -1,5 +1,6 @@
-// Field activation: who in the field team has punched in today and, if not, why. HR sees
-// everyone (Administration → Field activation) and sets it up; managers see their team.
+// Field Force (a separate module; shown only when the server has it switched on).
+// Activation: who in the field team has punched in today and, if not, why. HR sees
+// everyone (Field Force → Activation) and sets it up; managers see their team.
 let faState = { date: null, team: "", branch: "" };
 const FA_PILL = { on_time: "", late: "", reason: "", no_reply: "", waiting: "neutral", leave: "neutral", od: "neutral", off: "neutral" };
 const faTime = (iso) =>
@@ -13,7 +14,7 @@ async function fieldActivationPage(id) {
   if (hrView && faState.team) qs.set("team", faState.team);
   if (hrView && faState.branch) qs.set("branch_id", faState.branch);
   const [data, org] = await Promise.all([
-    api(`${hrView ? "/admin/activation" : "/team/activation"}?${qs}`),
+    api(`${hrView ? "/field-force/day" : "/field-force/team-day"}?${qs}`),
     hrView ? api("/admin/org") : null,
   ]);
   if (id !== renderId) return;
@@ -27,7 +28,7 @@ async function fieldActivationPage(id) {
   const working = data.total - c.leave - c.od - c.off;
   document.querySelector("#content").innerHTML =
     heading(
-      "Field activation",
+      "Field Force activation",
       hrView ? "Who in the field team has punched in, and why not." : "Who in your field team has punched in, and why not.",
       '<button class="secondary" id="fa-export">↓ Export CSV</button>',
     ) +
@@ -73,7 +74,7 @@ async function fieldActivationPage(id) {
 
 // ---- setup: the morning clock ---------------------------------------------------------------------------
 async function faClockCard(id) {
-  const s = await api("/admin/activation/settings");
+  const s = await api("/field-force/settings");
   if (id !== renderId) return;
   const editable = has("employees.write");
   const card = document.createElement("div");
@@ -84,7 +85,7 @@ async function faClockCard(id) {
     busy(e.currentTarget, async () => {
       const v = (sel) => card.querySelector(sel).value;
       const saved = await api(
-        "/admin/activation/settings",
+        "/field-force/settings",
         { on: card.querySelector("#fa-on").checked, nudge: v("#fa-nudge"), remind: v("#fa-remind"), report: v("#fa-report") },
         "PATCH",
       );
@@ -96,7 +97,7 @@ async function faClockCard(id) {
 
 // ---- setup: who is field staff ---------------------------------------------------------------------------
 async function faTeamCard(id, org) {
-  const people = await api("/admin/field-team");
+  const people = await api("/field-force/staff");
   if (id !== renderId) return;
   const editable = has("employees.write");
   const card = document.createElement("div");
@@ -109,7 +110,7 @@ async function faTeamCard(id, org) {
       : ""
   }<h3>Field staff (${people.length})</h3><div id="fa-team"></div>`;
   document.querySelector("#content").append(card);
-  const save = (body) => api("/admin/field-team", body, "PATCH");
+  const save = (body) => api("/field-force/staff", body, "PATCH");
   pagedList(card.querySelector("#fa-team"), people, {
     head: "<tr><th>Employee</th><th>Team</th><th>Designation</th><th>Branch</th><th></th></tr>",
     row: (p) =>
@@ -146,7 +147,7 @@ async function faTeamCard(id, org) {
     timer = setTimeout(async () => {
       const found = card.querySelector("#fa-found");
       if (!q.value.trim()) return (found.innerHTML = "");
-      const rows = await api(`/admin/field-team?q=${encodeURIComponent(q.value.trim())}`);
+      const rows = await api(`/field-force/staff?q=${encodeURIComponent(q.value.trim())}`);
       found.innerHTML = rows.length
         ? `<div class="cr-saved">${rows.map((p) => `<span class="cr-chip">${faWho(p)}${p.branch_name ? `<small>${esc(p.branch_name)}</small>` : ""}<button type="button" class="secondary" data-fa-add="${p.id}" data-team="collection">Collection</button><button type="button" class="secondary" data-fa-add="${p.id}" data-team="sales">Sales</button></span>`).join("")}</div>`
         : '<p class="muted">Nobody else matches.</p>';
