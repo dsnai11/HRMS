@@ -1073,14 +1073,17 @@ function employeeDialog(org, e) {
         if (!b.password) delete b.password;
         if (!b.employee_code) delete b.employee_code;
       } else if (!b.employee_code) delete b.employee_code;
-      await api(
+      const saved = await api(
         e ? `/admin/employees/${e.id}` : "/admin/employees",
         b,
         e ? "PATCH" : "POST",
       );
-      notice(e ? "Employee updated." : "Employee created.");
+      // A grade outside the designation's grades is saved, with a warning.
+      if (saved?.warning) notice(saved.warning, true);
+      else notice(e ? "Employee updated." : "Employee created.");
     },
   );
+  dgWireEmployeeForm(org);
 }
 
 const ORG_TABS = {
@@ -1091,7 +1094,13 @@ const ORG_TABS = {
     // Shown in the list; set with the Head button, not the edit form.
     shown: [["head_name", "Head"]],
   },
-  designations: { label: "Designations", noun: "designation", columns: [] },
+  designations: {
+    label: "Designations",
+    noun: "designation",
+    columns: [],
+    // Set with the Grades button or Import from sheet (designation-grades.js).
+    shown: [["grade_names", "Grades"]],
+  },
   grades: {
     label: "Grades",
     noun: "grade",
@@ -1150,7 +1159,9 @@ async function organizationPage(id) {
     heading(
       "Organization",
       "Companies, branches, departments and designations.",
-      manage ? `<button id="add">+ Add ${spec.noun}</button>` : "",
+      manage
+        ? `${orgTab === "designations" ? '<button class="secondary" id="dg-import">Import from sheet</button> ' : ""}<button id="add">+ Add ${spec.noun}</button>`
+        : "",
     ) +
     `<div class="tabbar">${Object.entries(tabs)
       .map(
@@ -1159,12 +1170,18 @@ async function organizationPage(id) {
       )
       .join(
         "",
-      )}</div><div class="card">${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th>${[...spec.columns, ...(spec.shown ?? [])].map(([, l]) => `<th>${l}</th>`).join("")}<th>Employees</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.name)}</td>${[...spec.columns, ...(spec.shown ?? [])].map(([k]) => `<td>${esc(r[k] || "—")}</td>`).join("")}<td>${r.employees ?? 0}</td><td><span class="pill ${r.active ? "" : "neutral"}">${r.active ? "Active" : "Inactive"}</span></td><td>${manage ? `<button class="secondary" data-edit="${r.id}">Edit</button>${orgTab === "departments" ? ` <button class="ghost" data-head="${r.id}">Head</button>` : ""}` : ""}</td></tr>`).join("")}</tbody></table></div>` : empty(`No ${spec.label.toLowerCase()} yet`, "Add the first one to get started.")}</div>`;
+      )}</div><div class="card">${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th>${[...spec.columns, ...(spec.shown ?? [])].map(([, l]) => `<th>${l}</th>`).join("")}<th>Employees</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.name)}</td>${[...spec.columns, ...(spec.shown ?? [])].map(([k]) => `<td>${esc(r[k] || "—")}</td>`).join("")}<td>${r.employees ?? 0}</td><td><span class="pill ${r.active ? "" : "neutral"}">${r.active ? "Active" : "Inactive"}</span></td><td>${manage ? `<button class="secondary" data-edit="${r.id}">Edit</button>${orgTab === "departments" ? ` <button class="ghost" data-head="${r.id}">Head</button>` : ""}${orgTab === "designations" ? ` <button class="ghost" data-grades="${r.id}">Grades</button>` : ""}` : ""}</td></tr>`).join("")}</tbody></table></div>` : empty(`No ${spec.label.toLowerCase()} yet`, "Add the first one to get started.")}</div>`;
   document
     .querySelectorAll("[data-tab]")
     .forEach((b) => (b.onclick = () => ((orgTab = b.dataset.tab), render())));
   const open = (row) => orgDialog(orgTab, spec, row);
   document.querySelector("#add")?.addEventListener("click", () => open());
+  document.querySelector("#dg-import")?.addEventListener("click", dgImportDialog);
+  document.querySelectorAll("[data-grades]").forEach((b) =>
+    b.addEventListener("click", () =>
+      busy(b, () => dgGradesDialog(rows.find((r) => r.id === Number(b.dataset.grades)))),
+    ),
+  );
   document.querySelectorAll("[data-head]").forEach((b) =>
     b.addEventListener("click", () => {
       const dept = rows.find((r) => r.id === Number(b.dataset.head));

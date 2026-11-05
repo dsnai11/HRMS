@@ -28,6 +28,9 @@ const KINDS = {
     userColumn: "designation_id",
     fields: [],
     max: {},
+    // The grades this designation may have (Organization → Designations → Grades).
+    extraSelect:
+      ",(SELECT string_agg(g.name, ', ' ORDER BY g.name) FROM designation_grades dg JOIN grades g ON g.id=dg.grade_id WHERE dg.designation_id=t.id) grade_names,(SELECT string_agg(dg.grade_id::text, ',') FROM designation_grades dg WHERE dg.designation_id=t.id) grade_ids",
   },
   grades: {
     label: "grade",
@@ -198,6 +201,12 @@ export function registerOrg(router, app) {
         departments: await active("departments"),
         designations: await active("designations"),
         grades: await active("grades"),
+        // [designation id, grade id] pairs: the grades each designation may have.
+        designation_grades: (
+          await db
+            .prepare("SELECT designation_id,grade_id FROM designation_grades WHERE company_id=?")
+            .all(companyId)
+        ).map((r) => [r.designation_id, r.grade_id]),
         cost_centres: await active("cost_centres"),
         business_units: await active("business_units"),
         workplaces: await db

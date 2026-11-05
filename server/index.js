@@ -9,6 +9,7 @@ import { loadPolicy } from "./policy.js";
 import { registerAuth } from "./routes/auth.js";
 import { registerAttendance, scheduleStaleShiftClose } from "./routes/attendance.js";
 import { registerOrg } from "./routes/org.js";
+import { registerDesignationGrades } from "./routes/designation-grades.js";
 import { registerEmployees } from "./routes/employees.js";
 import { registerReports } from "./routes/reports.js";
 import { registerAdmin } from "./routes/admin.js";
@@ -105,6 +106,7 @@ const STATIC = {
   "/learning.js": ["learning.js", "text/javascript"],
   "/recruit.js": ["recruit.js", "text/javascript"],
   "/profile360.js": ["profile360.js", "text/javascript"],
+  "/designation-grades.js": ["designation-grades.js", "text/javascript"],
   "/timeplus.js": ["timeplus.js", "text/javascript"],
   "/ess-plus.js": ["ess-plus.js", "text/javascript"],
   "/chat.js": ["chat.js", "text/javascript"],
@@ -224,6 +226,7 @@ export function createApp({
     registerAuth,
     registerAttendance,
     registerOrg,
+    registerDesignationGrades,
     registerEmployees,
     registerReports,
     registerAdmin,

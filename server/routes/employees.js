@@ -14,6 +14,7 @@ import {
 } from "../http.js";
 import { ROLES, assignableRoles, can } from "../rbac.js";
 import { branchScope, inBranchScope, requireOwned } from "../scope.js";
+import { gradeWarning } from "./designation-grades.js";
 
 const GENDERS = ["male", "female", "other"];
 const EMPLOYMENT = [
@@ -82,6 +83,11 @@ function canManage(caller, target) {
 
 export function registerEmployees(router, app) {
   const { db, transaction } = app;
+  // A grade outside the person's designation's grades is saved, with a warning back.
+  const gradeWarningFor = async (id) => {
+    const row = await db.prepare("SELECT designation_id,grade_id FROM users WHERE id=?").get(id);
+    return row ? await gradeWarning(db, row.designation_id, row.grade_id) : null;
+  };
 
   // People who have not signed in and set their own password yet, for handing out passwords.
   router.get("/api/admin/employees/not-signed-in", { perm: "employees.write" }, async ({ user, companyId, send }) =>
@@ -337,10 +343,10 @@ export function registerEmployees(router, app) {
   router.post(
     "/api/admin/employees",
     { perm: "employees.write" },
-    async ({ user, companyId, body, send, audit }) =>
-      send(201, {
-        id: await createEmployee(user, companyId, await body(), audit),
-      }),
+    async ({ user, companyId, body, send, audit }) => {
+      const id = await createEmployee(user, companyId, await body(), audit);
+      return send(201, { id, warning: await gradeWarningFor(id) });
+    },
   );
 
   router.patch(
@@ -495,7 +501,7 @@ export function registerEmployees(router, app) {
           passwordReset: b.password !== undefined,
         });
       });
-      return send(200, { ok: true });
+      return send(200, { ok: true, warning: await gradeWarningFor(id) });
     },
   );
 
