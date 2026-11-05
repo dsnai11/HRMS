@@ -602,7 +602,7 @@ export function registerLeave(router, app) {
   );
 
   // ---- applying for leave ---------------------------------------------------
-  router.post("/api/leave/requests", async ({ user, body, send, audit }) => {
+  router.post("/api/leave/requests", { lane: "self" }, async ({ user, body, send, audit }) => {
     const b = await body();
     const type = await requireOwned(
       db,

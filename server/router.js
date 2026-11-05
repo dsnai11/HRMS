@@ -4,6 +4,11 @@
 //   perm: "x.y"    caller needs this permission (checked in the company scope)
 //   any: true      any signed-in user (default requires nothing beyond sign-in)
 //   allowTemp: true  usable while a temporary password is still active
+//   concurrent: true  a save that need not wait for others (slow, self-contained work)
+//   lane: "self"   a save that changes only the caller's own records; it runs alongside
+//                  other people's, one at a time per person (createGate in postgres.js).
+//                  Use it only when the database itself refuses a duplicate (as
+//                  one_open_shift does) and nothing another person owns is changed.
 export function createRouter() {
   const routes = [];
   const add = (method) => (pattern, options, handler) => {

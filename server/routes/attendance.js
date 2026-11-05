@@ -144,7 +144,7 @@ export function registerAttendance(router, app) {
       throw new HttpError(400, "The selfie must be a JPEG.", "selfie_invalid");
     return value;
   }
-  router.post("/api/punch", async ({ req, user, body, send }) => {
+  router.post("/api/punch", { lane: "self" }, async ({ req, user, body, send }) => {
     rateLimit(`punch:${user.id}`, 60);
     // Phones on app versions before the selfie was shrunk send a full camera photo (2 MB+).
     const b = await body(3000000);
