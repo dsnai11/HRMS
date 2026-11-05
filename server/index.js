@@ -341,7 +341,7 @@ export function createApp({
     return id;
   }
 
-  const handle = async (req, res) => {
+  const handle = async (req, res, lane = "exclusive") => {
     const headers = {
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
@@ -435,6 +435,11 @@ export function createApp({
         c.audit = (action, detail) =>
           app.audit(c.user, action, detail, c.companyId);
       }
+      // A personal save waits only for the same person's other saves.
+      if (lane === "self")
+        return await (c.user
+          ? db.gate.personal(c.user.id, () => route.handler(c))
+          : db.gate.exclusive(() => route.handler(c)));
       return await route.handler(c);
     } catch (e) {
       // Unique-constraint violations from the database become a clean conflict.
@@ -471,17 +476,24 @@ export function createApp({
   };
   const server = http.createServer((req, res) => {
     req.setTimeout(20000, () => req.destroy());
-    void db
-      .serialized(() => timed(req, res, () => handle(req, res)), {
-        // GETs, and routes marked { concurrent: true } (slow, self-contained work
-        // such as the assistant's fallback), do not wait behind other writes.
-        concurrent:
-          req.method === "GET" ||
-          Boolean(
-            router.match(req.method, (req.url || "/").split("?")[0]).route
-              ?.options.concurrent,
-          ),
-      })
+    const route = router.match(req.method, (req.url || "/").split("?")[0]).route;
+    // GETs, and routes marked { concurrent: true } (slow, self-contained work such as
+    // the assistant's fallback), do not wait behind other saves. Routes marked
+    // { lane: "self" } change only the caller's own records: they sign in first and then
+    // wait only for that person's other saves (see createGate). Every other save runs alone.
+    const lane =
+      req.method === "GET" || route?.options.concurrent
+        ? "none"
+        : route?.options.lane === "self"
+          ? "self"
+          : "exclusive";
+    const run = () => timed(req, res, () => handle(req, res, lane));
+    void (lane === "exclusive"
+      ? db.serialized(run)
+      : lane === "self"
+        ? Promise.resolve().then(run)
+        : db.serialized(run, { concurrent: true })
+    )
       .catch(() => {
         if (!res.headersSent)
           res.writeHead(500, { "Content-Type": "application/json" });

@@ -112,7 +112,7 @@ export function registerRegularization(router, app) {
   const today = () => dayOf(nowIso());
   const SELECT = `SELECT r.*,u.name employee_name,u.employee_code FROM regularizations r JOIN users u ON u.id=r.user_id`;
 
-  router.post("/api/regularizations", async ({ user, body, send }) => {
+  router.post("/api/regularizations", { lane: "self" }, async ({ user, body, send }) => {
     const b = await body();
     const kind = oneOf(b.kind, "Type", KINDS);
     const date = isoDate(b.date, "Date");
@@ -171,7 +171,7 @@ export function registerRegularization(router, app) {
   // made for each working day in the range, sharing a batch id; weekly offs, holidays, days on
   // leave and days already waiting for a decision are skipped. Planned trips may be up to 30
   // days ahead.
-  router.post("/api/regularizations/batch", async ({ user, body, send }) => {
+  router.post("/api/regularizations/batch", { lane: "self" }, async ({ user, body, send }) => {
     const b = await body();
     const from = isoDate(b.from_date, "From date"),
       to = isoDate(b.to_date, "To date");

@@ -2,25 +2,81 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool } from "pg";
 import { runMigrations } from "./migrate.js";
 
-// The application deliberately runs as a single instance for the showcase.
-// Serialize request work so async SQLite transactions and PostgreSQL read/check/write
-// sequences have the same semantics. Transactions still commit atomically in the DB.
-export function serializedStore(store) {
-  let tail = Promise.resolve();
-  // On PostgreSQL, read-only requests (GET) may run alongside others: statements
-  // outside a transaction use their own pooled connection, and the few GET routes
-  // that write do so idempotently. Writes stay strictly in order.
+// The queue every save waits in. The application runs as a single instance, and most
+// routes read, check and then write, so saves are taken in order rather than all at once.
+//
+// - exclusive(fn): runs alone, as every save once did (HR, payroll and admin changes).
+// - personal(key, fn): a save that changes only one person's own records (a punch, a
+//   leave request). Different people's personal saves run side by side; one person's
+//   run in the order they arrived. None runs alongside an exclusive save.
+//
+// Waiting is first come, first served: an exclusive save waits for the personal saves
+// already running, and personal saves that arrive after it wait for it, so neither kind
+// can hold the other back for long. With parallel: false (the embedded database, which
+// has a single connection) every save runs alone.
+export function createGate({ parallel = true } = {}) {
+  const queue = [];
+  let exclusive = false;
+  let running = 0;
+  const busy = new Set();
+  const start = (entry) => {
+    if (entry.key === null) exclusive = true;
+    else busy.add(entry.key);
+    running++;
+    Promise.resolve()
+      .then(entry.fn)
+      .then(entry.resolve, entry.reject)
+      .finally(() => {
+        if (entry.key === null) exclusive = false;
+        else busy.delete(entry.key);
+        running--;
+        pump();
+      });
+  };
+  const pump = () => {
+    for (let i = 0; i < queue.length && !exclusive; ) {
+      const entry = queue[i];
+      if (entry.key === null) {
+        // Nothing queued behind an exclusive save may pass it.
+        if (i === 0 && running === 0) start(queue.shift());
+        return;
+      }
+      if (busy.has(entry.key)) i++;
+      else start(queue.splice(i, 1)[0]);
+    }
+  };
+  const enqueue = (key, fn) =>
+    new Promise((resolve, reject) => {
+      queue.push({ key, fn, resolve, reject });
+      pump();
+    });
+  return {
+    exclusive: (fn) => enqueue(null, fn),
+    personal: (key, fn) => enqueue(parallel ? String(key) : null, fn),
+    get waiting() {
+      return queue.length;
+    },
+    get running() {
+      return running;
+    },
+  };
+}
+
+export function serializedStore(store, { parallel = false } = {}) {
+  store.gate = createGate({ parallel });
+  // Read-only requests (GET) may run alongside others: statements outside a transaction
+  // use their own pooled connection, and the few GET routes that write do so idempotently.
   store.serialized = (fn, { concurrent = false } = {}) => {
     if (concurrent && store.dialect === "postgres")
       return Promise.resolve().then(fn);
-    const task = tail.then(fn);
-    tail = task.catch(() => {});
-    return task;
+    return store.gate.exclusive(fn);
   };
   return store;
 }
 
-export function createPostgresStore(pool) {
+// parallel: the pool hands each transaction its own connection, so personal saves may
+// overlap. The embedded database (PGlite) shares one connection and leaves this off.
+export function createPostgresStore(pool, { parallel = false } = {}) {
   const context = new AsyncLocalStorage();
   const query = (sql, params = []) =>
     (context.getStore() || pool).query(sql, params);
@@ -89,7 +145,7 @@ export function createPostgresStore(pool) {
       }
     },
     close: () => pool.end(),
-  });
+  }, { parallel });
 }
 
 export async function openPostgres(connectionString) {
@@ -105,7 +161,7 @@ export async function openPostgres(connectionString) {
       "PostgreSQL idle connection failed; the pool will reconnect.",
     ),
   );
-  const db = createPostgresStore(pool);
+  const db = createPostgresStore(pool, { parallel: true });
   try {
     await runMigrations(db);
     return db;
