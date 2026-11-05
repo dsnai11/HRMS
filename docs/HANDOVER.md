@@ -1,165 +1,176 @@
 # Handover: Laxmi India Finance HRMS
 
-Written 20 October 2026, at the end of a long build session with Claude Code. Everything you need to move this project to your own machine and carry on.
+Updated 5 November 2026. Read this on the new laptop to set up the project and carry on with Claude Code, on the same GitHub account and the same repository.
 
-## 1. What this is
+## 1. What this is, and where everything lives
 
-An HRMS for Laxmi India Finance Ltd. (1,000+ employees, several companies and branches): web portal, Android and iPhone app, and one API. Phone-only geofenced attendance with anti-spoofing, leave, payroll with Indian statutory rules, recruitment to exit, performance, learning, self-service, insights. Plain Node, no framework, PostgreSQL.
+An HRMS for Laxmi India Finance Ltd. (NBFC, 200+ branches across India, head office in Jaipur): a web portal, an Android and iPhone app, and one API. Phone-only geofenced attendance, leave, payroll with Indian statutory rules, hiring to exit, performance, learning (LMS), branch budgets, self-service, the Laxmi assistant and insights. Plain Node.js, no framework, PostgreSQL.
 
 | Thing | Where |
 | --- | --- |
-| Code | https://github.com/dsnai11/hrms (branch `main`) |
-| Live portal | https://hrms-hfsr.onrender.com (Render service **HRMS**, `srv-db940gu7bikc73djse2g`, free plan, auto-deploys every push to `main`) |
-| Database | Neon project `square-frog-78622540` (Postgres 18, AWS us-east-2, free plan: 1 GB cap, 6-hour point-in-time history) |
-| Daily backups | GitHub Action `backup.yml` (needs secrets, see section 5) |
-| Phone builds | GitHub Action `build-mobile.yml` (unsigned APK and IPA; IPA installed with Sideloadly and a free Apple ID) |
+| Code | https://github.com/dsnai11/HRMS (branch `main`; the old address `dsnai11/hrms` redirects) |
+| Live portal | https://hrms-hfsr.onrender.com (Render service **HRMS**, `srv-db940gu7bikc73djse2g`, Oregon, **free plan**, deploys every push to `main`) |
+| Database | Neon project `square-frog-78622540` (Postgres 18, AWS us-east-2, free plan) |
+| Tests on GitHub | Action **Validate HRMS** (`.github/workflows/ci.yml`) on every push and pull request |
+| Phone builds | Action **Build mobile apps** (`build-mobile.yml`): unsigned Android APK and iPhone IPA as artifacts; runs when `mobile/` changes on `main` or a `claude/*` branch, or by hand |
+| Daily backups | Action `backup.yml` (needs the secrets in section 5) |
 
-## 2. Run it on your machine
+## 2. Setting up the other laptop
 
-Needs Node 24 or newer.
-
-```bash
-git clone https://github.com/dsnai11/hrms.git
-cd hrms
-npm ci
-cp .env.example .env        # set ADMIN_EMAIL, ADMIN_NAME, ADMIN_PASSWORD (12+ characters)
-npm run bootstrap           # creates the first administrator, once
-npm start                   # http://localhost:3000
-npm test                    # about 90 tests, about 2 minutes
-```
-
-With no `DATABASE_URL`, an embedded PostgreSQL (PGlite) keeps data in `./data/pglite`. To use the live database locally, set `DATABASE_URL` to the Neon connection string (do not do this casually: it is the real data).
-
-To work on the phone app: `cd mobile && npm ci`, then see `docs/OPERATIONS.md` and `.github/workflows/build-mobile.yml`.
+1. **Install** (only these; nothing else is needed):
+   - Git for Windows (includes Git Credential Manager), from git-scm.com.
+   - Node.js 24 or newer, from nodejs.org.
+   - Python 3 (only for the UI UX Pro Max design skill), from python.org.
+   - The Claude desktop app, signed in with the **same Claude account**.
+2. **Get the code:**
+   ```bash
+   git clone https://github.com/dsnai11/HRMS.git hrms
+   cd hrms
+   npm ci
+   cd mobile && npm ci && cd ..
+   ```
+   The first `git push` opens a browser window to sign in to GitHub as **dsnai11** (Git Credential Manager). Never type the GitHub password in the terminal; GitHub refuses it.
+3. **Run it locally** (an embedded database, no internet needed):
+   ```bash
+   cp .env.example .env        # set ADMIN_EMAIL, ADMIN_NAME, ADMIN_PASSWORD (12+ characters)
+   npm run bootstrap           # creates the first administrator, once
+   npm start                   # http://localhost:3000
+   npm test                    # 156 tests, about 2.5 minutes; push only when "fail 0"
+   ```
+   Without `DATABASE_URL` the data lives in `./data/pglite`. Do not point a local copy at the live Neon database unless you mean to change real data.
+4. **Claude Code connections** to set up again on the new laptop (they are per machine): the **Neon** and **Render** connectors (used to check the live database and deploys), and the browser pane. Sign in to each when Claude asks.
+5. **The design skill** used for the UI work:
+   ```bash
+   npm install -g ui-ux-pro-max-cli
+   uipro init --ai claude --global
+   ```
+6. **Files that are not in git** (copy them yourself only if needed):
+   - `.env` (local settings; never commit it).
+   - `D:\project MY HRMS\hr-team-import.csv`: the HR team import sheet. It holds staff names and emails: keep it off shared drives.
+   - `AddettoHR.apk`: the old vendor's app, kept for reference only. Never commit it.
+   - Claude's own notes on this laptop (its "memory") do not travel. Everything it needs is in this file.
 
 ## 3. How the code is laid out
 
 ```
-server/index.js          builds the app, lists every route module, serves public/, starts background jobs
-server/router.js         tiny router: { public: true } (no login), { perm: "x.y" } (role permission)
-server/rbac.js           roles (super_admin, admin, hr, payroll, employee) and permission lists
-server/routes/*.js       one file per area, each exports registerXxx(router, app)
-server/migrations/*.sql  numbered, run in order at start-up (001 to 027 on main)
-server/payroll/          calculation engine, statutory rules, tax slabs
-server/postgres.js       wrapper over `pg` (see "gotchas")
-public/*.js              portal pages (plain scripts sharing one global scope, no build step)
-public/join.html,        public pages for candidates: joining portal and careers page
-  careers.html
-mobile/                  Expo app (React Native)
-test/*.test.js           node:test, run against PGlite with the real migrations
-docs/                    OPERATIONS, PILOT, ROADMAP, COMPARISON, PROPOSAL-MATCH, this file
-scripts/smoke/           browser smoke scripts (see its README)
+server/index.js           builds the app, lists every route module and static file, starts background jobs
+server/router.js          small router: { public: true } (no login), { perm: "x.y" } (a role permission)
+server/rbac.js            roles (super_admin, admin, hr, payroll, employee, custom) and permissions
+server/routes/*.js        one file per area; each exports registerXxx(router, app)
+server/migrations/*.sql   numbered, run once each at start-up (001 to 065 today)
+server/payroll/           pay engine, statutory rules, tax slabs
+server/brand.js           brand colour shades for the portal and the app
+server/postgres.js        wrapper over pg (PGlite in tests uses the same code)
+public/*.js               portal pages: plain scripts sharing ONE global scope, no build step
+public/styles.css         all portal styles (Day and Night themes, phone layout at the end)
+public/join.html, careers.html, agency.html, verify.html, letter.html, payslip.html   public pages
+mobile/                   Expo app (SDK 57, React Native 0.86, Expo Router)
+  src/screens/Attendance.tsx   app shell: sign-in, punch, top bar, menu, bottom bar
+  src/screens/More.tsx         Home, Profile and most self-service screens
+  src/screens/Daily.tsx        Att log, summary, regularization, OD, Multiple OD, leave, holidays
+  src/screens/Exit.tsx         resignation flow
+  src/theme.ts                 colours from Appearance & branding; themed() style sheets
+  src/ui.tsx                   icons, motion (Reanimated), skeletons, haptics, avatar
+test/*.test.js            node:test against PGlite with the real migrations
+docs/                     OPERATIONS, PILOT, ROADMAP, COMPARISON, PROPOSAL-MATCH, LAUNCH-5000, this file
 ```
 
-### Conventions and gotchas (these will bite you)
+### Rules that will bite if forgotten
 
-1. **New table with an `id`?** Add its name to the `INSERT … RETURNING id` regular expression in `server/postgres.js`, or `lastInsertRowid` is undefined on the live database (the embedded one hides this). A script check: every `id SERIAL PRIMARY KEY` table in the migrations must appear in that regex. All 88 do today.
-2. **Migrations** are append-only files `NNN_name.sql` using `IF NOT EXISTS`. Never edit one that has been deployed.
-3. **Content-Security-Policy forbids inline scripts and styles.** No `onclick=`, no `style=`; use classes in `public/styles.css`. SVG charts use attributes.
-4. **Portal scripts share one scope** and load in the order of `public/index.html`. A later file may call a function from an earlier one at run time. Each new script also needs an entry in the `STATIC` map in `server/index.js`.
-5. **Route order matters:** a static path like `/api/payslips/ytd` must be registered before `/api/payslips/:runId` (see the comment in `server/index.js`).
-6. **Read a request body once** (`await body()` twice hangs or fails).
-7. **Public routes** (`public: true`) must rate-limit and must not leak anything; follow `preboarding.js` and `careers` in `recruitment-plus.js`.
-8. **Sensitive data** (PAN, UAN, bank, credit API key, bureau report) is AES-256-GCM encrypted with `DATA_ENCRYPTION_KEY` via `server/crypto-store.js`; never stored in clear text.
-9. **Tests:** copy the `world()` helper at the top of `test/onboarding.test.js` (or `test/payroll.test.js` for payroll) to get a server with users per role, a fixed clock and a `setNow()`.
-10. **Always run `npm test` before pushing to `main`** and only push on `# fail 0`.
+1. **Migrations** are append-only `NNN_name.sql` with `IF NOT EXISTS`. Never edit one that has been deployed. The next number is **066**.
+2. **New row ids** come back automatically for any table with an `id` column (since 3 Nov the list is read from the database; it used to be a hand-kept list that had fallen behind).
+3. **The page security policy forbids inline scripts and styles:** no `onclick=`, no `style=` attributes, no Google Fonts or outside files. Use classes in `styles.css`; setting `element.style` from JavaScript is fine.
+4. **Portal scripts share one global scope.** A new top-level name must not clash with another file's (this broke the page once: `shrinkPhoto`). Each new script needs a `<script>` tag in `public/index.html` and an entry in the `STATIC` map in `server/index.js`.
+5. **Route order matters:** register `/api/x/fixed` before `/api/x/:id`.
+6. **Read a request body once** (`await body()`); large uploads pass a limit, `body(3_000_000)`.
+7. **Public routes** must rate-limit and leak nothing (see `preboarding.js`).
+8. **Sensitive data** (PAN, UAN, bank, bureau key) is encrypted with `DATA_ENCRYPTION_KEY` (`server/crypto-store.js`).
+9. **Tests:** copy a helper from `test/od-batch-optional.test.js` or `test/resignation.test.js`. Employees sign in with a phone (`native: true` plus a `device`) and send the device headers on later calls.
+10. **Phone app:** run `npx tsc --noEmit` and `npx eslint src` in `mobile/` before committing; add packages only with `npx expo install`; check `npx expo-doctor` (21/21 today). Colours come from `T` in `src/theme.ts`, never typed-in reds.
 
 ## 4. Environment variables (Render → HRMS → Environment)
 
 | Variable | State | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | set | Neon connection string |
-| `NODE_ENV`, `PORT`, `RENDER` | set by Render | production behaviour |
-| `DATA_ENCRYPTION_KEY` | **set** (32 bytes, base64) | encrypts PAN, bank, bureau key. **Back it up in a password manager. If lost, encrypted data cannot be recovered. Do not rotate casually.** |
-| `APP_URL` | **set** `https://hrms-hfsr.onrender.com` | builds links in emails (joining link, careers page, password reset) |
+| `DATA_ENCRYPTION_KEY` | **set** | encrypts PAN and bank details. **Keep a copy in a password manager; if lost, that data cannot be recovered. Never rotate casually.** |
+| `APP_URL` | **set** `https://hrms-hfsr.onrender.com` | links in emails and certificate checks |
 | `COMPANY_NAME`, `REPORT_TIMEZONE` | set | defaults |
-| `SETUP_TOKEN` | remove once the first admin exists | one-time admin setup |
-| `RESEND_API_KEY`, `MAIL_FROM` | **not set** | turns on email. Needs a Resend account and a verified sending domain. Until then nothing is emailed; HR copies links |
-| `FCM_SERVICE_ACCOUNT` | **not set** | Android push (Firebase). iPhone push is not possible with a free Apple ID |
-| `ANTHROPIC_API_KEY`, `BOT_MODEL` | optional, **not set** | turns on Laxmi's free-text answers by Claude (default model `claude-opus-5-5`). Without it Laxmi answers from rules, the knowledge base and policies only |
-| `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION` | recommended | file storage for selfies and documents; see `docs/LAUNCH-5000.md` |
-| `MAIL_PER_SECOND` | optional | mail provider sending rate (default 2) |
-| `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN` | optional | resumes sent to the company WhatsApp Business number (Cloud API); webhook `<PUBLIC_URL>/api/whatsapp/webhook`; add an RMS source of type WhatsApp for its default job |
-| `SSO_ALLOWED_DOMAINS`, `SSO_GOOGLE_CLIENT_ID`/`_SECRET`, `SSO_MICROSOFT_CLIENT_ID`/`_SECRET`/`_TENANT` | optional | "Sign in with Google / Microsoft" on the web portal for people already in the HRMS with an email in the allowed domains. Redirect URI: `<PUBLIC_URL>/api/sso/google/callback` (or `/microsoft/`) |
-| `PHOTO_RETENTION_DAYS`, `DB_POOL_MAX`, `LOGIN_IP_LIMIT`, `DB_SIZE_LIMIT_BYTES`, `TRUST_PROXY_HOPS`, `CREDIT_ALLOW_PRIVATE` | optional | see `docs/OPERATIONS.md`; `CREDIT_ALLOW_PRIVATE=1` is for tests only, never in production |
+| `RESEND_API_KEY`, `MAIL_FROM` | **not set** | email. Until set, nothing is emailed (no "forgot password" emails, no notifications by email) |
+| `FCM_SERVICE_ACCOUNT` | not set | Android push |
+| `ANTHROPIC_API_KEY`, `BOT_MODEL` | optional, not set | free-text answers in Ask Laxmi (default model `claude-opus-5-5`) |
+| `S3_*` | recommended | file storage for selfies, photos and documents (`docs/LAUNCH-5000.md`) |
+| `WHATSAPP_*`, `SSO_*` | optional | resumes by WhatsApp; Google / Microsoft sign-in |
 
-Secrets are never committed. GitHub repository secrets for the Actions: `DATABASE_URL` and `BACKUP_PASSPHRASE` (backups), `GOOGLE_SERVICES_JSON` (Android push build, optional).
+The phone app's server address is the GitHub Actions variable `EXPO_PUBLIC_API_URL`. A Google Maps key for Android goes in `mobile/app.config.js` at launch (iPhone uses Apple Maps without a key). Secrets are never committed.
 
 ## 5. Deploying
 
-- Push to `main` and Render builds the `Dockerfile` and restarts. Migrations run at start-up.
-- **Use a paid Render instance for real use.** The free one sleeps after idle time (first request takes about a minute) and has no uptime guarantee.
-- Neon free plan keeps only 6 hours of history, so the daily encrypted dump (`backup.yml`) matters. Add the two secrets above and run it once by hand to prove a restore works (`docs/OPERATIONS.md`).
-- Phone apps: run the **build-mobile** workflow from GitHub Actions and download the APK and IPA artifacts. Needs a new build whenever app code changes (the mobile Directory and Learning changes since the last build are not in your installed app).
+- **Pull request into `main`** → Render rebuilds the `Dockerfile` and restarts (about a minute); migrations run at start-up. Check https://hrms-hfsr.onrender.com/health.
+- GitHub runs **Validate HRMS** on the branch push, the pull request and the merge: three runs of the same tests, which is normal.
+- **Phone apps:** open the **Build mobile apps** run, download the APK and IPA under *Artifacts*. A new build is needed whenever `mobile/` changes. The IPA is unsigned (install with Sideloadly and an Apple ID).
+- Backups: add the `DATABASE_URL` and `BACKUP_PASSPHRASE` repository secrets and run `backup.yml` once by hand to prove a restore.
 
-## 6. What is built
+## 6. What is built (all live on `main`)
 
-Every module below is real, tested and in production code, not mock-up.
+- **Attendance:** geofenced phone punch with device binding, mock-location checks, optional selfie and fingerprint/face check, Apple Maps confirmation on iPhone, shift rules and rosters, regularization (Present, Outdoor duty, Work from home, **Short leave**), **Multiple OD** for a run of days, OD trips, overtime, biometric CSV import, muster, punch map.
+- **Leave:** types, accrual, half days, holidays, **optional holidays** (chosen within a yearly limit, approved by the manager), comp-off, team calendar, delegation of approvals.
+- **Payroll:** structure, runs, PF/ESI/PT/TDS/LWF, declarations and bills, loans, claims, bonus, gratuity, full and final, bank advice, payslips, **Form 16 bulk upload matched by PAN**.
+- **Hiring to exit:** requisitions, careers page, RMS with sources (email inbox, WhatsApp, agencies), interviews, credit checks, offers, joining portal (now asks for a **passport photo**), onboarding, probation, **full resignation flow** (reason, early release, handover, manager and HR told, step tracker, exit interview by the employee, withdrawal request), clearance, settlement, letters.
+- **LMS:** courses, department-wise assignment, catalogue, certificates with public verification, reports, live sessions.
+- **Branch budgets:** yearly budget by branch and head, zones and regions, manpower plan, maker-checker approval, revisions, budget vs actual from payroll, claims and entered spending.
+- **People:** employee master, org settings, custom roles limited by branch, **profile photos**, directory, org chart, 360° profile, **New temporary passwords** for people who have not signed in.
+- **Engagement and help:** announcements, surveys, cases (grievance, POSH, whistleblower), helpdesk, gallery, chat, **Ask Laxmi**, the **HR Guide** (HR team only).
+- **Look and feel:** enterprise design, Day and Night themes, works on phones, tablets and desktops; **Appearance & branding** (Administration) sets the brand colour and logo for the portal and the phone app. The phone app follows the old HR app's screen layout (bottom bar Home, Profile, OD, Att Log), with icons and motion.
+- **Speed:** the app's start-up check and the punch read the database in parallel; the GPS starts the moment Punch is tapped.
 
-- **Attendance:** geofenced phone punching, device binding, mock-location and emulator flags, risk rules, optional selfie (kept 90 days), shift rules (company, branch, department, person, day-by-day roster), shift templates, regularisation, on-duty and work-from-home, CSV biometric import, muster.
-- **Leave:** types, accrual, carry-forward, half days, holidays, comp-off with expiry, team calendar.
-- **Payroll:** structure, runs from attendance and leave, PF + ECR, ESI, professional tax, TDS (old and new regime), investment declarations, LWF, loans, claims, bonus, gratuity, arrears, full and final, bank advice, challans, payslips and year-to-date, cost report against budget.
-- **Hiring to exit:** requisitions, careers page and applicant tracker, skill match, pipeline board, interviews with panels, question bank and calendar invites, credit (CIBIL) check with consent, offers with e-acceptance, joining portal (documents, NDA and policy sign-off), welcome email, task owners, probation and confirmation, buddy, exit clearance and settlement.
-- **People:** employee master, grades and bands, cost centres, business units, custom fields, renamed terms, org chart, 360° profile, career changes and letters, directory with private contact details.
-- **Performance and learning:** goals, KRAs, reviews, feedback; courses with lessons, quizzes and certificates.
-- **Self-service:** payslips, letters, helpdesk with response times, policies and acknowledgements, bank changes with approval, documents, notifications (bell, email, Android push).
-- **Security:** roles, TOTP two-factor on the web, session controls, activity log, encrypted sensitive fields, rate limits, daily encrypted backups.
+`docs/PROPOSAL-MATCH.md` maps the proposal to what is built; `docs/COMPARISON.md` compares with Addetto.
 
-`docs/PROPOSAL-MATCH.md` maps every user story in the Unthinkable proposal to its status. `docs/COMPARISON.md` compares against Addetto. `docs/PILOT.md` is the pilot plan.
+## 7. State of the branches
 
-## 7. State of the branches (important)
+- **`main`** at `5d1736d` (pull request #14): everything above, deployed, all 156 tests passing, live database at migration 065.
+- **`claude/handover`**: this document.
+- All other `claude/*` branches are merged and can be deleted.
 
-- **`main`** (commit `d033ccf` at the time of writing): everything above, 90 tests passing, deployed.
-- **`claude/stage7-bot`**: internal chat and the Laxmi assistant, finished and tested (`test/chat-bot.test.js`), **not merged yet**. Portal pages *Messages* and *Ask Laxmi* (`public/chat.js`). Migration `028_chat_bot.sql` runs on the next deploy after the merge (it has not been applied to Neon). The phone app does not have these pages yet.
-- Older `claude/*` branches are all merged into `main` and can be deleted.
+## 8. The live system's people
 
-The Render deploy of `main` after the last merge may still have been building when this was written. Check https://hrms-hfsr.onrender.com/health returns `{"ok":true}`.
+- 21 accounts: the super administrator, three test accounts made during setup, and the **HR team of 17** (imported 3 November; 2 as **Admin**, 15 as **HR**, all reporting to the Vice President HR, code 8398).
+- The HR team need their passwords handed out: Administration → Employees → **New temporary passwords** (shown once; download the CSV).
+- 16 of them have **no workplace** yet, so they cannot punch from the phone until one is set (Employees → Manage → Attendance workplace). Indore and Ahmedabad need their own workplaces.
+- Passwords are never recorded in this repository.
 
-## 8. What is left
+## 9. What is left
 
-From the proposal (`docs/PROPOSAL-MATCH.md`), in the order I would do them:
+Needs the company:
+1. **Hosting:** Render's free plan sleeps after 15 minutes (first open takes about a minute) and is in Oregon; the database is in Ohio. Move to at least Render Starter, ideally both in Singapore.
+2. **Email:** a Resend account and verified domain, then `RESEND_API_KEY` and `MAIL_FROM`.
+3. **New phone builds** for staff, then switch on *Selfie and fingerprint at punch* once everyone has them.
+4. Google Maps key for Android; a chartered accountant's check of payroll before the first real run; the pilot (`docs/PILOT.md`).
 
-1. ~~Laxmi assistant and internal chat~~ (Module 11): built on `claude/stage7-bot` (see section 7). Left: the same two pages in the phone app, and HR filling the knowledge base and setting the pay day (*Ask Laxmi* page).
-2. **HR command centre** (RPT-01): one page with headcount by department, monthly attrition, open positions, joiners and leavers, demographics. Most numbers exist under Insights.
-3. **Multi-level approvals and escalation:** manager then HR for long leave, reminders when a request waits too long.
-4. **Anonymous 360° feedback rounds** (PER-05).
-5. Custom roles (today the five roles are fixed).
+Next work for Claude:
+1. **Let saves run side by side:** the server handles every save (punch, leave request) one at a time across the company (`serializedStore` in `server/postgres.js`), so a 9:30 rush queues up. Needs careful work and tests.
+2. Day / Night theme in the phone app.
+3. Leave rules during the notice period; email relieving and experience letters to the leaver's personal email.
+4. A warning when a job opening goes above a branch's sanctioned posts.
+5. Optional: run the CI tests once per pull request instead of on every branch push.
 
-Things only the company can supply:
+## 10. Known limits
 
-- **Email:** a Resend account, a verified domain, then set `RESEND_API_KEY` and `MAIL_FROM`.
-- **CIBIL:** the bureau or integration partner's API address, key and request format (set under Hiring → Credit checks → Settings). Until then HR enters scores by hand.
-- **Biometric devices:** the device make and model and its SDK or push protocol.
-- **LinkedIn, Naukri, Indeed auto-posting:** their paid APIs. The careers page and copy-paste adverts work now.
-- **Android push:** a Firebase project (`GOOGLE_SERVICES_JSON` secret for the build, `FCM_SERVICE_ACCOUNT` on Render).
-- **A chartered accountant's review of payroll** (PF, ESI, PT, TDS, gratuity, bonus) before the first real run. I verified many computations by hand but I am not a substitute for one. Tax slabs live in `server/payroll/statutory.js` and need updating after each Budget.
-- **The pilot** (`docs/PILOT.md`): one branch, 10 to 30 people, two weeks, one trial payroll.
+- Offer and policy acceptance is recorded consent, not a certified e-signature.
+- Form 16 is the TRACES-signed PDF uploaded by payroll; the HRMS does not make its own.
+- People count against the branch they are in today in cost and budget reports.
+- Free-plan limits: Render sleeps; Neon 1 GB and 6-hour history.
 
-## 9. Known limits (be honest with the client)
+## 11. Carrying on with Claude Code
 
-- Click-to-accept offers and policy sign-offs are recorded consent (typed name, time, address), not certified e-signatures.
-- Calendar invites are `.ics` files by email, not a live Google Calendar integration.
-- Year-end tax is a statement and filing data, not an official Form 16 file.
-- Declarations apply to the current tax year only; ask employees to declare again each April.
-- Videos in learning courses are links, not hosted.
-- The cost report groups people by where they are assigned today, not where they were in an older month.
-- The directory hides email and phone from ordinary employees (shown to HR, the person, their manager and reports).
-- Free-plan limits: Render sleeps, Neon 1 GB and 6-hour history.
+Open the `hrms` folder in the Claude desktop app (Code tab) and start with:
 
-## 10. People and accounts in the live system
+> Read docs/HANDOVER.md. Then [the next task].
 
-The live database has the super administrator and two employee accounts created during setup (no real payroll data yet). The super administrator has no personal pages (no Payslips, Learning and so on) by design: give your own employee login the **admin** role for daily use and keep the super administrator for creating companies. Passwords are not recorded anywhere in this repository.
-
-## 11. Carrying on with Claude Code locally
-
-```bash
-cd hrms
-claude
-```
-
-Good first prompts:
-
-- "Read docs/HANDOVER.md and docs/PROPOSAL-MATCH.md, then check `claude/stage7-bot` and finish the internal chat with tests and a portal page."
-- "Build the Laxmi assistant described in section 8 of docs/HANDOVER.md."
-
-Working pattern that worked well: one branch per chunk, tests added with the code, `npm test` green before each push to `main`, a browser check of each new screen, and a short report after each chunk. The repo's `.github/workflows/ci.yml` runs the tests on every push.
+How we have worked, and what Claude should keep doing:
+- **One branch per piece of work** (`claude/<topic>`), tests added with the code, `npm test` green, a browser check of each new screen, then a commit. **The owner pushes and merges** (Claude does not push unless asked).
+- Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- Plain, short explanations for a non-developer (the owner is the IT auditor): what changed, what to click, what is still open.
+- **Addetto** screens are a reference for layout and flow only: never copy their code, wording, images or logo. Laxmi's own logo and red-and-white branding stay.
+- Claude never types passwords on the owner's behalf, never solves CAPTCHAs, and asks before changing the live database (it may read it to check things).
+- Do not install software on the owner's machine unless asked; project packages are fine.
