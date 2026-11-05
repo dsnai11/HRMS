@@ -166,14 +166,18 @@ test("punch, leave and correction requests take the personal lane; HR changes st
 });
 
 // Optional: the same rush against a real PostgreSQL, where personal saves truly overlap.
-// Set TEST_DATABASE_URL to a throwaway database (never the live one); the test works in a
+// Set TEST_DATABASE_URL to a throwaway database (never the live one; on Neon, a test branch
+// and its direct address); the test works in a
 // schema of its own and drops it afterwards.
 test("a 9:30 rush on real PostgreSQL: everyone punches in once", { skip: !process.env.TEST_DATABASE_URL }, async (t) => {
   const schema = `parallel_test_${process.pid}_${Date.now()}`;
   const admin = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL });
   await admin.connect();
   await admin.query(`CREATE SCHEMA ${schema}`);
-  const pool = new pg.Pool({ connectionString: process.env.TEST_DATABASE_URL, max: 10, options: `-c search_path=${schema}` });
+  const pool = new pg.Pool({ connectionString: process.env.TEST_DATABASE_URL, max: 10 });
+  // Set on each new connection. On Neon use the direct address, not the "-pooler" one:
+  // the pooler shares connections between sessions, so this setting would not stick.
+  pool.on("connect", (client) => client.query(`SET search_path TO ${schema}`));
   const db = createPostgresStore(pool, { parallel: true });
   t.after(async () => {
     await db.close();
@@ -191,9 +195,20 @@ test("a 9:30 rush on real PostgreSQL: everyone punches in once", { skip: !proces
     return fn();
   });
   // Every person taps twice at the same moment.
-  const results = await Promise.all(env.people.flatMap((p) => [env.punch(p, "in"), env.punch(p, "in")]));
-  assert.equal(results.filter((r) => r.status === 200).length, 20);
-  assert.equal(results.filter((r) => r.status === 409).length, 20);
+  const started = Date.now();
+  const results = await Promise.all(
+    env.people.flatMap((p) => [env.punch(p, "in"), env.punch(p, "in")]).map((r) =>
+      r.catch((e) => ({ status: "failed", data: { error: e.cause?.code ?? e.message } })),
+    ),
+  );
+  const tally = {};
+  for (const r of results) {
+    const key = `${r.status} ${r.status === 200 ? "" : r.data.error}`.trim();
+    tally[key] = (tally[key] ?? 0) + 1;
+  }
+  t.diagnostic(`40 taps in ${Date.now() - started} ms, at most ${peak} at once: ${JSON.stringify(tally)}`);
+  assert.equal(results.filter((r) => r.status === 200).length, 20, JSON.stringify(tally));
+  assert.equal(results.filter((r) => r.status === 409).length, 20, JSON.stringify(tally));
   assert.equal((await db.prepare("SELECT COUNT(*) n FROM shifts WHERE out_at IS NULL").get()).n, 20);
   assert.ok(peak > 1, "punches overlapped");
 });
