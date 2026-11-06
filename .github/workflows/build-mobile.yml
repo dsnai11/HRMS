@@ -1,9 +1,20 @@
 name: Build mobile apps
+# Android builds by itself when the phone app changes on main. Both apps can be built by hand
+# for any branch (Actions → Build mobile apps → Run workflow). The iPhone build runs only by
+# hand: it needs a Mac machine, which GitHub counts at ten times the minutes.
 on:
   workflow_dispatch:
+    inputs:
+      ios:
+        description: "Also build the iPhone app (uses about 10x the minutes)"
+        type: boolean
+        default: true
   push:
-    branches: [main, claude/**]
+    branches: [main]
     paths: ["mobile/**", ".github/workflows/build-mobile.yml"]
+concurrency:
+  group: build-mobile-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   # Set under Settings > Secrets and variables > Actions > Variables.
@@ -43,6 +54,7 @@ jobs:
           path: mobile/android/app/build/outputs/apk/release/*.apk
 
   ios-ipa:
+    if: github.event_name == 'workflow_dispatch' && inputs.ios
     runs-on: macos-latest
     defaults:
       run:
