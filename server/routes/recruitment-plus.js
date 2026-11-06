@@ -10,6 +10,7 @@ import {
   optionalString,
   string,
 } from "../http.js";
+import { requireReasonIfOver } from "../sanctioned-posts.js";
 import { tokenHash } from "../db.js";
 import { requireOwned, staffWith } from "../scope.js";
 import { can } from "../rbac.js";
@@ -342,6 +343,18 @@ export function registerRecruitmentPlus(router, app) {
       const note = optionalString(b.note, "Note", 500) || null;
       if (decision === "rejected" && !note)
         throw new HttpError(400, "Tell the manager why.");
+      // Approving above the branch's sanctioned posts needs HR's reason.
+      if (decision === "approved") {
+        const overReason = await requireReasonIfOver(
+          app,
+          companyId,
+          { branchId: o.branch_id, designationId: o.designation_id, positions: o.positions },
+          b.over_sanction_reason,
+          audit,
+          o.id,
+        );
+        if (overReason) await db.prepare("UPDATE job_openings SET over_sanction_reason=? WHERE id=?").run(overReason, o.id);
+      }
       await db
         .prepare(
           "UPDATE job_openings SET approval_status=?,approved_by=?,approval_note=?,status=? WHERE id=?",

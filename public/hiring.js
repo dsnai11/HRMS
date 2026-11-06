@@ -1,3 +1,15 @@
+// An opening above the branch's sanctioned posts (Branch budgets) is saved only with a reason:
+// the server explains the numbers, HR gives the reason, and the request is sent again.
+async function withPostsReason(send) {
+  try {
+    return await send({});
+  } catch (e) {
+    if (e.code !== "over_sanctioned") throw e;
+    const reason = window.prompt(`${e.message}\n\nReason for going above sanctioned posts:`);
+    if (!reason?.trim()) throw new Error("Not saved: a reason is needed to go above sanctioned posts.");
+    return await send({ over_sanction_reason: reason.trim() });
+  }
+}
 // Hiring and exits: openings, candidates, onboarding, assets, exits; employee-side views.
 let hiringTab = "openings";
 const HIRING_TABS = {
@@ -183,10 +195,12 @@ async function hiringWire(tab) {
     on("#new-opening", openingDialog);
     each("[data-opening]", (b) =>
       busy(b, async () => {
-        await api(
-          `/admin/openings/${b.dataset.opening}`,
-          { status: b.dataset.status === "open" ? "closed" : "open" },
-          "PATCH",
+        await withPostsReason((extra) =>
+          api(
+            `/admin/openings/${b.dataset.opening}`,
+            { status: b.dataset.status === "open" ? "closed" : "open", ...extra },
+            "PATCH",
+          ),
         );
         render();
       }),
@@ -294,7 +308,7 @@ async function openingDialog() {
         "hiring_manager_id",
       ])
         if (b[k]) body[k] = Number(b[k]);
-      await api("/admin/openings", body);
+      await withPostsReason((extra) => api("/admin/openings", { ...body, ...extra }));
       notice("Opening created.");
     },
   );
@@ -750,11 +764,22 @@ async function exitView(id) {
   ${x.status === "accepted" ? `<h3>Clearance</h3>${x.clearance.map((c) => `<label class="check"><input type="checkbox" data-clear="${c.id}" ${c.cleared ? "checked" : ""}> ${esc(c.item)} <small>${esc(c.department)}</small></label>`).join("")}` : ""}
   ${x.status === "accepted" ? `<h3>Full and final settlement</h3>${x.settlement ? `<p class="muted">Posted to the ${monthLabel(x.settlement.pay_in_month)} payroll, where tax and net pay are worked out.</p>${x.settlement.data.lines.map(money).join("")}${x.settlement.data.info.map((i) => `<p class="muted">${esc(i)}</p>`).join("")}${canPay ? '<div class="actions"><button class="ghost" id="void-settle">Void and redo</button></div>' : ""}` : preview ? `${preview.lines.map(money).join("") || '<p class="muted">No earnings or recoveries calculated.</p>'}${preview.info.map((i) => `<p class="muted">${esc(i)}</p>`).join("")}${canPay ? '<div class="actions"><button id="post-settle">Post to payroll…</button></div>' : ""}` : '<p class="muted">Payroll staff prepare the settlement.</p>'}` : ""}
   ${x.status === "accepted" ? `<h3>Exit interview</h3><p class="muted">${x.interview_notes ? esc(x.interview_notes) : "Not recorded."}</p><div class="actions"><button class="secondary" id="interview">Record exit interview</button> <button class="secondary" id="change-lwd">Change last day</button> <button class="ghost" id="cancel-exit">Cancel exit</button> <button id="complete">Complete exit</button></div>` : ""}
-  ${x.status === "completed" ? `<div class="actions spaced"><a class="button secondary" target="_blank" rel="noopener" href="/letter.html?type=exit&kind=relieving&id=${x.id}">Relieving letter</a> <a class="button secondary" target="_blank" rel="noopener" href="/letter.html?type=exit&kind=experience&id=${x.id}">Experience certificate</a></div>` : ""}`;
+  ${x.status === "completed" ? `<div class="actions spaced"><a class="button secondary" target="_blank" rel="noopener" href="/letter.html?type=exit&kind=relieving&id=${x.id}">Relieving letter</a> <a class="button secondary" target="_blank" rel="noopener" href="/letter.html?type=exit&kind=experience&id=${x.id}">Experience certificate</a> <button class="secondary" id="email-letters">Email both letters</button></div>${x.personal_email ? `<p class="muted">Personal email given at resignation: ${esc(x.personal_email)}. The letters are emailed there when the exit is completed (once email is set up).</p>` : ""}` : ""}`;
   viewDialog(`Exit · ${x.employee_name}`, html);
   const on = (s, fn) =>
     document.querySelector(`dialog ${s}`)?.addEventListener("click", fn);
   const reopen = () => exitView(id);
+  // Relieving letter and experience certificate as PDFs to the leaver's personal email.
+  on("#email-letters", () =>
+    dialog(
+      "Email the letters",
+      `<p class="full muted">The relieving letter and experience certificate are sent as PDF attachments.</p>${input("to", "Send to", x.personal_email || "", 'type="email" maxlength="150" required')}`,
+      async (b) => {
+        const r = await api(`/admin/exits/${id}/letters/email`, { to: b.to });
+        notice(`Letters emailed to ${r.to}.`);
+      },
+    ),
+  );
   on("#wd-approve", async () => {
     try {
       await api(`/admin/exits/${id}/withdrawal`, { decision: "approved" });

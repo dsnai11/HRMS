@@ -9,7 +9,7 @@ import {
   optionalId,
 } from "../http.js";
 import { can } from "../rbac.js";
-import { branchScope, requireOwned } from "../scope.js";
+import { branchScope, requireOwned, staffWith } from "../scope.js";
 import {
   STEPS,
   chainOf,
@@ -77,6 +77,15 @@ export function registerLeave(router, app) {
   const today = () => dayOf(now(app));
 
   // ---- company calendar settings --------------------------------------------
+  // The person's notice period, once their resignation (or exit) is accepted: from the day
+  // notice was given to the last working day.
+  const noticeOf = async (userId) => {
+    const x = await db
+      .prepare("SELECT id,notice_given_on,last_working_day,requested_last_day FROM exits WHERE user_id=? AND status='accepted' ORDER BY id DESC")
+      .get(userId);
+    return x ? { id: x.id, from: x.notice_given_on, to: x.last_working_day ?? x.requested_last_day ?? null } : null;
+  };
+  const inNotice = (notice, day) => notice && day >= notice.from && (!notice.to || day <= notice.to);
   const settingsView = async (companyId) => {
     const s = await companySettings(db, companyId);
     return {
@@ -88,6 +97,9 @@ export function registerLeave(router, app) {
       weekly_off_saturdays: s.weekOff.saturdays,
       regularization_window_days: s.regularizationWindowDays,
       regularization_monthly_limit: s.regularizationMonthlyLimit,
+      notice_leave_extends: Boolean(
+        (await db.prepare("SELECT notice_leave_extends FROM companies WHERE id=?").get(companyId))?.notice_leave_extends,
+      ),
       ...(await approvalSettings(companyId)),
     };
   };
@@ -189,6 +201,8 @@ export function registerLeave(router, app) {
             );
           set[key] = JSON.stringify(steps);
         }
+      if (b.notice_leave_extends !== undefined)
+        set.notice_leave_extends = Number(bool(b.notice_leave_extends, "Leave extends the notice period"));
       for (const [key, label] of [
         ["approval_reminder_hours", "Reminder after (hours)"],
         ["approval_escalate_hours", "Escalate after (hours)"],
@@ -230,6 +244,8 @@ export function registerLeave(router, app) {
         Number(bool(v, "Half days")),
       ),
       encashable: pick("encashable", (v) => Number(bool(v, "Encashable"))),
+      // May be taken during the notice period, once a resignation is accepted.
+      allowed_in_notice: pick("allowed_in_notice", (v) => Number(bool(v, "Allowed during notice period"))),
       applicable_gender: pick("applicable_gender", (v) =>
         v === null || v === ""
           ? null
@@ -286,6 +302,7 @@ export function registerLeave(router, app) {
         applicable_gender: null,
         max_days_per_request: null,
         active: true,
+        allowed_in_notice: true,
         ...b,
       });
       const id = await transaction(async () => {
@@ -293,7 +310,7 @@ export function registerLeave(router, app) {
           (
             await db
               .prepare(
-                "INSERT INTO leave_types(company_id,name,code,paid,unlimited,quota_per_year,accrual,carry_forward_max,allow_half_day,applicable_gender,max_days_per_request,active,encashable,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO leave_types(company_id,name,code,paid,unlimited,quota_per_year,accrual,carry_forward_max,allow_half_day,applicable_gender,max_days_per_request,active,encashable,allowed_in_notice,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
               )
               .run(
                 companyId,
@@ -309,6 +326,7 @@ export function registerLeave(router, app) {
                 t.max_days_per_request,
                 t.active,
                 t.encashable,
+                t.allowed_in_notice,
                 now(app),
               )
           ).lastInsertRowid,
@@ -336,7 +354,7 @@ export function registerLeave(router, app) {
       await transaction(async () => {
         await db
           .prepare(
-            "UPDATE leave_types SET name=?,paid=?,unlimited=?,quota_per_year=?,accrual=?,carry_forward_max=?,allow_half_day=?,applicable_gender=?,max_days_per_request=?,active=?,encashable=? WHERE id=?",
+            "UPDATE leave_types SET name=?,paid=?,unlimited=?,quota_per_year=?,accrual=?,carry_forward_max=?,allow_half_day=?,applicable_gender=?,max_days_per_request=?,active=?,encashable=?,allowed_in_notice=? WHERE id=?",
           )
           .run(
             t.name,
@@ -350,6 +368,7 @@ export function registerLeave(router, app) {
             t.max_days_per_request,
             t.active,
             t.encashable,
+            t.allowed_in_notice,
             id,
           );
         await audit("leave_type_updated", { id, ...t });
@@ -679,6 +698,16 @@ export function registerLeave(router, app) {
         422,
         `${type.name} allows at most ${type.max_days_per_request} days per request.`,
       );
+    // HR chooses which leave types may be taken during the notice period.
+    if (!type.allowed_in_notice) {
+      const notice = await noticeOf(user.id);
+      if (slots.some((s) => inNotice(notice, s.day)))
+        throw new HttpError(
+          422,
+          `${type.name} cannot be taken during your notice period${notice.to ? ` (until ${notice.to})` : ""}. Choose another leave type, or ask HR.`,
+          "not_in_notice",
+        );
+    }
     const id = await transaction(async () => {
       if (!type.unlimited) {
         const pending = (
@@ -938,9 +967,33 @@ export function registerLeave(router, app) {
           companyId,
         );
       });
+      // Approved leave inside the notice period moves the last working day later, when the
+      // company has chosen that (Leave & holidays → Settings).
+      if (decision === "approved") await extendNotice(r, companyId);
       return send(200, { ok: true });
     },
   );
+  async function extendNotice(r, companyId) {
+    const c = await db.prepare("SELECT notice_leave_extends FROM companies WHERE id=?").get(companyId);
+    if (!c?.notice_leave_extends) return;
+    const notice = await noticeOf(r.user_id);
+    if (!notice?.to) return;
+    const slots = await db.prepare("SELECT day FROM leave_days WHERE request_id=?").all(r.id);
+    const days = Math.ceil(slots.filter((x) => inNotice(notice, x.day)).length / 2);
+    if (!days) return;
+    const next = new Date(Date.parse(`${notice.to}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+    await db.prepare("UPDATE exits SET last_working_day=? WHERE id=?").run(next, notice.id);
+    await app.audit(null, "notice_extended_by_leave", { exitId: notice.id, employeeId: r.user_id, leaveId: r.id, days, from: notice.to, to: next }, companyId);
+    const hr = (await staffWith(db, companyId, ["exit.manage"])).map((x) => x.id);
+    const message = {
+      companyId,
+      kind: "exit",
+      title: `Last working day moved to ${next}`,
+      body: `${days} day(s) of approved leave fall in the notice period, so it now ends on ${next} instead of ${notice.to}.`,
+    };
+    await app.notify([r.user_id], { ...message, link: "myemployment" });
+    if (hr.length) await app.notify(hr, { ...message, link: "hiring" });
+  }
   router.post(
     "/api/leave/requests/:id/cancel",
     async ({ params, user, companyId, send }) => {

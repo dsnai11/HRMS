@@ -1,10 +1,12 @@
 import { useSyncExternalStore } from "react";
+import { Appearance } from "react-native";
 import * as SecureStore from "expo-secure-store";
 
 // The app's colours. An administrator picks the brand colour on the web portal (Appearance &
 // branding); the app works out the same shades as the portal (server/brand.js) and recolours
 // every screen. Screens read colours from T, and style sheets made with themed() are rebuilt
-// when the brand changes.
+// when the brand or the Day / Night look changes. The look follows the phone's own light or
+// dark setting unless the person picks Day or Night on the Profile screen (kept on the phone).
 export type Brand = {
   primary: string | null;
   accent: string | null;
@@ -22,27 +24,33 @@ export const mix = (a: string, b: string, t: number) => {
   return hex(x.map((v, i) => v + (y[i] - v) * t));
 };
 
-const shades = (primary: string, accent: string | null) => ({
-  primary,
-  primaryDark: mix(primary, "#000000", 0.14),
-  primaryDeeper: mix(primary, "#000000", 0.3),
-  primaryHot: mix(primary, "#ffffff", 0.18),
-  light: mix(primary, "#ffffff", 0.4),
-  soft: mix(primary, "#ffffff", 0.9),
-  softer: mix(primary, "#ffffff", 0.95),
-  border: mix(primary, "#ffffff", 0.82),
-  onPrimarySoft: mix(primary, "#ffffff", 0.85),
-  accent: accent && HEX.test(accent) ? accent : mix(primary, "#ffffff", 0.18),
-});
+// Soft brand tints are mixed towards the card colour: white by day, dark grey by night.
+const shades = (primary: string, accent: string | null, dark = false) => {
+  const card = dark ? NIGHT.surface : "#ffffff";
+  return {
+    primary,
+    primaryDark: mix(primary, "#000000", 0.14),
+    primaryDeeper: mix(primary, "#000000", 0.3),
+    primaryHot: mix(primary, "#ffffff", 0.18),
+    light: mix(primary, card, 0.4),
+    soft: mix(primary, card, dark ? 0.78 : 0.9),
+    softer: mix(primary, card, dark ? 0.86 : 0.95),
+    border: mix(primary, card, dark ? 0.6 : 0.82),
+    onPrimarySoft: mix(primary, "#ffffff", 0.85),
+    accent: accent && HEX.test(accent) ? accent : mix(primary, "#ffffff", 0.18),
+  };
+};
 
-/** Brand colours plus the fixed neutrals and status colours. */
-export const T = {
-  ...shades(DEFAULT, null),
+// Neutrals and status colours for each look.
+const DAY = {
   ink: "#1f2130",
   body: "#3a3c4a",
   muted: "#626576",
+  faint: "#9a9cab",
   line: "#e8e6ee",
+  lineStrong: "#c9c8d3",
   page: "#f5f4f8",
+  fill: "#f4f3f7",
   surface: "#ffffff",
   success: "#1f7a4d",
   successSoft: "#e3f4ea",
@@ -53,7 +61,68 @@ export const T = {
   danger: "#b3261e",
   dangerSoft: "#fbe9e6",
 };
+const NIGHT: typeof DAY = {
+  ink: "#f1f1f5",
+  body: "#d6d6de",
+  muted: "#a3a5b3",
+  faint: "#7c7e8c",
+  line: "#2e2f3a",
+  lineStrong: "#454657",
+  page: "#111117",
+  fill: "#23242d",
+  surface: "#1b1c23",
+  success: "#5fc493",
+  successSoft: "#173326",
+  warning: "#f0b65a",
+  warningSoft: "#3a2c12",
+  info: "#7fb0ff",
+  infoSoft: "#16253f",
+  danger: "#ff8a80",
+  dangerSoft: "#3d1c1a",
+};
+
+/** Brand colours plus the neutrals and status colours of the current look. */
+export const T = {
+  ...shades(DEFAULT, null),
+  ...DAY,
+  // Text and icons on the brand colour: white in both looks.
+  onPrimary: "#ffffff",
+};
 export let brand: Brand = { primary: null, accent: null, logo_url: null, updated_at: null };
+
+// ---- Day / Night ------------------------------------------------------------------------
+export type ThemeMode = "system" | "light" | "dark";
+const MODE_KEY = "laxmi.hrms.theme";
+let mode: ThemeMode = "system";
+let dark = false;
+export const themeMode = () => mode;
+export const isDark = () => dark;
+function recolour() {
+  const next = mode === "system" ? Appearance.getColorScheme() === "dark" : mode === "dark";
+  const primary = brand.primary && HEX.test(brand.primary) ? brand.primary.toLowerCase() : DEFAULT;
+  dark = next;
+  Object.assign(T, shades(primary, brand.accent, dark), dark ? NIGHT : DAY);
+  version++;
+  listeners.forEach((l) => l());
+}
+/** Day, Night, or follow the phone; remembered on this phone. */
+export function setThemeMode(next: ThemeMode) {
+  mode = next;
+  recolour();
+  void SecureStore.setItemAsync(MODE_KEY, next).catch(() => {});
+}
+export async function restoreTheme() {
+  try {
+    const saved = await SecureStore.getItemAsync(MODE_KEY);
+    if (saved === "light" || saved === "dark" || saved === "system") mode = saved;
+  } catch {
+    /* follows the phone */
+  }
+  recolour();
+}
+Appearance.addChangeListener(() => {
+  if (mode === "system") recolour();
+});
 
 let version = 0;
 const listeners = new Set<() => void>();
@@ -69,7 +138,7 @@ export function applyBrand(next: Partial<Brand> | null | undefined, save = true)
   };
   if (JSON.stringify(merged) === JSON.stringify(brand)) return;
   brand = merged;
-  Object.assign(T, shades(primary, merged.accent));
+  Object.assign(T, shades(primary, merged.accent, dark));
   version++;
   listeners.forEach((l) => l());
   if (save) void SecureStore.setItemAsync(STORE_KEY, JSON.stringify(merged)).catch(() => {});

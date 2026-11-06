@@ -6,6 +6,7 @@ import {
   oneOf,
   optionalString,
   string,
+  email,
 } from "../http.js";
 import { requireOwned, staffWith } from "../scope.js";
 import { can } from "../rbac.js";
@@ -13,6 +14,7 @@ import { round } from "../payroll/engine.js";
 import { encashmentRate, gratuity } from "../payroll/extras.js";
 import { balances } from "../leave-ledger.js";
 import { exitLetter } from "../letters.js";
+import { textPdf } from "../text-pdf.js";
 import { loadConfig } from "./payroll-setup.js";
 
 const KINDS = [
@@ -1067,9 +1069,49 @@ export function registerExit(router, app) {
           .run(x.user_id);
         await audit("exit_completed", { id: x.id, employeeId: x.user_id });
       });
-      return send(200, { ok: true });
+      // The relieving letter and experience certificate go to the leaver's personal email.
+      const emailed = x.personal_email ? await emailLetters(x.id, companyId, x.personal_email, audit) : false;
+      return send(200, { ok: true, letters_emailed_to: emailed ? x.personal_email : null });
     },
   );
+  // The relieving letter or experience certificate for a completed exit.
+  async function exitLetterFor(exitId, companyId, kind) {
+    const row = await db.prepare(`${EXIT_SELECT} WHERE x.id=?`).get(exitId);
+    const company = await db.prepare("SELECT name FROM companies WHERE id=?").get(companyId);
+    return {
+      company: company.name,
+      ...exitLetter(kind, {
+        company: company.name,
+        person: {
+          name: row.employee_name,
+          employee_code: row.employee_code,
+          designation_name: row.designation_name,
+          department_name: row.department_name,
+        },
+        joined: row.date_of_joining ?? row.created_at.slice(0, 10),
+        lastDay: row.last_working_day,
+        today: today(),
+      }),
+    };
+  }
+  // Both letters as PDFs to an email address; false when email is not set up.
+  async function emailLetters(exitId, companyId, to, audit) {
+    const letters = await Promise.all(["relieving", "experience"].map((k) => exitLetterFor(exitId, companyId, k)));
+    const attachments = letters.map((l) => ({
+      filename: `${l.title.replace(/\s+/g, "-")}.pdf`,
+      content: textPdf({ heading: l.company, ...l }).toString("base64"),
+    }));
+    const row = await db.prepare(`${EXIT_SELECT} WHERE x.id=?`).get(exitId);
+    const sent = await app.notify.mail(
+      companyId,
+      to,
+      `${letters[0].company}: your relieving letter and experience certificate`,
+      `Dear ${row.employee_name},\n\nPlease find attached your relieving letter and experience certificate from ${letters[0].company}.\n\nWe wish you the very best.\n\n${letters[0].company}`,
+      attachments,
+    );
+    if (sent) await audit("exit_letters_emailed", { id: exitId, employeeId: row.user_id, to });
+    return sent;
+  }
   router.get(
     "/api/admin/exits/:id/letter",
     { perm: "exit.manage" },
@@ -1084,25 +1126,22 @@ export function registerExit(router, app) {
         "relieving",
         "experience",
       ]);
-      const row = await db.prepare(`${EXIT_SELECT} WHERE x.id=?`).get(x.id);
-      const company = await db
-        .prepare("SELECT name FROM companies WHERE id=?")
-        .get(companyId);
-      return send(200, {
-        company: company.name,
-        ...exitLetter(kind, {
-          company: company.name,
-          person: {
-            name: row.employee_name,
-            employee_code: row.employee_code,
-            designation_name: row.designation_name,
-            department_name: row.department_name,
-          },
-          joined: row.date_of_joining ?? row.created_at.slice(0, 10),
-          lastDay: x.last_working_day,
-          today: today(),
-        }),
-      });
+      return send(200, await exitLetterFor(x.id, companyId, kind));
+    },
+  );
+  // HR sends (or resends) both letters, to the personal email given at resignation or another.
+  router.post(
+    "/api/admin/exits/:id/letters/email",
+    { perm: "exit.manage" },
+    async ({ params, companyId, body, send, audit }) => {
+      const x = await owned("exits", params.id, companyId, "exit");
+      if (x.status !== "completed") throw new HttpError(409, "Letters are available once the exit is complete.");
+      const b = await body();
+      const to = b.to ? email(b.to) : x.personal_email;
+      if (!to) throw new HttpError(400, "There is no personal email for this person. Enter one.");
+      if (!(await emailLetters(x.id, companyId, to, audit)))
+        throw new HttpError(409, "Email is not set up yet (RESEND_API_KEY and MAIL_FROM), so the letters could not be sent.");
+      return send(200, { ok: true, to });
     },
   );
 }

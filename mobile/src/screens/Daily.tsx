@@ -21,7 +21,7 @@ import {
   useLoad,
 } from "./kit";
 
-import { T, themed } from "../theme";
+import { T, isDark, themed } from "../theme";
 import { Appear, Icon, tick } from "../ui";
 // The day-to-day screens of the phone app: attendance log and summary, regularization,
 // Multiple OD, leave (summary, request, history), holidays and optional holidays. The
@@ -38,18 +38,40 @@ export const C = {
   get soft() {
     return T.soft;
   },
-  ink: "#2a2c3a",
-  muted: "#6b6e7c",
-  line: "#eceaf1",
-  page: "#f8f7fa",
-  green: "#1f7a4d",
-  greenSoft: "#e3f4ea",
-  amber: "#8a5300",
-  amberSoft: "#fff1d6",
-  blue: "#1d5fbf",
-  blueSoft: "#e7effc",
+  get ink() {
+    return T.ink;
+  },
+  get muted() {
+    return T.muted;
+  },
+  get line() {
+    return T.line;
+  },
+  get page() {
+    return T.fill;
+  },
+  get green() {
+    return T.success;
+  },
+  get greenSoft() {
+    return T.successSoft;
+  },
+  get amber() {
+    return T.warning;
+  },
+  get amberSoft() {
+    return T.warningSoft;
+  },
+  get blue() {
+    return T.info;
+  },
+  get blueSoft() {
+    return T.infoSoft;
+  },
   violet: "#5b3fa6",
-  violetSoft: "#efeafb",
+  get violetSoft() {
+    return isDark() ? "#2a2140" : "#efeafb";
+  },
 };
 type Tone = "green" | "amber" | "red" | "blue" | "violet" | "grey";
 const TONE: Record<Tone, [string, string]> = themed(() => ({
@@ -58,7 +80,7 @@ const TONE: Record<Tone, [string, string]> = themed(() => ({
   red: [C.dark, C.soft],
   blue: [C.blue, C.blueSoft],
   violet: [C.violet, C.violetSoft],
-  grey: [C.muted, "#f0eff4"],
+  grey: [C.muted, T.fill],
 }));
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -219,7 +241,7 @@ export function DateField({
           setOpen(true);
         }}
       >
-        <Text style={{ color: value ? C.ink : "#9a9cab", fontSize: 15 }}>{value ? dmy(value) : "Tap to select"}</Text>
+        <Text style={{ color: value ? C.ink : T.faint, fontSize: 15 }}>{value ? dmy(value) : "Tap to select"}</Text>
       </Pressable>
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={d.backdrop} onPress={() => setOpen(false)}>
@@ -279,7 +301,7 @@ function TimeField({ label, value, onChange }: { label: string; value: string; o
         style={d.input}
         value={value}
         placeholder="09:30"
-        placeholderTextColor="#9a9cab"
+        placeholderTextColor={T.faint}
         keyboardType="numbers-and-punctuation"
         maxLength={5}
         onChangeText={(t) => {
@@ -985,7 +1007,7 @@ function LeaveSummary({ bal }: { bal: ReturnType<typeof useLoad<Balance[]>> }) {
   );
 }
 function Stat({ label, value, tone }: { label: string; value: string; tone?: Tone }) {
-  const [fg, bg] = tone ? TONE[tone] : [C.ink, "#f6f5f9"];
+  const [fg, bg] = tone ? TONE[tone] : [C.ink, T.fill];
   return (
     <View style={[d.stat, { backgroundColor: bg }]}>
       <Text style={[d.statLabel, { color: tone ? fg : C.muted }]}>{label}</Text>
@@ -1053,7 +1075,7 @@ function LeaveRequestForm({ api, balances, onDone }: { api: Api; balances: Balan
           }
         }}
       >
-        <Text style={{ color: docId ? C.ink : "#9a9cab" }}>{docId ? "📎 Document attached" : "Attach a medical document (optional)"}</Text>
+        <Text style={{ color: docId ? C.ink : T.faint }}>{docId ? "📎 Document attached" : "Attach a medical document (optional)"}</Text>
       </Pressable>
       <Btn
         title={working ? "Sending…" : "Submit request"}
@@ -1301,7 +1323,7 @@ export function HolidaysScreen({ api }: { api: Api }) {
         const p = parts(h.date);
         return (
           <Appear key={h.date + h.name} index={i} style={d.logCard}>
-            <View style={[d.dateBlock, { backgroundColor: "#fff", borderRightWidth: 1, borderColor: C.line }]}>
+            <View style={[d.dateBlock, { backgroundColor: T.surface, borderRightWidth: 1, borderColor: C.line }]}>
               <Text style={[d.dateSub, { color: C.red }]}>{MONTHS[p.m - 1].toUpperCase()}</Text>
               <Text style={[d.dateDay, { color: C.ink }]}>{p.day}</Text>
               <Text style={[d.dateSmall, { color: C.muted }]}>{WEEKDAYS[p.wd].toUpperCase()}</Text>
@@ -1417,18 +1439,18 @@ export function OptionalHolidayScreen({ api }: { api: Api }) {
 }
 
 export const d = themed(() => StyleSheet.create({
-  card: { backgroundColor: "#fff", borderWidth: 1, borderColor: C.line, borderRadius: 18, padding: 16, gap: 10 },
+  card: { backgroundColor: T.surface, borderWidth: 1, borderColor: C.line, borderRadius: 18, padding: 16, gap: 10 },
   heading: { color: C.ink, fontSize: 18, fontWeight: "700" },
   section: { color: C.ink, fontSize: 17, fontWeight: "700", marginTop: 4 },
   kicker: { color: C.muted, fontSize: 11, fontWeight: "700", letterSpacing: 1 },
   strong: { color: C.ink, fontSize: 15, fontWeight: "600" },
   strongBig: { color: C.ink, fontSize: 18, fontWeight: "700" },
   note: { color: C.muted, fontSize: 13, lineHeight: 19 },
-  error: { color: "#8a2a1c", backgroundColor: "#fbe9e6", padding: 12, borderRadius: 10 },
-  label: { fontSize: 12, fontWeight: "600", color: "#555867" },
+  error: { color: "#8a2a1c", backgroundColor: T.dangerSoft, padding: 12, borderRadius: 10 },
+  label: { fontSize: 12, fontWeight: "600", color: T.body },
   input: {
-    backgroundColor: "#fafafc",
-    borderColor: "#e1e0e8",
+    backgroundColor: T.fill,
+    borderColor: T.line,
     borderWidth: 1,
     borderRadius: 10,
     padding: 13,
@@ -1446,11 +1468,11 @@ export const d = themed(() => StyleSheet.create({
   chipText: { color: C.red, fontWeight: "600", fontSize: 13 },
   tag: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 12, alignSelf: "flex-start" },
   tagText: { fontSize: 12, fontWeight: "700" },
-  segments: { flexDirection: "row", backgroundColor: "#fff", borderRadius: 14, borderWidth: 1, borderColor: C.line, padding: 4, gap: 4 },
+  segments: { flexDirection: "row", backgroundColor: T.surface, borderRadius: 14, borderWidth: 1, borderColor: C.line, padding: 4, gap: 4 },
   segment: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center", minHeight: 40, justifyContent: "center" },
   segmentOn: { backgroundColor: C.red },
   segmentText: { color: C.ink, fontWeight: "600", fontSize: 13 },
-  meter: { height: 8, borderRadius: 4, backgroundColor: "#f0eff4", overflow: "hidden" },
+  meter: { height: 8, borderRadius: 4, backgroundColor: T.fill, overflow: "hidden" },
   meterFill: { height: 8, borderRadius: 4 },
   ring: {
     width: 92,
@@ -1473,7 +1495,7 @@ export const d = themed(() => StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "#fff",
+    backgroundColor: T.surface,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: C.line,
@@ -1482,7 +1504,7 @@ export const d = themed(() => StyleSheet.create({
   },
   monthArrow: { fontSize: 30, color: C.red, paddingHorizontal: 8 },
   monthText: { color: C.ink, fontSize: 16, fontWeight: "700" },
-  logCard: { flexDirection: "row", backgroundColor: "#fff", borderRadius: 18, borderWidth: 1, borderColor: C.line, overflow: "hidden" },
+  logCard: { flexDirection: "row", backgroundColor: T.surface, borderRadius: 18, borderWidth: 1, borderColor: C.line, overflow: "hidden" },
   dateBlock: { width: 76, backgroundColor: C.red, alignItems: "center", justifyContent: "center", paddingVertical: 14, gap: 2 },
   dateDay: { color: "#fff", fontSize: 28, fontWeight: "800" },
   dateSub: { color: T.onPrimarySoft, fontSize: 13, fontWeight: "600" },
@@ -1500,7 +1522,7 @@ export const d = themed(() => StyleSheet.create({
   primarySmallText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   emptyIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: C.soft, alignItems: "center", justifyContent: "center" },
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: 20 },
-  calendar: { backgroundColor: "#fff", borderRadius: 18, padding: 16, gap: 12, width: "100%", maxWidth: 420, alignSelf: "center" },
+  calendar: { backgroundColor: T.surface, borderRadius: 18, padding: 16, gap: 12, width: "100%", maxWidth: 420, alignSelf: "center" },
   calGrid: { flexDirection: "row", flexWrap: "wrap" },
   calHead: { width: "14.28%", textAlign: "center", color: C.muted, fontWeight: "700", fontSize: 12, paddingVertical: 4 },
   calCell: { width: "14.28%", aspectRatio: 1, alignItems: "center", justifyContent: "center", borderRadius: 22 },
@@ -1512,7 +1534,7 @@ export const d = themed(() => StyleSheet.create({
     maxWidth: 600,
     alignSelf: "center",
     maxHeight: "92%",
-    backgroundColor: "#fff",
+    backgroundColor: T.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 20,
@@ -1520,7 +1542,7 @@ export const d = themed(() => StyleSheet.create({
   },
   sheetHead: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   sheetTitle: { color: C.ink, fontSize: 20, fontWeight: "800" },
-  close: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#f3f2f7", alignItems: "center", justifyContent: "center" },
+  close: { width: 40, height: 40, borderRadius: 20, backgroundColor: T.fill, alignItems: "center", justifyContent: "center" },
   codeBadge: { width: 52, height: 52, borderRadius: 14, backgroundColor: C.red, alignItems: "center", justifyContent: "center" },
   codeBadgeText: { color: "#fff", fontWeight: "800", fontSize: 16 },
   fromTo: { flex: 1, minWidth: 110, borderRadius: 12, padding: 10 },
@@ -1531,15 +1553,15 @@ export const d = themed(() => StyleSheet.create({
   chartBar: { width: "70%", minHeight: 2, borderTopLeftRadius: 6, borderTopRightRadius: 6 },
   chartValue: { color: C.ink, fontWeight: "700", fontSize: 12 },
   chartLabel: { color: C.muted, fontSize: 11 },
-  nextHoliday: { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", borderRadius: 14, overflow: "hidden", marginTop: 6 },
+  nextHoliday: { flexDirection: "row", alignItems: "center", backgroundColor: T.surface, borderRadius: 14, overflow: "hidden", marginTop: 6 },
   tileGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  tile: { flexGrow: 1, flexBasis: "30%", minWidth: 96, backgroundColor: "#fff", borderRadius: 16, borderWidth: 1, borderColor: C.line, padding: 14, alignItems: "center", gap: 4 },
+  tile: { flexGrow: 1, flexBasis: "30%", minWidth: 96, backgroundColor: T.surface, borderRadius: 16, borderWidth: 1, borderColor: C.line, padding: 14, alignItems: "center", gap: 4 },
   tileValue: { fontSize: 26, fontWeight: "800" },
-  choice: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#fff", borderRadius: 14, borderWidth: 1, borderColor: C.line, padding: 14, minHeight: 56 },
+  choice: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: T.surface, borderRadius: 14, borderWidth: 1, borderColor: C.line, padding: 14, minHeight: 56 },
   choiceOn: { borderColor: C.red, backgroundColor: T.softer },
-  check: { width: 26, height: 26, borderRadius: 8, borderWidth: 2, borderColor: "#c9c8d3", alignItems: "center", justifyContent: "center" },
+  check: { width: 26, height: 26, borderRadius: 8, borderWidth: 2, borderColor: T.lineStrong, alignItems: "center", justifyContent: "center" },
   checkOn: { backgroundColor: C.red, borderColor: C.red },
-  linkTile: { flex: 1, minWidth: 130, backgroundColor: "#fff", borderRadius: 16, borderWidth: 1, borderColor: C.line, padding: 16, alignItems: "center", gap: 6, minHeight: 88 },
+  linkTile: { flex: 1, minWidth: 130, backgroundColor: T.surface, borderRadius: 16, borderWidth: 1, borderColor: C.line, padding: 16, alignItems: "center", gap: 6, minHeight: 88 },
   linkTileIcon: { fontSize: 22, color: C.red },
   linkTileText: { color: C.ink, fontWeight: "600" },
 }));

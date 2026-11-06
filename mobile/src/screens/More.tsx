@@ -35,7 +35,7 @@ import {
   RegularizationScreen,
 } from "./Daily";
 
-import { T, themed } from "../theme";
+import { T, setThemeMode, themeMode, themed, useBrandVersion, type ThemeMode } from "../theme";
 import * as ImagePicker from "expo-image-picker";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { Appear, Avatar, Icon, type IconName, PressScale, ScreenIn, success, tick } from "../ui";
@@ -1508,7 +1508,7 @@ function LaxmiScreen({
                     ))}
                 </>
               ) : e.error ? (
-                <Text style={{ color: "#894a35" }}>{e.error}</Text>
+                <Text style={{ color: T.danger }}>{e.error}</Text>
               ) : (
                 <Text style={s.note}>Thinking…</Text>
               )}
@@ -1744,7 +1744,7 @@ function GalleryBunches({ api, files }: { api: Api; files: Files }) {
       <Text style={[s.heading, { color: "#fff" }]}>Engagement Gallery</Text>
       <Status loading={g.loading} error={g.error} />
       {!g.loading && albums.length === 0 && (
-        <Text style={{ color: "#b9bdd6" }}>
+        <Text style={{ color: T.faint }}>
           Photos from HR days, celebrations and awards appear here.
         </Text>
       )}
@@ -3009,9 +3009,42 @@ function ProfileScreen({
       </View>
       {doc === "payslip" && <PayslipsScreen api={api} files={files} />}
       {doc === "form16" && <Form16Card api={api} files={files} />}
+      <AppearanceCard />
       <Btn title="Change password" secondary onPress={onPassword} />
       <Btn title="Sign out" secondary onPress={onSignOut} />
     </>
+  );
+}
+// Day or Night look, or follow the phone's own setting; remembered on this phone.
+function AppearanceCard() {
+  useBrandVersion();
+  const current = themeMode();
+  const options: [ThemeMode, string, IconName][] = [
+    ["system", "Phone setting", "phone-portrait-outline"],
+    ["light", "Day", "sunny-outline"],
+    ["dark", "Night", "moon-outline"],
+  ];
+  return (
+    <View style={s.card}>
+      <Text style={s.heading}>Appearance</Text>
+      <View style={s.wrap}>
+        {options.map(([value, label, icon]) => (
+          <Pressable
+            key={value}
+            accessibilityRole="button"
+            accessibilityState={{ selected: current === value }}
+            style={[s.chip, current === value && s.chipOn, { flexDirection: "row", alignItems: "center", gap: 6 }]}
+            onPress={() => {
+              tick();
+              setThemeMode(value);
+            }}
+          >
+            <Icon name={icon} size={16} color={current === value ? "#fff" : T.primary} />
+            <Text style={[s.chipText, current === value && { color: "#fff" }]}>{label}</Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
   );
 }
 // My profile with its extra sections underneath.
@@ -3032,27 +3065,27 @@ function ProfileWithDetails(props: {
 
 const s = themed(() => StyleSheet.create({
   card: {
-    backgroundColor: "#fff",
+    backgroundColor: T.surface,
     borderWidth: 1,
-    borderColor: "#eceaf1",
+    borderColor: T.line,
     borderRadius: 20,
     padding: 20,
     gap: 12,
   },
   heading: {
-    color: "#2a2c3a",
+    color: T.ink,
     fontSize: 21,
     fontWeight: "600",
     letterSpacing: -0.4,
   },
-  label: { fontSize: 12, fontWeight: "600", color: "#555867" },
+  label: { fontSize: 12, fontWeight: "600", color: T.body },
   input: {
-    backgroundColor: "#fafafc",
-    borderColor: "#e1e0e8",
+    backgroundColor: T.fill,
+    borderColor: T.line,
     borderWidth: 1,
     borderRadius: 10,
     padding: 13,
-    color: "#2a2c3a",
+    color: T.ink,
     fontSize: 15,
   },
   btn: {
@@ -3082,14 +3115,14 @@ const s = themed(() => StyleSheet.create({
     gap: 10,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderColor: "#f0eff4",
+    borderColor: T.line,
   },
-  strong: { fontWeight: "600", color: "#3a3c4a", fontSize: 14 },
-  note: { color: "#7a7d8c", fontSize: 12, lineHeight: 18 },
+  strong: { fontWeight: "600", color: T.body, fontSize: 14 },
+  note: { color: T.muted, fontSize: 12, lineHeight: 18 },
   link: { color: T.primary, fontWeight: "600", fontSize: 13 },
   error: {
-    color: "#894a35",
-    backgroundColor: "#f9eae3",
+    color: T.danger,
+    backgroundColor: T.warningSoft,
     padding: 12,
     borderRadius: 10,
   },
@@ -3115,7 +3148,7 @@ const s = themed(() => StyleSheet.create({
   },
   netLabel: { color: T.soft, fontWeight: "600" },
   netValue: { color: "#fff", fontSize: 22, fontWeight: "700" },
-  bubble: { backgroundColor: "#f3f2f7", borderRadius: 12, padding: 12, gap: 4 },
+  bubble: { backgroundColor: T.fill, borderRadius: 12, padding: 12, gap: 4 },
   hero: {
     backgroundColor: T.primaryDark,
     borderRadius: 24,
@@ -3156,7 +3189,7 @@ const s = themed(() => StyleSheet.create({
   punchBtn: {
     height: 56,
     borderRadius: 28,
-    backgroundColor: "#fff",
+    backgroundColor: T.surface,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -3165,7 +3198,7 @@ const s = themed(() => StyleSheet.create({
     height: 46,
     borderRadius: 23,
     borderWidth: 1.5,
-    borderColor: "#fff",
+    borderColor: T.surface,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -3174,7 +3207,7 @@ const s = themed(() => StyleSheet.create({
   heroRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 14 },
   heroLine: { color: T.soft, fontSize: 15, fontWeight: "600" },
   heroTime: { color: "#fff", fontSize: 20, fontWeight: "800" },
-  sectionTitle: { color: "#2a2c3a", fontSize: 18, fontWeight: "700", textAlign: "center" },
+  sectionTitle: { color: T.ink, fontSize: 18, fontWeight: "700", textAlign: "center" },
   quickPage: { gap: 14 },
   quickHead: { flexDirection: "row", alignItems: "center", gap: 10 },
   quickHeadIcon: {
@@ -3200,9 +3233,9 @@ const s = themed(() => StyleSheet.create({
     justifyContent: "center",
   },
   quickGlyph: { fontSize: 24, color: T.primary },
-  quickText: { color: "#2a2c3a", fontSize: 13, fontWeight: "600", textAlign: "center" },
+  quickText: { color: T.ink, fontSize: 13, fontWeight: "600", textAlign: "center" },
   dots: { flexDirection: "row", justifyContent: "center", gap: 6 },
-  dotPage: { width: 8, height: 6, borderRadius: 3, backgroundColor: "#e1e0e8" },
+  dotPage: { width: 8, height: 6, borderRadius: 3, backgroundColor: T.line },
   dotPageOn: { width: 24, backgroundColor: T.primary },
   greetRow: { flexDirection: "row", alignItems: "center", gap: 14 },
   greetAvatar: {
@@ -3214,26 +3247,26 @@ const s = themed(() => StyleSheet.create({
     justifyContent: "center",
   },
   greetAvatarText: { color: "#fff", fontSize: 20, fontWeight: "800" },
-  greetName: { color: "#2a2c3a", fontSize: 22, fontWeight: "800" },
+  greetName: { color: T.ink, fontSize: 22, fontWeight: "800" },
   strip: {
     flexDirection: "row",
     flexWrap: "wrap",
     alignItems: "center",
     gap: 10,
-    backgroundColor: "#fff",
+    backgroundColor: T.surface,
     borderWidth: 1,
-    borderColor: "#eceaf1",
+    borderColor: T.line,
     borderRadius: 16,
     paddingVertical: 12,
     paddingHorizontal: 14,
   },
-  stripText: { color: "#2a2c3a", fontSize: 14, fontWeight: "700", flexShrink: 1 },
-  stripDivider: { width: 1, height: 18, backgroundColor: "#e1e0e8" },
+  stripText: { color: T.ink, fontSize: 14, fontWeight: "700", flexShrink: 1 },
+  stripDivider: { width: 1, height: 18, backgroundColor: T.line },
   profileHead: {
-    backgroundColor: "#fff",
+    backgroundColor: T.surface,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: "#eceaf1",
+    borderColor: T.line,
     overflow: "hidden",
     paddingBottom: 16,
     gap: 14,
@@ -3246,7 +3279,7 @@ const s = themed(() => StyleSheet.create({
     borderRadius: 44,
     backgroundColor: T.primary,
     borderWidth: 4,
-    borderColor: "#fff",
+    borderColor: T.surface,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -3260,12 +3293,12 @@ const s = themed(() => StyleSheet.create({
     borderRadius: 15,
     backgroundColor: T.primaryDark,
     borderWidth: 2,
-    borderColor: "#fff",
+    borderColor: T.surface,
     alignItems: "center",
     justifyContent: "center",
   },
   headRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  profileName: { color: "#2a2c3a", fontSize: 21, fontWeight: "800" },
+  profileName: { color: T.ink, fontSize: 21, fontWeight: "800" },
   profileDept: {
     alignSelf: "flex-start",
     color: T.primaryDark,
@@ -3282,7 +3315,7 @@ const s = themed(() => StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: "#f8f7fa",
+    backgroundColor: T.fill,
     borderRadius: 14,
     paddingVertical: 12,
     paddingHorizontal: 14,
@@ -3291,16 +3324,16 @@ const s = themed(() => StyleSheet.create({
   contactTile: {
     flex: 1,
     minWidth: 140,
-    backgroundColor: "#fff",
+    backgroundColor: T.surface,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#eceaf1",
+    borderColor: T.line,
     padding: 14,
     gap: 4,
     minHeight: 96,
   },
   contactIcon: { fontSize: 22, color: T.primary },
-  contactLabel: { color: "#6b6e7c", fontSize: 11, fontWeight: "700", letterSpacing: 1 },
+  contactLabel: { color: T.muted, fontSize: 11, fontWeight: "700", letterSpacing: 1 },
   docOn: { backgroundColor: T.primary, borderColor: T.primary },
   tiles: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   tile: { flex: 1, minWidth: 130, borderRadius: 14, padding: 14, gap: 2 },
@@ -3328,8 +3361,8 @@ const s = themed(() => StyleSheet.create({
     height: 120,
     borderRadius: 4,
     borderWidth: 6,
-    borderColor: "#f4f4f8",
-    backgroundColor: "#f4f4f8",
+    borderColor: T.line,
+    backgroundColor: T.fill,
   },
   stackCount: {
     marginTop: 128,
@@ -3343,38 +3376,38 @@ const s = themed(() => StyleSheet.create({
     overflow: "hidden",
   },
   stackTitle: { color: "#eef0ff", fontWeight: "700", fontSize: 13, marginTop: 4 },
-  stackSub: { color: "#b9bdd6", fontSize: 11 },
-  albumWrap: { flex: 1, padding: 18, paddingTop: 48, gap: 12, backgroundColor: "#fff" },
+  stackSub: { color: T.faint, fontSize: 11 },
+  albumWrap: { flex: 1, padding: 18, paddingTop: 48, gap: 12, backgroundColor: T.surface },
   albumGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  albumThumb: { width: 104, height: 104, borderRadius: 8, backgroundColor: "#eee" },
+  albumThumb: { width: 104, height: 104, borderRadius: 8, backgroundColor: T.fill },
   tabsRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "center" },
   crumb: {
-    backgroundColor: "#fff",
+    backgroundColor: T.surface,
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 14,
     fontWeight: "600",
-    color: "#2a2c3a",
+    color: T.ink,
   },
   dot: { width: 12, height: 12, borderRadius: 6, marginRight: 8 },
   applied: {
-    backgroundColor: "#f1f1f4",
+    backgroundColor: T.fill,
     borderRadius: 6,
     paddingVertical: 5,
     paddingHorizontal: 9,
     fontSize: 12,
-    color: "#3a3c4a",
+    color: T.body,
     overflow: "hidden",
   },
   feed: {
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderColor: "#f0eff4",
+    borderColor: T.line,
     gap: 3,
   },
   feedTitle: { color: "#1d6fd6", fontWeight: "700", fontSize: 14 },
   orgNode: {
-    backgroundColor: "#d9ecf7",
+    backgroundColor: T.infoSoft,
     borderColor: "#b9d7ea",
     borderWidth: 1,
     borderRadius: 6,
@@ -3384,17 +3417,17 @@ const s = themed(() => StyleSheet.create({
     minWidth: 140,
   },
   orgMe: { backgroundColor: T.soft, borderColor: T.border },
-  orgLine: { width: 1, height: 14, backgroundColor: "#b9b9c6" },
+  orgLine: { width: 1, height: 14, backgroundColor: T.lineStrong },
   clock: {
     fontSize: 28,
     fontWeight: "700",
-    color: "#2a2c3a",
+    color: T.ink,
     textAlign: "right",
     fontVariant: ["tabular-nums"],
   },
   msg: { maxWidth: "90%", alignSelf: "flex-start" },
-  msgMine: { alignSelf: "flex-end", backgroundColor: "#e3e6f8" },
-  body: { color: "#2a2c3a", fontSize: 15, lineHeight: 21 },
+  msgMine: { alignSelf: "flex-end", backgroundColor: T.infoSoft },
+  body: { color: T.ink, fontSize: 15, lineHeight: 21 },
   avatar: {
     width: 38,
     height: 38,
@@ -3417,10 +3450,10 @@ const s = themed(() => StyleSheet.create({
     overflow: "hidden",
   },
   draft: {
-    backgroundColor: "#fff",
+    backgroundColor: T.surface,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#eceaf1",
+    borderColor: T.line,
     padding: 12,
     gap: 10,
     marginTop: 4,

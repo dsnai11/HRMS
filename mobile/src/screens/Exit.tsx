@@ -178,7 +178,7 @@ function ResignForm({ api, m, onDone }: { api: Api; m: Mine; onDone: () => void 
           }
         }}
       >
-        <Text style={{ color: letter ? T.ink : "#9a9cab" }}>{letter ? "Letter attached" : "Attach a signed letter (optional)"}</Text>
+        <Text style={{ color: letter ? T.ink : T.faint }}>{letter ? "Letter attached" : "Attach a signed letter (optional)"}</Text>
       </Pressable>
       <Btn
         title={working ? "Sending…" : "Submit resignation"}
@@ -252,12 +252,12 @@ function Progress({ api, m, x: e, reload }: { api: Api; m: Mine; x: Exit; reload
             <View key={title} style={x.step}>
               <View style={x.rail}>
                 <View style={[x.dot, state === "done" && x.dotDone, state === "now" && x.dotNow]}>
-                  <Icon name={state === "done" ? "checkmark" : icon} size={16} color={state === "next" ? "#9a9cab" : "#fff"} />
+                  <Icon name={state === "done" ? "checkmark" : icon} size={16} color={state === "next" ? T.faint : "#fff"} />
                 </View>
                 {i < steps.length - 1 && <View style={[x.line, state === "done" && x.lineDone]} />}
               </View>
               <View style={{ flex: 1, paddingBottom: 14 }}>
-                <Text style={[k.strong, state === "next" && { color: "#9a9cab" }]}>{title}</Text>
+                <Text style={[k.strong, state === "next" && { color: T.faint }]}>{title}</Text>
                 {note ? <Text style={k.note}>{note}</Text> : null}
               </View>
             </View>
@@ -271,7 +271,7 @@ function Progress({ api, m, x: e, reload }: { api: Api; m: Mine; x: Exit; reload
             <Text style={k.heading}>Clearance</Text>
             {(m.clearance ?? []).map((c) => (
               <View key={c.id} style={k.row}>
-                <Icon name={c.cleared ? "checkmark-circle" : "ellipse-outline"} size={20} color={c.cleared ? T.success : "#9a9cab"} />
+                <Icon name={c.cleared ? "checkmark-circle" : "ellipse-outline"} size={20} color={c.cleared ? T.success : T.faint} />
                 <View style={{ flex: 1 }}>
                   <Text style={k.strong}>{c.item}</Text>
                   <Text style={k.note}>{c.department}</Text>
@@ -316,7 +316,7 @@ function Interview({ api, m, onDone }: { api: Api; m: Mine; onDone: () => void }
             <View style={x.stars} accessibilityRole="adjustable" accessibilityLabel={`${label}: ${ratings[key] ?? "not rated"} of 5`}>
               {[1, 2, 3, 4, 5].map((n) => (
                 <Pressable key={n} hitSlop={6} onPress={() => setRatings({ ...ratings, [key]: n })} accessibilityLabel={`${n} of 5`}>
-                  <Icon name={(ratings[key] ?? 0) >= n ? "star" : "star-outline"} size={28} color={(ratings[key] ?? 0) >= n ? "#d49a00" : "#c9c8d3"} />
+                  <Icon name={(ratings[key] ?? 0) >= n ? "star" : "star-outline"} size={28} color={(ratings[key] ?? 0) >= n ? "#d49a00" : T.lineStrong} />
                 </Pressable>
               ))}
             </View>
@@ -392,10 +392,10 @@ const x = themed(() =>
     heroSub: { color: T.onPrimarySoft, fontSize: 14 },
     step: { flexDirection: "row", gap: 12 },
     rail: { alignItems: "center", width: 30 },
-    dot: { width: 30, height: 30, borderRadius: 15, backgroundColor: "#ececf2", alignItems: "center", justifyContent: "center" },
+    dot: { width: 30, height: 30, borderRadius: 15, backgroundColor: T.fill, alignItems: "center", justifyContent: "center" },
     dotDone: { backgroundColor: T.success },
     dotNow: { backgroundColor: T.primary },
-    line: { flex: 1, width: 2, backgroundColor: "#e1e0e8", marginVertical: 2 },
+    line: { flex: 1, width: 2, backgroundColor: T.line, marginVertical: 2 },
     lineDone: { backgroundColor: T.success },
     stars: { flexDirection: "row", gap: 6 },
   }),

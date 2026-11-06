@@ -41,7 +41,7 @@ import {
   confirmForPunch,
   setBiometricLock,
 } from "../biometric";
-import { T, applyBrand, brand, restoreBrand, themed, useBrandVersion } from "../theme";
+import { T, applyBrand, brand, isDark, restoreBrand, restoreTheme, themed, useBrandVersion } from "../theme";
 import { Avatar, Icon, type IconName, failure, success, tick } from "../ui";
 import Animated, { ZoomIn } from "react-native-reanimated";
 type User = {
@@ -476,6 +476,8 @@ export default function Attendance() {
     (async () => {
       try {
         await restoreBrand();
+        // Day or Night as last chosen on this phone (or the phone's own setting).
+        await restoreTheme();
         // Before sign-in: the company's colours and logo for the sign-in screen.
         void api<{ primary: string | null; accent: string | null; logo_url: string | null; updated_at: string | null }>(
           "/branding",
@@ -761,7 +763,7 @@ export default function Attendance() {
     !!profile && !passwordScreen && profile.user.role !== "super_admin";
   return (
     <SafeAreaView style={s.safe}>
-      <StatusBar style="dark" />
+      <StatusBar style={isDark() ? "light" : "dark"} />
       <Modal
         visible={selfieOpen}
         animationType="slide"
@@ -1356,7 +1358,7 @@ export default function Attendance() {
                 <Icon
                   name={(view === id ? icon : `${icon}-outline`) as IconName}
                   size={view === id ? 24 : 22}
-                  color={view === id ? "#fff" : "#7a7d8c"}
+                  color={view === id ? "#fff" : T.muted}
                 />
               </Animated.View>
               <Text
@@ -1441,7 +1443,7 @@ export default function Attendance() {
   );
 }
 const s = themed(() => StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#f8f7fa" },
+  safe: { flex: 1, backgroundColor: T.fill },
   scrollNarrow: { padding: 16 },
   scroll: {
     flexGrow: 1,
@@ -1459,31 +1461,31 @@ const s = themed(() => StyleSheet.create({
     marginBottom: 28,
   },
   logo: { width: 96, height: 37 },
-  brandName: { fontSize: 21, fontWeight: "700", color: "#2a2c3a" },
-  eyebrow: { fontSize: 10, letterSpacing: 1.5, color: "#8a8c99", marginTop: 4 },
+  brandName: { fontSize: 21, fontWeight: "700", color: T.ink },
+  eyebrow: { fontSize: 10, letterSpacing: 1.5, color: T.muted, marginTop: 4 },
   title: {
     fontSize: 35,
     fontWeight: "600",
     letterSpacing: -1.2,
-    color: "#2a2c3a",
+    color: T.ink,
   },
-  subtitle: { fontSize: 14, color: "#6f7282", lineHeight: 23 },
+  subtitle: { fontSize: 14, color: T.muted, lineHeight: 23 },
   card: {
-    backgroundColor: "#fff",
+    backgroundColor: T.surface,
     borderWidth: 1,
-    borderColor: "#eceaf1",
+    borderColor: T.line,
     borderRadius: 20,
     padding: 23,
     gap: 15,
   },
-  label: { fontSize: 12, fontWeight: "600", color: "#555867" },
+  label: { fontSize: 12, fontWeight: "600", color: T.body },
   input: {
-    backgroundColor: "#fafafc",
-    borderColor: "#e1e0e8",
+    backgroundColor: T.fill,
+    borderColor: T.line,
     borderWidth: 1,
     borderRadius: 10,
     padding: 15,
-    color: "#2a2c3a",
+    color: T.ink,
     fontSize: 16,
   },
   button: {
@@ -1496,9 +1498,9 @@ const s = themed(() => StyleSheet.create({
   },
   secondary: { backgroundColor: T.softer },
   buttonText: { fontSize: 15, color: "#fff", fontWeight: "600" },
-  note: { color: "#7a7d8c", fontSize: 12, lineHeight: 20 },
+  note: { color: T.muted, fontSize: 12, lineHeight: 20 },
   heading: {
-    color: "#2a2c3a",
+    color: T.ink,
     fontSize: 25,
     fontWeight: "600",
     letterSpacing: -0.5,
@@ -1510,22 +1512,22 @@ const s = themed(() => StyleSheet.create({
     fontWeight: "600",
     marginBottom: 10,
   },
-  siteName: { fontWeight: "600", fontSize: 15, color: "#3a3c4a" },
-  callout: { backgroundColor: "#f3f2f7", borderRadius: 10, padding: 15 },
+  siteName: { fontWeight: "600", fontSize: 15, color: T.body },
+  callout: { backgroundColor: T.fill, borderRadius: 10, padding: 15 },
   odBox: {
     gap: 8,
     borderTopWidth: 1,
-    borderTopColor: "#ececf2",
+    borderTopColor: T.line,
     paddingTop: 14,
   },
   tabs: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   crumb: {
-    backgroundColor: "#fff",
+    backgroundColor: T.surface,
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 14,
     fontWeight: "600",
-    color: "#2a2c3a",
+    color: T.ink,
   },
   topbar: {
     backgroundColor: "#24262f",
@@ -1569,13 +1571,13 @@ const s = themed(() => StyleSheet.create({
     width: 54,
     height: 54,
     borderRadius: 27,
-    backgroundColor: "#fff",
+    backgroundColor: T.surface,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 8,
   },
   menuAvatarText: { color: T.primaryDark, fontWeight: "800", fontSize: 18 },
-  menuAvatarRing: { alignSelf: "flex-start", padding: 3, borderRadius: 40, backgroundColor: "#fff" },
+  menuAvatarRing: { alignSelf: "flex-start", padding: 3, borderRadius: 40, backgroundColor: T.surface },
   menuGroupRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 18, paddingTop: 10 },
   bellBadge: {
     position: "absolute",
@@ -1585,7 +1587,7 @@ const s = themed(() => StyleSheet.create({
     height: 20,
     borderRadius: 10,
     paddingHorizontal: 5,
-    backgroundColor: "#fff",
+    backgroundColor: T.surface,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1607,9 +1609,9 @@ const s = themed(() => StyleSheet.create({
   },
   tabBar: {
     flexDirection: "row",
-    backgroundColor: "#fff",
+    backgroundColor: T.surface,
     borderTopWidth: 1,
-    borderColor: "#eceaf1",
+    borderColor: T.line,
     paddingVertical: 6,
     paddingHorizontal: 8,
   },
@@ -1635,10 +1637,10 @@ const s = themed(() => StyleSheet.create({
     marginTop: -26,
     backgroundColor: T.primary,
     borderWidth: 4,
-    borderColor: "#fff",
+    borderColor: T.surface,
   },
-  tabIcon: { fontSize: 20, color: "#7a7d8c" },
-  tabLabel: { fontSize: 11, color: "#7a7d8c", fontWeight: "600" },
+  tabIcon: { fontSize: 20, color: T.muted },
+  tabLabel: { fontSize: 11, color: T.muted, fontWeight: "600" },
   sheetWrap: {
     flex: 1,
     justifyContent: "flex-end",
@@ -1649,17 +1651,17 @@ const s = themed(() => StyleSheet.create({
     width: "100%",
     maxWidth: 600,
     alignSelf: "center",
-    backgroundColor: "#fff",
+    backgroundColor: T.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 22,
     gap: 12,
   },
-  sheetTitle: { fontSize: 22, fontWeight: "800", color: "#2a2c3a" },
+  sheetTitle: { fontSize: 22, fontWeight: "800", color: T.ink },
   pinRow: { flexDirection: "row", gap: 12, alignItems: "center" },
   map: { width: "100%", height: 260, borderRadius: 16, overflow: "hidden" },
   pin: { fontSize: 34 },
-  sheetAddress: { fontSize: 15, fontWeight: "700", color: "#2a2c3a" },
+  sheetAddress: { fontSize: 15, fontWeight: "700", color: T.ink },
   menuWrap: {
     flex: 1,
     flexDirection: "row",
@@ -1681,18 +1683,18 @@ const s = themed(() => StyleSheet.create({
   historyRow: {
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderColor: "#f0eff4",
+    borderColor: T.line,
     gap: 7,
   },
   message: {
-    backgroundColor: "#f9eae3",
-    color: "#894a35",
+    backgroundColor: T.warningSoft,
+    color: T.danger,
     padding: 17,
     borderRadius: 12,
     lineHeight: 22,
   },
   footer: {
-    color: "#a2a4b0",
+    color: T.faint,
     textAlign: "center",
     fontSize: 9,
     letterSpacing: 2,
