@@ -44,6 +44,7 @@ export function registerAuth(router, app) {
     send(200, {
       company: app.company,
       timezone: app.timezone,
+      features: app.features,
       setupRequired:
         Boolean(process.env.SETUP_TOKEN) &&
         !(await db

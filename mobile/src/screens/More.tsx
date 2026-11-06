@@ -20,6 +20,7 @@ import {
 import * as DocumentPicker from "expo-document-picker";
 import { File } from "expo-file-system";
 import { SupervisorScreen } from "./Supervisor";
+import { FieldForceCard } from "./FieldForce";
 import { ClaimsScreen, TaxScreen } from "./Money";
 import { ResignationScreen } from "./Exit";
 import { LearningScreen, PerformanceScreen } from "./Growth";
@@ -727,6 +728,8 @@ function HomeScreen({
   const home = useLoad(() => api<HomeData>("/home"));
   const news = useLoad(() => api<Announcement[]>("/announcements"));
   const today = useLoad(() => api<TodayInfo>("/me"));
+  // Field Force (separate module): bumped after a punch so its card can hide itself.
+  const [punches, setPunches] = useState(0);
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const me = home.data?.me;
@@ -775,10 +778,12 @@ function HomeScreen({
         onSlidePunch={async () => {
           await onSlidePunch();
           void today.reload();
+          setPunches((n) => n + 1);
         }}
         onOdPunch={onOdPunch}
       />
       </Appear>
+      <FieldForceCard api={api} refreshKey={punches} onLeave={() => onSection("Leave")} />
       <Appear index={3}>
         <QuickLinks onSection={onSection} />
       </Appear>

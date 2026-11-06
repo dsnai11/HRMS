@@ -71,6 +71,8 @@ import {
   scheduleLearningReminders,
 } from "./routes/learning.js";
 import { registerCompOff, scheduleCompOffExpiry } from "./routes/compoff.js";
+// Field Force (the activation plan) is a separate module; FIELD_FORCE=off leaves it out.
+import { registerFieldForce, scheduleFieldForce } from "./field-force/index.js";
 import { registerTaxDeclarations } from "./routes/tax-declarations.js";
 import { registerPayrollReports } from "./routes/payroll-reports.js";
 import { registerChat } from "./routes/chat.js";
@@ -107,6 +109,7 @@ const STATIC = {
   "/recruit.js": ["recruit.js", "text/javascript"],
   "/profile360.js": ["profile360.js", "text/javascript"],
   "/designation-grades.js": ["designation-grades.js", "text/javascript"],
+  "/field-force.js": ["field-force.js", "text/javascript"],
   "/timeplus.js": ["timeplus.js", "text/javascript"],
   "/ess-plus.js": ["ess-plus.js", "text/javascript"],
   "/chat.js": ["chat.js", "text/javascript"],
@@ -167,6 +170,10 @@ export function createApp({
   const limits = new Map();
   const app = {
     db,
+    // Optional modules that are switched on, for the portal (GET /api/config).
+    features: {},
+    // Modules that take some incoming WhatsApp messages: (value, message) => true if taken.
+    whatsappHandlers: [],
     production,
     company,
     timezone,
@@ -227,6 +234,7 @@ export function createApp({
     registerAttendance,
     registerOrg,
     registerDesignationGrades,
+    registerFieldForce,
     registerEmployees,
     registerReports,
     registerAdmin,
@@ -518,6 +526,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   scheduleReports(app);
   scheduleLearningReminders(app);
   scheduleCompOffExpiry(app);
+  scheduleFieldForce(app);
   server.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () =>
     console.log(`HRMS listening on port ${process.env.PORT || 3000}`),
   );
