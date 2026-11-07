@@ -147,9 +147,12 @@ function recruitOpeningsWire() {
     (b) =>
       (b.onclick = () =>
         busy(b, async () => {
-          await api(`/admin/openings/${b.dataset.reqOk}/approval`, {
-            decision: "approved",
-          });
+          await withPostsReason((extra) =>
+            api(`/admin/openings/${b.dataset.reqOk}/approval`, {
+              decision: "approved",
+              ...extra,
+            }),
+          );
           notice("Approved. The opening is now open.");
           render();
         })),

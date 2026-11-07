@@ -106,7 +106,7 @@ export function Skeleton({ height = 16, width = "100%", radius = 8 }: { height?:
     o.set(withRepeat(withSequence(withTiming(1, { duration: 650 }), withTiming(0.55, { duration: 650 })), -1));
   }, [o]);
   const anim = useAnimatedStyle(() => ({ opacity: o.value }));
-  return <Animated.View style={[{ height, width, borderRadius: radius, backgroundColor: "#e9e7ef" }, anim]} />;
+  return <Animated.View style={[{ height, width, borderRadius: radius, backgroundColor: T.fill }, anim]} />;
 }
 /** A loading card: a title line and three rows. */
 export function SkeletonCard() {
@@ -156,7 +156,7 @@ export function Avatar({
 const u = themed(() =>
   StyleSheet.create({
     card: {
-      backgroundColor: "#fff",
+      backgroundColor: T.surface,
       borderRadius: 18,
       borderWidth: 1,
       borderColor: T.line,

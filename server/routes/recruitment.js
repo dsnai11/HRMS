@@ -8,6 +8,7 @@ import {
   optionalString,
   string,
 } from "../http.js";
+import { requireReasonIfOver } from "../sanctioned-posts.js";
 import { requireOwned } from "../scope.js";
 import { can } from "../rbac.js";
 import { offerLetter } from "../letters.js";
@@ -161,6 +162,15 @@ export function registerRecruitment(router, app) {
       const f = await openingFields(b, companyId);
       const extras = openingExtras(b);
       if (!f.title) throw new HttpError(400, "Title is required.");
+      // Above the branch's sanctioned posts: only with HR's reason (Branch budgets).
+      const overReason = await requireReasonIfOver(
+        app,
+        companyId,
+        { branchId: f.branch_id, designationId: f.designation_id, positions: f.positions },
+        b.over_sanction_reason,
+        audit,
+      );
+      if (overReason) extras.over_sanction_reason = overReason;
       const id = await transaction(async () => {
         const id = Number(
           (
@@ -207,6 +217,20 @@ export function registerRecruitment(router, app) {
         b.status === undefined
           ? row.status
           : oneOf(b.status, "Status", ["open", "on_hold", "closed"]);
+      // Moving the opening or adding positions is checked against sanctioned posts again.
+      const moved =
+        f.branch_id !== row.branch_id || f.designation_id !== row.designation_id || f.positions > row.positions || (row.status === "closed" && status !== "closed");
+      if (moved && status !== "closed") {
+        const overReason = await requireReasonIfOver(
+          app,
+          companyId,
+          { branchId: f.branch_id, designationId: f.designation_id, positions: f.positions },
+          b.over_sanction_reason,
+          audit,
+          row.id,
+        );
+        if (overReason) extras.over_sanction_reason = overReason;
+      }
       await db
         .prepare(
           "UPDATE job_openings SET title=?,department_id=?,branch_id=?,designation_id=?,positions=?,employment_type=?,description=?,hiring_manager_id=?,status=?,closed_at=? WHERE id=?",

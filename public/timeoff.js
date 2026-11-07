@@ -535,7 +535,7 @@ async function leaveAdminTabHtml(tab) {
         new Date(2000, i, 1).toLocaleString("en", { month: "long" }),
       ]),
       s.leave_year_start_month,
-    )}${input("leave_start_year", "First leave year with balances", s.leave_start_year ?? "", 'type="number" min="2000" max="2100"')}<div class="full"><strong>Weekly offs</strong></div><div class="full checks">${days.map((d, i) => `<label class="check"><input type="checkbox" name="wo${i}" ${s.weekly_off_days.includes(i) ? "checked" : ""}> ${d}</label>`).join("")}</div><div class="full"><strong>Saturdays off</strong> <span class="muted">(in addition to the above)</span></div><div class="full checks">${[1, 2, 3, 4, 5].map((n) => `<label class="check"><input type="checkbox" name="sat${n}" ${s.weekly_off_saturdays.includes(n) ? "checked" : ""}> ${["1st", "2nd", "3rd", "4th", "5th"][n - 1]}</label>`).join("")}</div><div class="full"><strong>Attendance</strong></div>${input("attendance_start_date", "Counted from (blank = the day your company started)", s.attendance_start_date || "", 'type="date"')}<div class="full"><strong>Attendance corrections</strong></div>${input("regularization_window_days", "Allowed up to (days back)", s.regularization_window_days, 'type="number" min="0" max="90"')}${input("regularization_monthly_limit", "Per person per month (0 = unlimited)", s.regularization_monthly_limit, 'type="number" min="0" max="31"')}${[
+    )}${input("leave_start_year", "First leave year with balances", s.leave_start_year ?? "", 'type="number" min="2000" max="2100"')}<div class="full"><strong>Weekly offs</strong></div><div class="full checks">${days.map((d, i) => `<label class="check"><input type="checkbox" name="wo${i}" ${s.weekly_off_days.includes(i) ? "checked" : ""}> ${d}</label>`).join("")}</div><div class="full"><strong>Saturdays off</strong> <span class="muted">(in addition to the above)</span></div><div class="full checks">${[1, 2, 3, 4, 5].map((n) => `<label class="check"><input type="checkbox" name="sat${n}" ${s.weekly_off_saturdays.includes(n) ? "checked" : ""}> ${["1st", "2nd", "3rd", "4th", "5th"][n - 1]}</label>`).join("")}</div><div class="full"><strong>Attendance</strong></div>${input("attendance_start_date", "Counted from (blank = the day your company started)", s.attendance_start_date || "", 'type="date"')}<div class="full"><strong>Notice period</strong> <span class="muted">(choose per leave type whether it can be taken during notice)</span></div><label class="check full"><input type="checkbox" name="notice_leave_extends" ${s.notice_leave_extends ? "checked" : ""}> Approved leave during the notice period moves the last working day later by the same number of days</label><div class="full"><strong>Attendance corrections</strong></div>${input("regularization_window_days", "Allowed up to (days back)", s.regularization_window_days, 'type="number" min="0" max="90"')}${input("regularization_monthly_limit", "Per person per month (0 = unlimited)", s.regularization_monthly_limit, 'type="number" min="0" max="31"')}${[
       ["leave_chain", "chain", "Leave approval chain"],
       ["correction_chain", "cchain", "Attendance correction approval chain"],
     ]
@@ -626,7 +626,15 @@ function typeDialog(t) {
         ["other", "Other only"],
       ],
       t?.applicable_gender || "",
-    )}${input("max_days_per_request", "Max days per request (optional)", t?.max_days_per_request ?? "", 'type="number" min="0.5" max="366" step="0.5"')}${
+    )}${input("max_days_per_request", "Max days per request (optional)", t?.max_days_per_request ?? "", 'type="number" min="0.5" max="366" step="0.5"')}${sel(
+      "allowed_in_notice",
+      "During notice period",
+      [
+        ["true", "Can be taken"],
+        ["false", "Cannot be taken"],
+      ],
+      String(t ? Boolean(t.allowed_in_notice ?? true) : true),
+    )}${
       t
         ? sel(
             "active",
@@ -646,6 +654,7 @@ function typeDialog(t) {
         "allow_half_day",
         "encashable",
         "active",
+        "allowed_in_notice",
       ])
         if (k in b) b[k] = b[k] === "true";
       for (const k of ["quota_per_year", "carry_forward_max"])
@@ -761,6 +770,7 @@ async function leaveAdminWire(tab) {
             .filter(Boolean),
           approval_reminder_hours: Number(f.get("approval_reminder_hours")),
           approval_escalate_hours: Number(f.get("approval_escalate_hours")),
+          notice_leave_extends: f.get("notice_leave_extends") === "on",
         };
         if (f.get("leave_start_year"))
           body.leave_start_year = Number(f.get("leave_start_year"));

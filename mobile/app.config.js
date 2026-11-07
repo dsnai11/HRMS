@@ -12,7 +12,8 @@ module.exports = {
     version: "1.0.0",
     // Phones and tablets may turn sideways; content stays centred at a readable width.
     orientation: "default",
-    userInterfaceStyle: "light",
+    // Follows the phone's light or dark setting unless the person picks Day or Night in the app.
+    userInterfaceStyle: "automatic",
     icon: "./assets/icon.png",
     web: { favicon: "./assets/favicon.png" },
     ios: {
