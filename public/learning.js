@@ -4,35 +4,41 @@ let learnTab = "mine";
 let reportCourse = "";
 const LESSON_KIND = { text: "Text", link: "Link", video: "Video link" };
 
-async function learningPage(id) {
-  const manage = has("performance.manage");
-  const tabs = {
-    mine: "My learning",
-    catalogue: "Course catalogue",
-    certificates: "My certificates",
-    ...(manage
-      ? {
-          manage: "Manage courses",
-          report: "Department report",
-          sessions: "Training sessions",
-        }
-      : {}),
-  };
-  if (!tabs[learnTab]) learnTab = "mine";
-  const html = await learningHtml(learnTab);
+// LMS → My Courses: what a person takes. LMS → Manage courses (HR, admins, the platform owner):
+// building courses, the report and training sessions.
+let learnManageTab = "manage";
+async function learningPage(id, mode = "learner") {
+  const managing = mode === "manage" && has("performance.manage");
+  const tabs = managing
+    ? { manage: "Manage courses", report: "Department report", sessions: "Training sessions" }
+    : { mine: "My learning", catalogue: "Course catalogue", certificates: "My certificates" };
+  if (managing && !tabs[learnManageTab]) learnManageTab = "manage";
+  if (!managing && !tabs[learnTab]) learnTab = "mine";
+  const current = managing ? learnManageTab : learnTab;
+  const html = await learningHtml(current);
   if (id !== renderId) return;
   document.querySelector("#content").innerHTML =
-    heading("Learning", "Courses, quizzes, certificates and training sessions.") +
+    heading(
+      managing ? "Manage courses" : "My learning",
+      managing ? "Build courses and quizzes, assign them, and see who has finished." : "Your courses, quizzes and certificates.",
+    ) +
     `<div class="tabbar">${Object.entries(tabs)
       .map(
         ([k, l]) =>
-          `<button class="${k === learnTab ? "" : "secondary"}" data-tab="${k}">${l}</button>`,
+          `<button class="${k === current ? "" : "secondary"}" data-tab="${k}">${l}</button>`,
       )
       .join("")}</div><div id="tab">${html}</div>`;
   document
     .querySelectorAll("[data-tab]")
-    .forEach((b) => (b.onclick = () => ((learnTab = b.dataset.tab), render())));
-  learningWire(learnTab);
+    .forEach(
+      (b) =>
+        (b.onclick = () => {
+          if (managing) learnManageTab = b.dataset.tab;
+          else learnTab = b.dataset.tab;
+          render();
+        }),
+    );
+  learningWire(current);
 }
 
 async function learningHtml(tab) {
