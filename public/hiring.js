@@ -479,13 +479,15 @@ async function candidateView(id) {
     ),
   );
   on("#hire", async () => {
-    const [
-      { departments: deps, branches, designations: desigs, workplaces: sites },
-      people,
-    ] = await Promise.all([api("/admin/org"), peopleList()]);
+    const [org, people, next] = await Promise.all([
+      api("/admin/org"),
+      peopleList(),
+      api("/admin/employees/next-code").catch(() => ({ employee_code: "" })),
+    ]);
+    const { departments: deps, branches, designations: desigs, workplaces: sites } = org;
     dialog(
       "Hire " + c.name,
-      `${input("email", "Login email", c.email || "", 'type="email" required')}${input("password", "Temporary password", "", 'type="password" minlength="10" required')}<label>Workplace (for punching)<select name="workplace_id">${options(sites, null)}</select></label><label>Department<select name="department_id">${options(deps, null)}</select></label><label>Branch<select name="branch_id">${options(branches, null)}</select></label><label>Designation<select name="designation_id">${options(desigs, null)}</select></label><label>Reporting manager<select name="manager_id">${options(people, null)}</select></label><label>Onboarding buddy<select name="buddy_id">${options(people, null)}</select></label><label class="full">Workstation details for the welcome email (desk, laptop…)<input name="workstation" maxlength="300"></label><label class="check full"><input type="checkbox" name="send_welcome" checked> Email a welcome message with the login details to the candidate</label><label class="full">Credit check override note (only if a high-risk result is accepted)<input name="credit_override_note" maxlength="300"></label>${sel(
+      `${input("employee_code", "Employee code", next.employee_code || "", 'maxlength="30" required')}<p class="full muted">The next code in your series is filled in; change it if needed.</p>${input("email", "Login email", c.email || "", 'type="email" required')}${input("password", "Temporary password", "", 'type="password" minlength="10" required')}<label>Workplace (for punching)<select name="workplace_id">${options(sites, null)}</select></label><label>Department<select name="department_id">${options(deps, null)}</select></label><label>Branch<select name="branch_id">${options(branches, null)}</select></label><label>Designation<select name="designation_id">${options(desigs, null)}</select></label><label>Grade<select name="grade_id">${options(org.grades || [], null)}</select></label><label>Reporting manager<select name="manager_id">${options(people, null)}</select></label><label>Onboarding buddy<select name="buddy_id">${options(people, null)}</select></label><label class="full">Workstation details for the welcome email (desk, laptop…)<input name="workstation" maxlength="300"></label><label class="check full"><input type="checkbox" name="send_welcome" checked> Email a welcome message with the login details to the candidate</label><label class="full">Credit check override note (only if a high-risk result is accepted)<input name="credit_override_note" maxlength="300"></label>${sel(
         "gender",
         "Gender",
         [
@@ -496,12 +498,13 @@ async function candidateView(id) {
         ],
       )}`,
       async (b) => {
-        const body = { email: b.email, password: b.password };
+        const body = { email: b.email, password: b.password, employee_code: b.employee_code.trim() };
         for (const k of [
           "workplace_id",
           "department_id",
           "branch_id",
           "designation_id",
+          "grade_id",
           "manager_id",
           "buddy_id",
         ])
@@ -511,12 +514,15 @@ async function candidateView(id) {
           body.credit_override_note = b.credit_override_note;
         if (b.workstation) body.workstation = b.workstation;
         body.send_welcome = "send_welcome" in b;
-        await api(`/admin/candidates/${id}/hire`, body);
+        const hired = await api(`/admin/candidates/${id}/hire`, body);
         notice(
-          "Hired. The onboarding checklist has been created; set their salary under Payroll.",
+          `Hired as ${hired.employee_code}. The onboarding checklist has been created; set their salary under Payroll.${hired.warning ? ` ${hired.warning}` : ""}`,
+          Boolean(hired.warning),
         );
       },
     );
+    // The designation's grades first, with a note when the grade does not fit.
+    dgWireEmployeeForm(org);
   });
 }
 

@@ -89,6 +89,10 @@ export function registerEmployees(router, app) {
     return row ? await gradeWarning(db, row.designation_id, row.grade_id) : null;
   };
 
+  // The code the next new employee would get, for forms to show and HR to change.
+  router.get("/api/admin/employees/next-code", { perm: "employees.write" }, async ({ companyId, send }) =>
+    send(200, { employee_code: await nextCode(companyId) }),
+  );
   // People who have not signed in and set their own password yet, for handing out passwords.
   router.get("/api/admin/employees/not-signed-in", { perm: "employees.write" }, async ({ user, companyId, send }) =>
     send(
@@ -195,7 +199,15 @@ export function registerEmployees(router, app) {
         : null;
     }
   }
+  // The next employee code in the company's own series: plain numbers (3367, 9441 → 9442)
+  // when the company uses them, otherwise E0001, E0002 …
   async function nextCode(companyId) {
+    const numeric = await db
+      .prepare(
+        "SELECT MAX(CAST(employee_code AS BIGINT)) highest, MAX(LENGTH(employee_code)) width FROM users WHERE company_id=? AND employee_code ~ '^[0-9]{1,12}$'",
+      )
+      .get(companyId);
+    if (numeric?.highest != null) return String(Number(numeric.highest) + 1).padStart(Number(numeric.width) || 1, "0");
     const { n } = await db
       .prepare(
         "SELECT MAX(CAST(SUBSTRING(employee_code FROM 2) AS INTEGER)) n FROM users WHERE company_id=? AND employee_code ~ '^E[0-9]{1,9}$'",
@@ -203,6 +215,7 @@ export function registerEmployees(router, app) {
       .get(companyId);
     return `E${String((n ?? 0) + 1).padStart(4, "0")}`;
   }
+  app.nextEmployeeCode = nextCode;
   const visible = (user) =>
     user.role === "super_admin" ? "" : " AND u.role<>'super_admin'";
 
