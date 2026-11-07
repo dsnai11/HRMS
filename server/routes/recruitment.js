@@ -9,6 +9,7 @@ import {
   string,
 } from "../http.js";
 import { requireReasonIfOver } from "../sanctioned-posts.js";
+import { gradeWarning } from "./designation-grades.js";
 import { requireOwned } from "../scope.js";
 import { can } from "../rbac.js";
 import { offerLetter } from "../letters.js";
@@ -832,6 +833,9 @@ export function registerRecruitment(router, app) {
             manager_id: b.manager_id ?? opening?.hiring_manager_id ?? undefined,
             gender: b.gender ?? f.gender ?? undefined,
             date_of_birth: b.date_of_birth ?? f.date_of_birth ?? undefined,
+            // HR may set the code (the form suggests the next in the company's series) and grade.
+            employee_code: b.employee_code === "" ? undefined : b.employee_code,
+            grade_id: b.grade_id ?? undefined,
           },
           audit,
         );
@@ -966,7 +970,13 @@ export function registerRecruitment(router, app) {
           `${c.name} will join your team on ${offer.joining_date}`,
           null,
         );
-      return send(201, { user_id: userId });
+      const hired = await db.prepare("SELECT employee_code,designation_id,grade_id FROM users WHERE id=?").get(userId);
+      return send(201, {
+        user_id: userId,
+        employee_code: hired.employee_code,
+        // A grade outside the designation's grades is saved, with a warning.
+        warning: await gradeWarning(db, hired.designation_id, hired.grade_id),
+      });
     },
   );
   router.get(
