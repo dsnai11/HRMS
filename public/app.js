@@ -326,7 +326,16 @@ function navGroups() {
           !has("recruitment.manage") && ["requisitions", "Requisitions"],
       ],
     ],
-    ["LMS", "✎", [staff && ["learning", "My Courses"]]],
+    // Learning: courses to take for every employee; building courses for anyone who manages them
+    // (HR, admins and the platform owner), straight to the Manage courses tab.
+    [
+      "LMS",
+      "✎",
+      [
+        staff && ["learning", "My Courses"],
+        has("performance.manage") && ["lmsmanage", "Manage courses"],
+      ],
+    ],
     ["Reimbursement", "₹", [staff && ["myclaims", "My Claim"]]],
     [
       "Connect",
@@ -703,6 +712,7 @@ async function render() {
     if (page === "surveyadmin") return await surveyAdminPage(id);
     if (page === "performance") return await performancePage(id);
     if (page === "learning") return await learningPage(id);
+    if (page === "lmsmanage") return await learningPage(id, "manage");
     if (page === "requisitions") return await requisitionsPage(id);
     if (page === "directory") return await directoryPage(id);
     if (page === "orgchart") return await orgChartPage(id);
