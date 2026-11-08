@@ -8,6 +8,7 @@ let budgetSearch = "";
 const BUDGET_TABS = {
   overview: "Budget vs actual",
   plan: "Budget plan",
+  allocation: "Salary by branch",
   manpower: "Manpower plan",
   spending: "Spending",
   setup: "Setup",
@@ -74,6 +75,7 @@ async function budgetsPage(id) {
   const body = document.querySelector("#budget-body");
   if (budgetTab === "overview") await budgetOverview(id, body, plan);
   else if (budgetTab === "plan") budgetPlan(body, plan);
+  else if (budgetTab === "allocation") await saTab(id, body);
   else if (budgetTab === "manpower") await budgetManpower(id, body, plan);
   else if (budgetTab === "spending") await budgetSpending(id, body, plan);
   else budgetSetup(body, plan);
@@ -170,7 +172,7 @@ async function budgetOverview(id, body, plan) {
         return `<tr><td>${esc(h.name)}<small>${esc(h.code)}</small></td><td>${BUDGET_SOURCE[h.source]}</td><td>${bgAmount(c.budget_fy)}</td><td>${bgAmount(c.budget_ytd)}</td><td>${bgAmount(c.actual_ytd)}</td><td>${bgUsed(c)}</td><td>${bgFlag(c.flag)}</td></tr>`;
       })
       .join("")}</tbody></table></div></div>
-    <div class="card"><div class="card-head"><div><h2>By ${budgetGroup === "zones" ? "zone" : budgetGroup === "regions" ? "region" : "branch"}</h2><p class="muted">People count against the branch they are in today. The head office is shown on its own.</p></div><div class="actions"><button class="secondary" id="budget-csv">↓ CSV</button></div></div>
+    <div class="card"><div class="card-head"><div><h2>By ${budgetGroup === "zones" ? "zone" : budgetGroup === "regions" ? "region" : "branch"}</h2><p class="muted">Salaries are on the branches each person covers, shared by AUM (see Salary by branch), for months with an approved payroll run. The head office is shown on its own.</p></div><div class="actions"><button class="secondary" id="budget-csv">↓ CSV</button></div></div>
       <form class="filters" id="budget-filters"><label>Show<select name="group">${[["zones", "Zones"], ["regions", "Regions"], ["branches", "Branches"]].map(([v, l]) => `<option value="${v}" ${v === budgetGroup ? "selected" : ""}>${l}</option>`).join("")}</select></label><label>Search<input name="q" value="${esc(budgetSearch)}" placeholder="Name, code, zone or region"></label><button>Show</button></form>
       ${
         rows.length

@@ -51,6 +51,7 @@ import { registerOvertime } from "./routes/overtime.js";
 import { registerSeparation } from "./routes/separation.js";
 import { registerSalaryBills } from "./routes/salary-bills.js";
 import { registerBudgets } from "./routes/budgets.js";
+import { registerSalaryAllocation, scheduleSalaryAllocation } from "./salary-allocation.js";
 import { registerOptionalHolidays } from "./routes/optional-holidays.js";
 import { registerBranding } from "./routes/branding.js";
 import { registerCompetencies } from "./routes/competencies.js";
@@ -126,6 +127,7 @@ const STATIC = {
   "/hr-guide.js": ["hr-guide.js", "text/javascript"],
   "/dashboard.js": ["dashboard.js", "text/javascript"],
   "/budgets.js": ["budgets.js", "text/javascript"],
+  "/salary-allocation.js": ["salary-allocation.js", "text/javascript"],
   "/branding.js": ["branding.js", "text/javascript"],
   "/theme.js": ["theme.js", "text/javascript"],
   "/vendor/leaflet.js": ["../node_modules/leaflet/dist/leaflet.js", "text/javascript"],
@@ -290,6 +292,7 @@ export function createApp({
     registerSeparation,
     registerSalaryBills,
     registerBudgets,
+    registerSalaryAllocation,
     registerOptionalHolidays,
     registerBranding,
     registerCompetencies,
@@ -527,6 +530,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   scheduleLearningReminders(app);
   scheduleCompOffExpiry(app);
   scheduleFieldForce(app);
+  scheduleSalaryAllocation(app);
   server.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () =>
     console.log(`HRMS listening on port ${process.env.PORT || 3000}`),
   );

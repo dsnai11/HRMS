@@ -500,14 +500,33 @@ export function registerBudgets(router, app) {
     };
     const first = months[0];
     const payrollHead = headList.find((h) => h.source === "payroll");
-    if (payrollHead && end)
+    if (payrollHead && end) {
+      // Months worked out by Salary by branch from the payroll run: each person's employer
+      // cost shared across the branches they cover. Other months: the branch they are in.
+      const shared = new Set(
+        (
+          await db
+            .prepare("SELECT month FROM salary_allocation_runs WHERE company_id=? AND salary_source='payroll' AND month>=? AND month<=?")
+            .all(companyId, first, end)
+        ).map((r) => r.month),
+      );
+      for (const r of await db
+        .prepare(
+          `SELECT month,branch_id,SUM(amount) amount FROM salary_allocations WHERE company_id=? AND month>=? AND month<=? GROUP BY month,branch_id`,
+        )
+        .all(companyId, first, end))
+        if (shared.has(r.month)) addActual(r.branch_id, payrollHead.id, r.month, Number(r.amount));
       for (const r of await db
         .prepare(
           `SELECT r.month,u.branch_id,SUM(i.employer_cost) amount FROM payroll_items i JOIN payroll_runs r ON r.id=i.run_id JOIN users u ON u.id=i.user_id
-           WHERE r.company_id=? AND r.status IN ('approved','paid') AND r.month>=? AND r.month<=? GROUP BY r.month,u.branch_id`,
+           WHERE r.company_id=? AND r.status IN ('approved','paid') AND r.month>=? AND r.month<=?
+             AND NOT EXISTS (SELECT 1 FROM salary_allocation_runs s JOIN salary_allocations a ON a.company_id=s.company_id AND a.month=s.month
+                             WHERE s.company_id=r.company_id AND s.month=r.month AND s.salary_source='payroll' AND a.user_id=i.user_id)
+           GROUP BY r.month,u.branch_id`,
         )
         .all(companyId, first, end))
         addActual(r.branch_id, payrollHead.id, r.month, Number(r.amount));
+    }
     const claimsHead = headList.find((h) => h.source === "claims");
     if (claimsHead && end)
       for (const r of await db
