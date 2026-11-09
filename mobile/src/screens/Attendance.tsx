@@ -829,7 +829,7 @@ export default function Attendance() {
             <ScrollView>
               {profile && (
                 <View style={s.menuUser}>
-                  <Text style={s.menuCompany} numberOfLines={2}>{(profile.company?.name ?? "Laxmi India Finance").toUpperCase()}</Text>
+                  <Text style={s.menuCompany} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{(profile.company?.name ?? "Laxmi India Finance").toUpperCase()}</Text>
                   <View style={s.menuAvatarRing}>
                     <Avatar name={profile.user.name} uri={photoUri} headers={imgHeaders} size={64} />
                   </View>
@@ -938,15 +938,18 @@ export default function Attendance() {
         >
           {!employeeView && (
             <View style={s.brand}>
-              <Image
-                source={brand.logo_url ? { uri: API + brand.logo_url } : require("../../assets/logo.png")}
-                style={s.logo}
-                resizeMode="contain"
-                accessibilityIgnoresInvertColors
-              />
-              <View>
-                <Text style={s.brandName}>Laxmi India</Text>
-                <Text style={s.eyebrow}>FINANCE LTD. · HRMS</Text>
+              <View style={s.logoChip}>
+                <Image
+                  source={brand.logo_url ? { uri: API + brand.logo_url } : require("../../assets/logo.png")}
+                  style={s.logo}
+                  resizeMode="contain"
+                  accessibilityIgnoresInvertColors
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.brandName} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                  {profile?.company?.name ?? "Laxmi India Finance Ltd."}
+                </Text>
               </View>
             </View>
           )}
@@ -1460,8 +1463,17 @@ const s = themed(() => StyleSheet.create({
     marginTop: 14,
     marginBottom: 28,
   },
-  logo: { width: 96, height: 37 },
-  brandName: { fontSize: 21, fontWeight: "700", color: T.ink },
+  // White behind the logo, so its dark artwork stays visible in Night mode.
+  logoChip: {
+    backgroundColor: "#ffffff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: T.line,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  logo: { width: 62, height: 26 },
+  brandName: { fontSize: 18, fontWeight: "700", color: T.ink },
   eyebrow: { fontSize: 10, letterSpacing: 1.5, color: T.muted, marginTop: 4 },
   title: {
     fontSize: 35,

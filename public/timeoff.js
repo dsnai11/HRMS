@@ -555,7 +555,7 @@ async function leaveAdminTabHtml(tab) {
             )
             .join("")}`,
       )
-      .join("")}${input("approval_reminder_hours", "Remind the approver after (hours)", s.approval_reminder_hours, 'type="number" min="1" max="720"')}${input("approval_escalate_hours", "Escalate to HR after (hours)", s.approval_escalate_hours, 'type="number" min="1" max="720"')}<div class="full form-actions"><button>Save</button></div></form></div>`;
+      .join("")}<div class="full"><strong>Daily team attendance mail</strong><p class="muted">Each supervisor gets one mail a day listing the people reporting to them who are late, on leave or have not punched in. Nothing is sent when everyone is on time.</p></div><label class="check full"><input type="checkbox" name="team_mail_enabled" ${s.team_mail_enabled ? "checked" : ""}> Send the daily mail to supervisors</label>${input("team_mail_time", "Send at", s.team_mail_time, 'type="time" required')}${input("approval_reminder_hours", "Remind the approver after (hours)", s.approval_reminder_hours, 'type="number" min="1" max="720"')}${input("approval_escalate_hours", "Escalate to HR after (hours)", s.approval_escalate_hours, 'type="number" min="1" max="720"')}<div class="full form-actions"><button>Save</button></div></form></div>`;
   }
   if (tab === "requests") {
     const q = leaveAdminCache.status ?? "pending";
@@ -770,6 +770,8 @@ async function leaveAdminWire(tab) {
             .filter(Boolean),
           approval_reminder_hours: Number(f.get("approval_reminder_hours")),
           approval_escalate_hours: Number(f.get("approval_escalate_hours")),
+          team_mail_enabled: f.get("team_mail_enabled") === "on",
+          team_mail_time: f.get("team_mail_time"),
           notice_leave_extends: f.get("notice_leave_extends") === "on",
         };
         if (f.get("leave_start_year"))

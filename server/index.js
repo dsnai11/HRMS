@@ -51,6 +51,7 @@ import { registerOvertime } from "./routes/overtime.js";
 import { registerSeparation } from "./routes/separation.js";
 import { registerSalaryBills } from "./routes/salary-bills.js";
 import { registerBudgets } from "./routes/budgets.js";
+import { scheduleTeamAttendanceMails } from "./team-attendance-mail.js";
 import { registerCertificateDesign } from "./routes/certificate-design.js";
 import { registerTrainingFollowup } from "./training-followup.js";
 import { registerSalaryAllocation, scheduleSalaryAllocation } from "./salary-allocation.js";
@@ -543,6 +544,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   scheduleCompOffExpiry(app);
   scheduleFieldForce(app);
   scheduleSalaryAllocation(app);
+  scheduleTeamAttendanceMails(app);
   server.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () =>
     console.log(`HRMS listening on port ${process.env.PORT || 3000}`),
   );

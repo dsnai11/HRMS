@@ -129,7 +129,24 @@ async function busy(button, fn) {
   }
 }
 const brand = (name = me?.company?.name || config.company) =>
-  `<div class="brand"><img class="brand-logo" src="${esc(brandLogoSrc())}" alt=""><div>${esc(name)}<small>HRMS</small></div></div>`;
+  `<div class="brand" title="${esc(name)}"><img class="brand-logo" src="${esc(brandLogoSrc())}" alt=""><div class="brand-name">${esc(name)}</div></div>`;
+// The company name stays on one line: a long name gets smaller text once the logo has loaded.
+function fitBrandName(name) {
+  name.style.fontSize = "";
+  let size = parseFloat(getComputedStyle(name).fontSize);
+  while (name.scrollWidth > name.clientWidth && size > 10) {
+    size -= 0.5;
+    name.style.fontSize = `${size}px`;
+  }
+}
+document.addEventListener(
+  "load",
+  (e) => {
+    if (e.target.classList?.contains("brand-logo")) e.target.parentElement.querySelectorAll(".brand-name").forEach(fitBrandName);
+  },
+  true,
+);
+window.addEventListener("resize", () => document.querySelectorAll(".brand-name").forEach(fitBrandName));
 const empty = (title, description) =>
   `<div class="empty"><div class="empty-icon">◎</div><strong>${esc(title)}</strong>${esc(description)}</div>`;
 function login() {

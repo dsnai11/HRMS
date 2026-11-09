@@ -391,10 +391,11 @@ export default function More({
   }, [unread, chatUnread, onCounts]);
   return (
     <ScreenIn key={section}>
-      <Text style={s.crumb}>
-        {MENU.find(([, items]) => items.some(([id]) => id === section))?.[0]}
-        {section === "Home" ? "" : " / " + section}
-      </Text>
+      {section !== "Home" && (
+        <Text style={s.crumb}>
+          {MENU.find(([, items]) => items.some(([id]) => id === section))?.[0]} / {section}
+        </Text>
+      )}
       {section === "Home" && (
         <HomeScreen
           api={api}
@@ -3189,7 +3190,8 @@ const s = themed(() => StyleSheet.create({
   punchBtn: {
     height: 56,
     borderRadius: 28,
-    backgroundColor: T.surface,
+    // White in Day and Night: the main action of the screen, on the brand colour.
+    backgroundColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -3198,19 +3200,21 @@ const s = themed(() => StyleSheet.create({
     height: 46,
     borderRadius: 23,
     borderWidth: 1.5,
-    borderColor: T.surface,
+    borderColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",
   },
   odBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   heroTitle: { color: "#fff", fontSize: 18, fontWeight: "800" },
   heroRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 14 },
-  heroLine: { color: T.soft, fontSize: 15, fontWeight: "600" },
+  heroLine: { color: T.onPrimarySoft, fontSize: 15, fontWeight: "600" },
   heroTime: { color: "#fff", fontSize: 20, fontWeight: "800" },
   sectionTitle: { color: T.ink, fontSize: 18, fontWeight: "700", textAlign: "center" },
   quickPage: { gap: 14 },
   quickHead: { flexDirection: "row", alignItems: "center", gap: 10 },
   quickHeadIcon: {
+    alignItems: "center",
+    justifyContent: "center",
     fontSize: 20,
     color: T.primary,
     backgroundColor: T.soft,

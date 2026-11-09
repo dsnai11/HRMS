@@ -106,7 +106,7 @@ export function registerLeave(router, app) {
   const approvalSettings = async (companyId) => {
     const c = await db
       .prepare(
-        "SELECT approval_reminder_hours,approval_escalate_hours FROM companies WHERE id=?",
+        "SELECT approval_reminder_hours,approval_escalate_hours,team_mail_enabled,team_mail_time FROM companies WHERE id=?",
       )
       .get(companyId);
     return {
@@ -115,6 +115,8 @@ export function registerLeave(router, app) {
       approval_steps: STEPS,
       approval_reminder_hours: c?.approval_reminder_hours ?? 24,
       approval_escalate_hours: c?.approval_escalate_hours ?? 72,
+      team_mail_enabled: Boolean(c?.team_mail_enabled ?? 1),
+      team_mail_time: c?.team_mail_time ?? "11:00",
     };
   };
   router.get(
@@ -209,6 +211,13 @@ export function registerLeave(router, app) {
       ])
         if (b[key] !== undefined)
           set[key] = Math.round(number(b[key], label, 1, 720));
+      if (b.team_mail_enabled !== undefined)
+        set.team_mail_enabled = Number(bool(b.team_mail_enabled, "Daily team attendance mail"));
+      if (b.team_mail_time !== undefined) {
+        if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(b.team_mail_time)))
+          throw new HttpError(400, "Send time must be like 11:00.");
+        set.team_mail_time = b.team_mail_time;
+      }
       const keys = Object.keys(set);
       if (!keys.length) throw new HttpError(400, "Nothing to update.");
       await transaction(async () => {
