@@ -13,6 +13,7 @@ import {
   type Api,
   Btn,
   Field,
+  PickSheet,
   Status,
   attempt,
   errorText,
@@ -186,14 +187,29 @@ function Ring({ pct, label }: { pct: number; label: string }) {
 function MonthPicker({ value, onChange }: { value: string; onChange: (m: string) => void }) {
   const [y, m] = value.split("-").map(Number);
   const now = today().slice(0, 7);
+  const nowYear = Number(now.slice(0, 4));
   return (
     <View style={d.monthBar}>
       <Pressable accessibilityRole="button" accessibilityLabel="Previous month" hitSlop={10} onPress={() => onChange(shiftMonth(value, -1))}>
         <Text style={d.monthArrow}>‹</Text>
       </Pressable>
-      <Text style={d.monthText}>
-        {MONTHS_LONG[m - 1]} {y}
-      </Text>
+      <View style={d.monthPicks}>
+        <PickSheet
+          label="Month"
+          value={m}
+          options={MONTHS_LONG.map((n, i): [number, string] => [i + 1, n]).filter(([i]) => `${y}-${String(i).padStart(2, "0")}` <= now)}
+          onChange={(v) => onChange(`${y}-${String(v).padStart(2, "0")}`)}
+        />
+        <PickSheet
+          label="Year"
+          value={y}
+          options={[0, 1, 2, 3, 4].map((n): [number, string] => [nowYear - n, String(nowYear - n)])}
+          onChange={(v) => {
+            const next = `${v}-${String(m).padStart(2, "0")}`;
+            onChange(next > now ? now : next);
+          }}
+        />
+      </View>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Next month"
@@ -1504,6 +1520,7 @@ export const d = themed(() => StyleSheet.create({
   },
   monthArrow: { fontSize: 30, color: C.red, paddingHorizontal: 8 },
   monthText: { color: C.ink, fontSize: 16, fontWeight: "700" },
+  monthPicks: { flex: 1, flexDirection: "row", gap: 8, marginHorizontal: 12 },
   logCard: { flexDirection: "row", backgroundColor: T.surface, borderRadius: 18, borderWidth: 1, borderColor: C.line, overflow: "hidden" },
   dateBlock: { width: 76, backgroundColor: C.red, alignItems: "center", justifyContent: "center", paddingVertical: 14, gap: 2 },
   dateDay: { color: "#fff", fontSize: 28, fontWeight: "800" },

@@ -27,6 +27,23 @@ export function registerPeople(router, app) {
     requireOwned(db, table, integer(Number(id)), companyId, label);
 
   // ---- directory -----------------------------------------------------------------------------
+  // Headcount and the choices for the directory's filters.
+  router.get("/api/directory/summary", async ({ user, send }) => {
+    const total = await db
+      .prepare("SELECT COUNT(*) n FROM users WHERE company_id=? AND active=1 AND role<>'super_admin'")
+      .get(user.company_id);
+    const options = (table, column) =>
+      db
+        .prepare(
+          `SELECT DISTINCT t.id,t.name FROM ${table} t JOIN users u ON u.${column}=t.id WHERE u.company_id=? AND u.active=1 AND u.role<>'super_admin' ORDER BY t.name`,
+        )
+        .all(user.company_id);
+    return send(200, {
+      total: Number(total.n),
+      departments: await options("departments", "department_id"),
+      branches: await options("branches", "branch_id"),
+    });
+  });
   router.get("/api/directory", async ({ user, query, send }) => {
     const where = ["u.company_id=?", "u.active=1", "u.role<>'super_admin'"],
       params = [user.company_id];

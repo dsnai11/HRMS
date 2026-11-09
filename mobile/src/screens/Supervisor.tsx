@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Text, View } from "react-native";
+import React, { useEffect, useState } from "react";
+import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import {
   type Api,
   Btn,
@@ -11,6 +11,7 @@ import {
   Tabs,
   attempt,
   dateText,
+  errorText,
   inr,
   isDate,
   k,
@@ -18,6 +19,8 @@ import {
   today,
   useLoad,
 } from "./kit";
+import { T, themed } from "../theme";
+import { Icon, tick } from "../ui";
 
 // Supervisor: everything waiting for this person's decision (leave, attendance corrections,
 // OD trips, overtime, claims), their team, team resignations and separation. The server
@@ -119,54 +122,90 @@ const SEP_STATUS: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
-/** Approve, or reject with a reason. */
-function Decide({
-  onDecide,
-}: {
-  onDecide: (
-    decision: "approved" | "rejected",
-    note?: string,
-  ) => Promise<boolean>;
-}) {
-  const [rejecting, setRejecting] = useState(false);
-  const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const go = async (d: "approved" | "rejected") => {
-    if (d === "rejected" && !note.trim()) return;
-    setBusy(true);
-    await onDecide(d, note.trim() || undefined);
-    setBusy(false);
-  };
-  return rejecting ? (
-    <View style={{ gap: 8 }}>
-      <Field label="Reason for rejecting" value={note} onChange={setNote} />
-      <View style={k.actions}>
-        <Btn
-          title="Reject"
-          onPress={() => void go("rejected")}
-          disabled={busy || !note.trim()}
-        />
-        <Btn title="Back" secondary onPress={() => setRejecting(false)} />
-      </View>
-    </View>
-  ) : (
-    <View style={k.actions}>
-      <Btn
-        title="Approve"
-        onPress={() => void go("approved")}
-        disabled={busy}
-      />
-      <Btn
-        title="Reject"
-        secondary
-        onPress={() => setRejecting(true)}
-        disabled={busy}
-      />
-    </View>
-  );
+// One list per kind of request. Pending requests can be ticked and decided together: the server
+// still checks each one, so a request this person may not decide is reported, not approved.
+export type ApprovalKind = "leave" | "regularization" | "od" | "multiple" | "overtime" | "claims" | "optional";
+const APPROVAL_LABEL: Record<ApprovalKind, string> = {
+  leave: "Leave",
+  regularization: "Regularization",
+  od: "OD days",
+  multiple: "Multiple OD",
+  overtime: "Overtime",
+  claims: "Claims",
+  optional: "Optional holiday",
+};
+const APPROVAL_ORDER = Object.keys(APPROVAL_LABEL) as ApprovalKind[];
+// Kinds with an Approved and Rejected history on the server.
+const WITH_HISTORY: ApprovalKind[] = ["leave", "regularization", "od", "multiple"];
+// Set just before opening this screen from a Quick Link on Home.
+let approvalStart: ApprovalKind | null = null;
+export const openApprovalsAt = (kind: ApprovalKind) => {
+  approvalStart = kind;
+};
+const takeApprovalStart = () => {
+  const kind = approvalStart;
+  approvalStart = null;
+  return kind;
+};
+
+type ApprovalRow = {
+  key: string;
+  title: string;
+  lines: string[];
+  body?: string | null;
+  tag?: string;
+  paths: string[];
+};
+const PAGE = 40;
+const dayRange = (from: string, to: string) => (to !== from ? `${dateText(from)} – ${dateText(to)}` : dateText(from));
+const fixRow = (r: Fix): ApprovalRow => ({
+  key: `r${r.id}`,
+  title: `${r.employee_name} · ${dateText(r.date)}`,
+  tag: FIX_KIND[r.kind] ?? r.kind,
+  lines: r.in_time || r.out_time ? [`In ${r.in_time ?? "—"} · Out ${r.out_time ?? "—"}`] : [],
+  body: r.reason,
+  paths: [`/regularizations/${r.id}/decision`],
+});
+const batchRow = (rows: Fix[]): ApprovalRow => ({
+  key: `b${rows[0].batch_id}`,
+  title: `${rows[0].employee_name} · ${dayRange(rows[0].date, rows[rows.length - 1].date)}`,
+  tag: `${rows.length} day${rows.length === 1 ? "" : "s"}`,
+  lines: [],
+  body: rows[0].reason,
+  paths: rows.map((x) => `/regularizations/${x.id}/decision`),
+});
+const leaveRow = (r: Leave): ApprovalRow => ({
+  key: `l${r.id}`,
+  title: `${r.employee_name} · ${r.type_name}`,
+  lines: [`${dayRange(r.from_date, r.to_date)} · ${r.days} day${r.days === 1 ? "" : "s"}${r.step_name ? ` · your step: ${r.step_name}` : ""}`],
+  body: r.reason,
+  paths: [`/leave/requests/${r.id}/decision`],
+});
+const odRow = (r: Od): ApprovalRow => ({
+  key: `o${r.id}`,
+  title: r.employee_name,
+  lines: [`Out ${timeText(r.out_at)}${r.in_at ? ` · back ${timeText(r.in_at)}` : ""}`],
+  body: r.purpose,
+  paths: [`/od-visits/${r.id}/decision`],
+});
+function splitBatches(rows: Fix[]) {
+  const singles: Fix[] = [];
+  const batches = new Map<string, Fix[]>();
+  for (const f of rows)
+    if (f.batch_id) batches.set(f.batch_id, [...(batches.get(f.batch_id) ?? []), f]);
+    else singles.push(f);
+  return { singles, batches: [...batches.values()] };
 }
 
 function Approvals({ api }: { api: Api }) {
+  const [chosen, setChosen] = useState<ApprovalKind | null>(takeApprovalStart);
+  const [status, setStatus] = useState<"pending" | "approved" | "rejected">("pending");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [shown, setShown] = useState(PAGE);
+  const [rejecting, setRejecting] = useState(false);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState("");
   const inbox = useLoad(async () => {
     const [a, od, ot, claims, optional] = await Promise.all([
       api<{ leave: Leave[]; regularizations: Fix[] }>("/approvals"),
@@ -175,137 +214,223 @@ function Approvals({ api }: { api: Api }) {
       api<Claim[]>("/claims/inbox").catch(() => [] as Claim[]),
       api<OptionalChoice[]>("/optional-holidays/inbox").catch(() => [] as OptionalChoice[]),
     ]);
-    // Multiple OD: the days of one request are decided together.
-    const singles: Fix[] = [];
-    const batches = new Map<string, Fix[]>();
-    for (const f of a.regularizations)
-      if (f.batch_id) batches.set(f.batch_id, [...(batches.get(f.batch_id) ?? []), f]);
-      else singles.push(f);
-    return { ...a, regularizations: singles, batches: [...batches.values()], od, ot, claims, optional };
+    const { singles, batches } = splitBatches(a.regularizations);
+    const lists: Record<ApprovalKind, ApprovalRow[]> = {
+      leave: a.leave.map(leaveRow),
+      regularization: singles.map(fixRow),
+      od: od.map(odRow),
+      multiple: batches.map(batchRow),
+      overtime: ot.map((r) => ({
+        key: `t${r.id}`,
+        title: `${r.employee_name} · ${dateText(r.date)}`,
+        lines: [`${Math.floor(r.minutes_claimed / 60)} h ${r.minutes_claimed % 60} min claimed`],
+        body: r.reason,
+        paths: [`/overtime/${r.id}/decision`],
+      })),
+      claims: claims.map((r) => ({
+        key: `c${r.id}`,
+        title: `${r.employee_name} · ${r.type_name} · ${inr(r.amount)}`,
+        lines: [dateText(r.expense_date)],
+        body: r.description,
+        paths: [`/claims/${r.id}/decide`],
+      })),
+      optional: optional.map((r) => ({
+        key: `h${r.id}`,
+        title: `${r.employee_name} · ${r.name}`,
+        lines: [dateText(r.date)],
+        paths: [`/optional-holidays/${r.id}/decision`],
+      })),
+    };
+    return lists;
   });
-  const decide =
-    (path: string) => (decision: "approved" | "rejected", note?: string) =>
-      attempt(async () => {
-        await api(path, { decision, note });
-        await inbox.reload();
-      });
-  const decideAll =
-    (ids: number[]) => (decision: "approved" | "rejected", note?: string) =>
-      attempt(async () => {
-        for (const id of ids) await api(`/regularizations/${id}/decision`, { decision, note });
-        await inbox.reload();
-      });
-  const d = inbox.data;
-  const total = d
-    ? d.leave.length +
-      d.regularizations.length +
-      d.batches.length +
-      d.optional.length +
-      d.od.length +
-      d.ot.length +
-      d.claims.length
-    : 0;
+  const [history, setHistory] = useState<Partial<Record<ApprovalKind, ApprovalRow[]>> | null>(null);
+  const [historyError, setHistoryError] = useState("");
+  useEffect(() => {
+    if (status === "pending") return;
+    let stale = false;
+    const load = async () => {
+      setHistory(null);
+      setHistoryError("");
+      try {
+        const h = await api<{ leave: Leave[]; regularizations: Fix[]; od: Od[] }>(`/approvals/decided?status=${status}`);
+        if (stale) return;
+        const { singles, batches } = splitBatches(h.regularizations);
+        setHistory({
+          leave: h.leave.map(leaveRow),
+          regularization: singles.map(fixRow),
+          od: h.od.map(odRow),
+          multiple: batches.map(batchRow),
+        });
+      } catch (e) {
+        if (!stale) setHistoryError(errorText(e));
+      }
+    };
+    // Asks the server when the status changes; state is set after it answers.
+    void load();
+    return () => {
+      stale = true;
+    };
+  }, [api, status]);
+  const lists = inbox.data;
+  const count = (x: ApprovalKind) => lists?.[x].length ?? 0;
+  const kind: ApprovalKind = chosen ?? APPROVAL_ORDER.find((x) => count(x) > 0) ?? "leave";
+  const pendingView = status === "pending";
+  const rows = pendingView ? (lists?.[kind] ?? []) : (history?.[kind] ?? []);
+  const visible = rows.slice(0, shown);
+  const chosenRows = rows.filter((r) => picked.has(r.key));
+  const allPicked = rows.length > 0 && chosenRows.length === rows.length;
+  const reset = () => {
+    setPicked(new Set());
+    setShown(PAGE);
+    setRejecting(false);
+    setNote("");
+    setResult("");
+  };
+  const toggle = (key: string) => {
+    tick();
+    setPicked((p) => {
+      const next = new Set(p);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  const run = async (decision: "approved" | "rejected", reason?: string) => {
+    setBusy(true);
+    setResult("");
+    const queue = [...chosenRows];
+    let done = 0;
+    let failed = 0;
+    let firstError = "";
+    const worker = async () => {
+      for (let job = queue.shift(); job; job = queue.shift()) {
+        try {
+          for (const path of job.paths) await api(path, { decision, note: reason });
+          done++;
+        } catch (e) {
+          failed++;
+          firstError ||= errorText(e);
+        }
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    setPicked(new Set());
+    setRejecting(false);
+    setNote("");
+    setResult(
+      `${done} ${decision}.${failed ? ` ${failed} could not be saved: ${firstError}` : ""}`,
+    );
+    await inbox.reload();
+    setBusy(false);
+  };
+  const approve = () => {
+    if (chosenRows.length === 1) return void run("approved");
+    Alert.alert(`Approve ${chosenRows.length} requests?`, "Each selected request will be approved.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Approve", onPress: () => void run("approved") },
+    ]);
+  };
+  const loading = pendingView ? inbox.loading : !history && !historyError;
+  const error = pendingView ? inbox.error : historyError;
   return (
     <View style={k.card}>
       <Text style={k.heading}>Waiting for you</Text>
-      <Status loading={inbox.loading} error={inbox.error} />
-      {d && total === 0 && (
-        <Empty text="Nothing is waiting for your approval." />
+      <Choice<ApprovalKind>
+        options={APPROVAL_ORDER.filter((x) => WITH_HISTORY.includes(x) || count(x) > 0).map(
+          (x) => [x, count(x) ? `${APPROVAL_LABEL[x]} (${count(x)})` : APPROVAL_LABEL[x]],
+        )}
+        value={kind}
+        onChange={(v) => {
+          setChosen(v);
+          if (!WITH_HISTORY.includes(v)) setStatus("pending");
+          reset();
+        }}
+      />
+      {WITH_HISTORY.includes(kind) && (
+        <Choice<"pending" | "approved" | "rejected">
+          options={[["pending", "Pending"], ["approved", "Approved by me"], ["rejected", "Rejected by me"]]}
+          value={status}
+          onChange={(v) => {
+            setStatus(v);
+            reset();
+          }}
+        />
       )}
-      {d?.leave.map((r) => (
-        <View key={`l${r.id}`} style={k.item}>
-          <Pill text="Leave" />
-          <Text style={k.strong}>
-            {r.employee_name} · {r.type_name}
-          </Text>
-          <Text style={k.note}>
-            {dateText(r.from_date)}
-            {r.to_date !== r.from_date
-              ? ` – ${dateText(r.to_date)}`
-              : ""} · {r.days} day
-            {r.days === 1 ? "" : "s"}
-            {r.step_name ? ` · your step: ${r.step_name}` : ""}
-          </Text>
-          {r.reason ? <Text style={k.body}>{r.reason}</Text> : null}
-          <Decide onDecide={decide(`/leave/requests/${r.id}/decision`)} />
+      <Status loading={loading} error={error} />
+      {!!result && <Text style={k.note}>{result}</Text>}
+      {pendingView && rows.length > 0 && (
+        <View style={a.bar}>
+          <Pressable
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: allPicked }}
+            accessibilityLabel="Select all"
+            style={a.allRow}
+            onPress={() => setPicked(allPicked ? new Set() : new Set(rows.map((r) => r.key)))}
+          >
+            <Icon name={allPicked ? "checkbox" : "square-outline"} size={24} color={T.primaryText} />
+            <Text style={k.strong}>All ({rows.length})</Text>
+          </Pressable>
+          <Text style={k.note}>{chosenRows.length ? `${chosenRows.length} selected` : "Select requests to act"}</Text>
+          {rejecting ? (
+            <View style={{ gap: 8, width: "100%" }}>
+              <Field label="Reason for rejecting" value={note} onChange={setNote} />
+              <View style={k.actions}>
+                <Btn title="Reject" onPress={() => void run("rejected", note.trim())} disabled={busy || !note.trim() || !chosenRows.length} />
+                <Btn title="Back" secondary onPress={() => setRejecting(false)} />
+              </View>
+            </View>
+          ) : (
+            <View style={[k.actions, { width: "100%" }]}>
+              <Btn title={busy ? "Saving…" : "Approve"} onPress={approve} disabled={busy || !chosenRows.length} />
+              <Btn title="Reject" secondary onPress={() => setRejecting(true)} disabled={busy || !chosenRows.length} />
+            </View>
+          )}
         </View>
-      ))}
-      {d?.regularizations.map((r) => (
-        <View key={`r${r.id}`} style={k.item}>
-          <Pill text={FIX_KIND[r.kind] ?? r.kind} />
-          <Text style={k.strong}>
-            {r.employee_name} · {dateText(r.date)}
-          </Text>
-          {r.in_time || r.out_time ? (
-            <Text style={k.note}>
-              In {r.in_time ?? "—"} · Out {r.out_time ?? "—"}
-            </Text>
-          ) : null}
-          <Text style={k.body}>{r.reason}</Text>
-          <Decide onDecide={decide(`/regularizations/${r.id}/decision`)} />
-        </View>
-      ))}
-      {d?.batches.map((rows) => (
-        <View key={`b${rows[0].batch_id}`} style={k.item}>
-          <Pill text={`Multiple OD · ${rows.length} day${rows.length === 1 ? "" : "s"}`} />
-          <Text style={k.strong}>
-            {rows[0].employee_name} · {dateText(rows[0].date)}
-            {rows.length > 1 ? ` – ${dateText(rows[rows.length - 1].date)}` : ""}
-          </Text>
-          <Text style={k.body}>{rows[0].reason}</Text>
-          <Decide onDecide={decideAll(rows.map((x) => x.id))} />
-        </View>
-      ))}
-      {d?.optional.map((r) => (
-        <View key={`h${r.id}`} style={k.item}>
-          <Pill text="Optional holiday" />
-          <Text style={k.strong}>
-            {r.employee_name} · {r.name}
-          </Text>
-          <Text style={k.note}>{dateText(r.date)}</Text>
-          <Decide onDecide={decide(`/optional-holidays/${r.id}/decision`)} />
-        </View>
-      ))}
-      {d?.od.map((r) => (
-        <View key={`o${r.id}`} style={k.item}>
-          <Pill text="On duty trip" />
-          <Text style={k.strong}>{r.employee_name}</Text>
-          <Text style={k.note}>
-            Out {timeText(r.out_at)}
-            {r.in_at ? ` · back ${timeText(r.in_at)}` : ""}
-          </Text>
-          <Text style={k.body}>{r.purpose}</Text>
-          <Decide onDecide={decide(`/od-visits/${r.id}/decision`)} />
-        </View>
-      ))}
-      {d?.ot.map((r) => (
-        <View key={`t${r.id}`} style={k.item}>
-          <Pill text="Overtime" />
-          <Text style={k.strong}>
-            {r.employee_name} · {dateText(r.date)}
-          </Text>
-          <Text style={k.note}>
-            {Math.floor(r.minutes_claimed / 60)} h {r.minutes_claimed % 60} min
-            claimed
-          </Text>
-          <Text style={k.body}>{r.reason}</Text>
-          <Decide onDecide={decide(`/overtime/${r.id}/decision`)} />
-        </View>
-      ))}
-      {d?.claims.map((r) => (
-        <View key={`c${r.id}`} style={k.item}>
-          <Pill text="Claim" />
-          <Text style={k.strong}>
-            {r.employee_name} · {r.type_name} · {inr(r.amount)}
-          </Text>
-          <Text style={k.note}>{dateText(r.expense_date)}</Text>
-          <Text style={k.body}>{r.description}</Text>
-          <Decide onDecide={decide(`/claims/${r.id}/decide`)} />
-        </View>
-      ))}
+      )}
+      {!loading && rows.length === 0 && (
+        <Empty text={pendingView ? `Nothing is waiting for you under ${APPROVAL_LABEL[kind]}.` : "Nothing here yet."} />
+      )}
+      {visible.map((r) => {
+        const on = picked.has(r.key);
+        const inner = (
+          <>
+            <View style={{ flex: 1, gap: 4 }}>
+              {r.tag ? <Pill text={r.tag} /> : null}
+              <Text style={k.strong}>{r.title}</Text>
+              {r.lines.map((l) => (
+                <Text key={l} style={k.note}>{l}</Text>
+              ))}
+              {r.body ? <Text style={k.body}>{r.body}</Text> : null}
+            </View>
+            {pendingView && <Icon name={on ? "checkbox" : "square-outline"} size={24} color={on ? T.primaryText : T.muted} />}
+          </>
+        );
+        return pendingView ? (
+          <Pressable
+            key={r.key}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: on }}
+            accessibilityLabel={r.title}
+            style={[k.item, a.row]}
+            onPress={() => toggle(r.key)}
+          >
+            {inner}
+          </Pressable>
+        ) : (
+          <View key={r.key} style={[k.item, a.row]}>{inner}</View>
+        );
+      })}
+      {rows.length > shown && <Btn title={`Show more (${rows.length - shown} left)`} secondary onPress={() => setShown(shown + PAGE)} />}
     </View>
   );
 }
+const a = themed(() =>
+  StyleSheet.create({
+    bar: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: T.line, backgroundColor: T.fill },
+    allRow: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 44 },
+    row: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  }),
+);
 
 function Team({ api }: { api: Api }) {
   const team = useLoad(() => api<Member[]>("/team/members"));
