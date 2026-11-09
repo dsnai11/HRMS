@@ -493,6 +493,28 @@ export function registerRegularization(router, app) {
   );
 
   // ---- approvals inbox ------------------------------------------------------
+  // What this person has already decided, newest first: the Approved and Rejected views of the
+  // phone's approval lists.
+  router.get("/api/approvals/decided", async ({ user, query, send }) => {
+    const status = oneOf(query.get("status"), "Status", ["approved", "rejected"]);
+    const args = [user.company_id, user.id, status];
+    const where = "WHERE r.company_id=? AND r.decided_by=? AND r.status=? ORDER BY r.decided_at DESC,r.id DESC LIMIT 150";
+    const [leave, regularizations, od] = await Promise.all([
+      db
+        .prepare(
+          `SELECT r.*,t.name type_name,u.name employee_name,u.employee_code FROM leave_requests r JOIN leave_types t ON t.id=r.leave_type_id JOIN users u ON u.id=r.user_id ${where}`,
+        )
+        .all(...args),
+      db.prepare(`${SELECT} ${where}`).all(...args),
+      db
+        .prepare(
+          `SELECT r.id,r.purpose,r.out_at,r.in_at,r.status,r.decision_note,u.name employee_name,u.employee_code FROM od_visits r JOIN users u ON u.id=r.user_id ${where}`,
+        )
+        .all(...args),
+    ]);
+    return send(200, { leave, regularizations, od });
+  });
+
   router.get("/api/approvals", async ({ user, send }) => {
     const scope = await inboxScope(app, user);
     if (!scope) return send(200, { leave: [], regularizations: [] });

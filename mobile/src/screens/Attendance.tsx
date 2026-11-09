@@ -22,7 +22,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Circle, Marker } from "react-native-maps";
 import { StatusBar } from "expo-status-bar";
 import * as Location from "expo-location";
@@ -196,6 +196,7 @@ const rootedCheck = () =>
   (rooted ??= Device.isRootedExperimentalAsync().catch(() => null));
 
 export default function Attendance() {
+  const insets = useSafeAreaInsets();
   // Colours from Appearance & branding: drawn again when they change.
   useBrandVersion();
   // Narrow phones (320–360 points wide) get less side padding.
@@ -588,7 +589,8 @@ export default function Attendance() {
         : null;
       early?.catch(() => {});
       let current = profile;
-      if (!current || Date.now() - profileAt.current > 60000) {
+      // A phone still waiting for approval asks again, so it works as soon as HR approves it.
+      if (!current || Date.now() - profileAt.current > 60000 || current.device?.status !== "approved") {
         current = await api<Profile>("/me");
         setProfile(current);
         profileAt.current = Date.now();
@@ -762,8 +764,8 @@ export default function Attendance() {
   const employeeView =
     !!profile && !passwordScreen && profile.user.role !== "super_admin";
   return (
-    <SafeAreaView style={s.safe}>
-      <StatusBar style={isDark() ? "light" : "dark"} />
+    <SafeAreaView style={s.safe} edges={employeeView ? ["top", "left", "right"] : undefined}>
+      <StatusBar style={isDark() || (menuOpen && employeeView) ? "light" : "dark"} />
       <Modal
         visible={selfieOpen}
         animationType="slide"
@@ -828,7 +830,7 @@ export default function Attendance() {
           <View style={s.menu}>
             <ScrollView>
               {profile && (
-                <View style={s.menuUser}>
+                <View style={[s.menuUser, { paddingTop: insets.top + 10 }]}>
                   <Text style={s.menuCompany} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{(profile.company?.name ?? "Laxmi India Finance").toUpperCase()}</Text>
                   <View style={s.menuAvatarRing}>
                     <Avatar name={profile.user.name} uri={photoUri} headers={imgHeaders} size={64} />
@@ -964,12 +966,19 @@ export default function Attendance() {
               <Text style={s.subtitle}>
                 Sign in to record attendance at your assigned workplace.
               </Text>
+              {!!message && (
+                <Text accessibilityRole="alert" style={s.message}>
+                  {message}
+                </Text>
+              )}
               <View style={s.card}>
                 <Text style={s.label}>Email address</Text>
                 <TextInput
                   accessibilityLabel="Email address"
                   style={s.input}
                   autoCapitalize="none"
+                  autoCorrect={false}
+                  spellCheck={false}
                   autoComplete="username"
                   keyboardType="email-address"
                   value={email}
@@ -1325,7 +1334,7 @@ export default function Attendance() {
               )}
             </>
           )}
-          {!!message && (
+          {!!message && !!token && (
             <Text accessibilityRole="alert" style={s.message}>
               {message}
             </Text>
@@ -1334,7 +1343,7 @@ export default function Attendance() {
         </ScrollView>
       </KeyboardAvoidingView>
       {employeeView && (
-        <View style={s.tabBar}>
+        <View style={[s.tabBar, { paddingBottom: insets.bottom + 6 }]}>
           {(
             [
               ["Home", "home", "Home"],
@@ -1366,7 +1375,7 @@ export default function Attendance() {
               </Animated.View>
               <Text
                 numberOfLines={1}
-                style={[s.tabLabel, view === id && { color: T.primaryDark }]}
+                style={[s.tabLabel, view === id && { color: isDark() ? T.primaryText : T.primaryDark }]}
               >
                 {label}
               </Text>

@@ -32,6 +32,8 @@ const shades = (primary: string, accent: string | null, dark = false) => {
     primaryDark: mix(primary, "#000000", 0.14),
     primaryDeeper: mix(primary, "#000000", 0.3),
     primaryHot: mix(primary, "#ffffff", 0.18),
+    // Brand colour for text and icons: lighter at night so it stays readable on dark cards.
+    primaryText: dark ? mix(primary, "#ffffff", 0.45) : primary,
     light: mix(primary, card, 0.4),
     soft: mix(primary, card, dark ? 0.78 : 0.9),
     softer: mix(primary, card, dark ? 0.86 : 0.95),

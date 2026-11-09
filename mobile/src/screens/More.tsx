@@ -19,10 +19,11 @@ import {
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import { File } from "expo-file-system";
-import { SupervisorScreen } from "./Supervisor";
+import { SupervisorScreen, openApprovalsAt, type ApprovalKind } from "./Supervisor";
 import { FieldForceCard } from "./FieldForce";
 import { ClaimsScreen, TaxScreen } from "./Money";
 import { ResignationScreen } from "./Exit";
+import { PickSheet } from "./kit";
 import { LearningScreen, PerformanceScreen } from "./Growth";
 import {
   AttLogScreen,
@@ -551,15 +552,17 @@ function PunchHero({
       <View style={s.heroBlob} />
       <Text style={s.heroTitle}>Today&apos;s attendance</Text>
       <View style={s.heroRow}>
-        <View style={{ flex: 1, gap: 6 }}>
-          <Text style={s.heroLine}>
-            ↓ Punch in <Text style={s.heroTime}>{inAt ? clock(inAt) : "--:--"}</Text>
-          </Text>
-          <Text style={s.heroLine}>
-            ↑ Punch out <Text style={s.heroTime}>{done?.out_at ? clock(done.out_at) : "--:--"}</Text>
-          </Text>
+        <View style={s.heroTimes}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.heroLine}>↓ Punch in</Text>
+            <Text style={s.heroTime}>{inAt ? clock(inAt) : "--:--"}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.heroLine}>↑ Punch out</Text>
+            <Text style={s.heroTime}>{done?.out_at ? clock(done.out_at) : "--:--"}</Text>
+          </View>
         </View>
-        <View style={{ flex: 1, minWidth: 140 }}>
+        <View>
           <PunchButton
             label={
               odOpen
@@ -605,9 +608,51 @@ const QUICK: [string, IconName, [Section, string, IconName][]][] = [
   ["Pay", "wallet-outline", [["Payslips", "Payslip", "receipt-outline"], ["Tax Declaration", "Tax", "document-text-outline"], ["My Claims", "Claims", "card-outline"]]],
   ["Connect", "chatbubbles-outline", [["Ask Laxmi", "Ask Laxmi", "sparkles-outline"], ["Messages", "Messages", "chatbubble-ellipses-outline"], ["Helpdesk", "Helpdesk", "help-buoy-outline"]]],
 ];
-function QuickLinks({ onSection }: { onSection: (s: Section) => void }) {
+type QuickTile = { id: string; label: string; glyph: IconName; badge?: number; go: () => void };
+function QuickLinks({ api, onSection }: { api: Api; onSection: (s: Section) => void }) {
   const [width, setWidth] = useState(0);
   const [pageNo, setPageNo] = useState(0);
+  // Supervisors and HR get a first page with what is waiting for them.
+  const waiting = useLoad(async () => {
+    const [team, a, od] = await Promise.all([
+      api<unknown[]>("/team/members").catch(() => [] as unknown[]),
+      api<{ leave: unknown[]; regularizations: { batch_id?: string | null }[] }>("/approvals").catch(() => ({ leave: [], regularizations: [] })),
+      api<unknown[]>("/od-visits/pending").catch(() => [] as unknown[]),
+    ]);
+    return {
+      team: team.length,
+      leave: a.leave.length,
+      regularization: a.regularizations.filter((r) => !r.batch_id).length,
+      od: od.length,
+    };
+  });
+  const w = waiting.data;
+  const openApprovals = (kind: ApprovalKind) => {
+    openApprovalsAt(kind);
+    onSection("Supervisor");
+  };
+  const supervisor: [string, IconName, QuickTile[]][] =
+    w && (w.team > 0 || w.leave + w.regularization + w.od > 0)
+      ? [
+          [
+            "Supervisor actions",
+            "shield-checkmark-outline",
+            [
+              { id: "reg", label: "Regularize", glyph: "create-outline", badge: w.regularization, go: () => openApprovals("regularization") },
+              { id: "od", label: "OD days", glyph: "briefcase-outline", badge: w.od, go: () => openApprovals("od") },
+              { id: "leave", label: "Leave", glyph: "umbrella-outline", badge: w.leave, go: () => openApprovals("leave") },
+            ],
+          ],
+        ]
+      : [];
+  const pages: [string, IconName, QuickTile[]][] = [
+    ...supervisor,
+    ...QUICK.map(([group, icon, links]): [string, IconName, QuickTile[]] => [
+      group,
+      icon,
+      links.map(([id, label, glyph]) => ({ id, label, glyph, go: () => onSection(id) })),
+    ]),
+  ];
   return (
     <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)} style={{ gap: 10 }}>
       <Text style={s.sectionTitle}>Quick links</Text>
@@ -618,22 +663,27 @@ function QuickLinks({ onSection }: { onSection: (s: Section) => void }) {
           showsHorizontalScrollIndicator={false}
           onMomentumScrollEnd={(e) => setPageNo(Math.round(e.nativeEvent.contentOffset.x / width))}
         >
-          {QUICK.map(([group, icon, links]) => (
+          {pages.map(([group, icon, links]) => (
             <View key={group} style={[s.card, s.quickPage, { width }]}>
               <View style={s.quickHead}>
                 <View style={s.quickHeadIcon}>
-                  <Icon name={icon} size={22} color={T.primary} />
+                  <Icon name={icon} size={22} color={T.primaryText} />
                 </View>
                 <Text style={s.heading}>{group}</Text>
               </View>
               <View style={s.quickRow}>
-                {links.map(([id, label, glyph]) => (
-                  <PressScale key={id} accessibilityRole="button" accessibilityLabel={label} style={s.quickLink} haptic onPress={() => onSection(id)}>
+                {links.map((t) => (
+                  <PressScale key={t.id} accessibilityRole="button" accessibilityLabel={t.badge ? `${t.label}, ${t.badge} waiting` : t.label} style={s.quickLink} haptic onPress={t.go}>
                     <View style={s.quickIcon}>
-                      <Icon name={glyph} size={26} color={T.primary} />
+                      <Icon name={t.glyph} size={26} color={T.primaryText} />
+                      {!!t.badge && (
+                        <View style={s.quickBadge}>
+                          <Text style={s.quickBadgeText}>{t.badge > 99 ? "99+" : t.badge}</Text>
+                        </View>
+                      )}
                     </View>
                     <Text style={s.quickText} numberOfLines={2}>
-                      {label}
+                      {t.label}
                     </Text>
                   </PressScale>
                 ))}
@@ -642,8 +692,8 @@ function QuickLinks({ onSection }: { onSection: (s: Section) => void }) {
           ))}
         </ScrollView>
       )}
-      <View style={s.dots} accessibilityLabel={`Page ${pageNo + 1} of ${QUICK.length}`}>
-        {QUICK.map(([g], i) => (
+      <View style={s.dots} accessibilityLabel={`Page ${pageNo + 1} of ${pages.length}`}>
+        {pages.map(([g], i) => (
           <View key={g} style={[s.dotPage, i === pageNo && s.dotPageOn]} />
         ))}
       </View>
@@ -729,19 +779,36 @@ function HomeScreen({
   const home = useLoad(() => api<HomeData>("/home"));
   const news = useLoad(() => api<Announcement[]>("/announcements"));
   const today = useLoad(() => api<TodayInfo>("/me"));
+  const now = new Date();
+  const localDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  // Today's holiday, weekly off or leave, shown beside the shift.
+  const calendar = useLoad(() =>
+    api<{ days: { date: string; status: string; holiday?: string | null }[] }>(`/attendance/calendar?month=${localDay.slice(0, 7)}`),
+  );
   // Field Force (separate module): bumped after a punch so its card can hide itself.
   const [punches, setPunches] = useState(0);
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const me = home.data?.me;
   const t = today.data;
+  const off = calendar.data?.days.find((x) => x.date === localDay);
+  const offWord =
+    off?.status === "holiday"
+      ? (off.holiday ?? "Holiday")
+      : off?.status === "weekly_off"
+        ? "Weekly off"
+        : off?.status === "leave"
+          ? "On leave"
+          : off?.status === "half_leave"
+            ? "Half-day leave"
+            : null;
   const status = t?.openShift
     ? t.openShift.source === "od_punch"
       ? "On OD"
       : "Working"
     : t?.todayShift
       ? "Done for today"
-      : "Not punched in";
+      : (offWord ?? "Not punched in");
   const node = (p: HomePerson, mine?: boolean) => (
     <View key={p.id} style={[s.orgNode, mine && s.orgMe]}>
       <Text style={s.strong}>{p.name}</Text>
@@ -770,8 +837,7 @@ function HomeScreen({
         <Text style={s.stripText} numberOfLines={1}>
           {t?.shift ? `${t.shift.name} ${t.shift.start}` : "—"}
         </Text>
-        <View style={s.stripDivider} />
-        <Text style={[s.stripText, { color: T.primary }]}>{status}</Text>
+        <Text style={[s.stripText, { color: T.primaryText, width: "100%" }]}>{status}</Text>
       </Appear>
       <Appear index={2}>
       <PunchHero
@@ -786,11 +852,11 @@ function HomeScreen({
       </Appear>
       <FieldForceCard api={api} refreshKey={punches} onLeave={() => onSection("Leave")} />
       <Appear index={3}>
-        <QuickLinks onSection={onSection} />
+        <QuickLinks api={api} onSection={onSection} />
       </Appear>
       <Appear index={4} style={s.card}>
         <View style={s.headRow}>
-          <Icon name="megaphone-outline" size={22} color={T.primary} />
+          <Icon name="megaphone-outline" size={22} color={T.primaryText} />
           <Text style={s.heading}>Announcements</Text>
         </View>
         <Status loading={news.loading} error={news.error} />
@@ -821,7 +887,7 @@ function HomeScreen({
       </Appear>
       <Appear index={5} style={s.card}>
         <View style={s.headRow}>
-          <Icon name="balloon-outline" size={22} color={T.primary} />
+          <Icon name="balloon-outline" size={22} color={T.primaryText} />
           <Text style={s.heading}>Birthdays</Text>
         </View>
         <Status loading={home.loading} error={home.error} />
@@ -2174,6 +2240,11 @@ function OdLogScreen({ api }: { api: Api }) {
 // ---- directory and referrals ----------------------------------------------------------------------
 function DirectoryScreen({ api }: { api: Api }) {
   const [q, setQ] = useState("");
+  const [department, setDepartment] = useState(0);
+  const [branch, setBranch] = useState(0);
+  const summary = useLoad(() =>
+    api<{ total: number; departments: { id: number; name: string }[]; branches: { id: number; name: string }[] }>("/directory/summary"),
+  );
   const [people, setPeople] = useState<Person[]>([]);
   const [error, setError] = useState("");
   const [refer, setRefer] = useState(false);
@@ -2182,7 +2253,12 @@ function DirectoryScreen({ api }: { api: Api }) {
     [note, setNote] = useState("");
   useEffect(() => {
     const t = setTimeout(() => {
-      api<Person[]>("/directory?q=" + encodeURIComponent(q))
+      api<Person[]>(
+        "/directory?q=" +
+          encodeURIComponent(q) +
+          (department ? `&department_id=${department}` : "") +
+          (branch ? `&branch_id=${branch}` : ""),
+      )
         .then((r) => {
           setPeople(r);
           setError("");
@@ -2192,22 +2268,46 @@ function DirectoryScreen({ api }: { api: Api }) {
         );
     }, 300);
     return () => clearTimeout(t);
-  }, [api, q]);
+  }, [api, q, department, branch]);
   return (
     <>
       <View style={s.card}>
         <Text style={s.heading}>Directory</Text>
+        {!!summary.data && (
+          <Text style={s.note}>
+            {new Intl.NumberFormat("en-IN").format(summary.data.total)} employees in your organisation
+          </Text>
+        )}
         <Field
           label="Search"
           value={q}
           onChange={setQ}
-          placeholder="Name, designation or department"
+          placeholder="Name, code, designation or department"
         />
+        {!!summary.data && (
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <PickSheet
+              label="Department"
+              value={department}
+              options={[[0, "All"], ...summary.data.departments.map((d): [number, string] => [d.id, d.name])]}
+              onChange={setDepartment}
+            />
+            <PickSheet
+              label="Branch"
+              value={branch}
+              options={[[0, "All"], ...summary.data.branches.map((d): [number, string] => [d.id, d.name])]}
+              onChange={setBranch}
+            />
+          </View>
+        )}
         {!!error && <Text style={s.error}>{error}</Text>}
-        {people.slice(0, 40).map((p) => (
+        {people.slice(0, 100).map((p) => (
           <View key={p.id} style={s.row}>
             <View style={{ flex: 1 }}>
-              <Text style={s.strong}>{p.name}</Text>
+              <Text style={s.strong}>
+                {p.name}
+                {p.employee_code ? ` · ${p.employee_code}` : ""}
+              </Text>
               <Text style={s.note}>
                 {[p.designation_name, p.department_name]
                   .filter(Boolean)
@@ -3206,7 +3306,8 @@ const s = themed(() => StyleSheet.create({
   },
   odBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   heroTitle: { color: "#fff", fontSize: 18, fontWeight: "800" },
-  heroRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 14 },
+  heroRow: { gap: 14 },
+  heroTimes: { flexDirection: "row", gap: 14 },
   heroLine: { color: T.onPrimarySoft, fontSize: 15, fontWeight: "600" },
   heroTime: { color: "#fff", fontSize: 20, fontWeight: "800" },
   sectionTitle: { color: T.ink, fontSize: 18, fontWeight: "700", textAlign: "center" },
@@ -3237,6 +3338,8 @@ const s = themed(() => StyleSheet.create({
     justifyContent: "center",
   },
   quickGlyph: { fontSize: 24, color: T.primary },
+  quickBadge: { position: "absolute", top: -5, right: -7, minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 5, alignItems: "center", justifyContent: "center", backgroundColor: T.primary, borderWidth: 2, borderColor: T.surface },
+  quickBadgeText: { color: "#fff", fontSize: 11, fontWeight: "800" },
   quickText: { color: T.ink, fontSize: 13, fontWeight: "600", textAlign: "center" },
   dots: { flexDirection: "row", justifyContent: "center", gap: 6 },
   dotPage: { width: 8, height: 6, borderRadius: 3, backgroundColor: T.line },

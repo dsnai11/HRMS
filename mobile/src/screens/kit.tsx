@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Linking,
+  Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -139,6 +141,53 @@ export function Choice<T extends string | number>({
     </View>
   );
 }
+/** A value shown as a pill; tapping it opens a list to choose from. */
+export function PickSheet<V extends string | number>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: V;
+  options: [V, string][];
+  onChange: (v: V) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = options.find(([v]) => v === value)?.[1] ?? "";
+  return (
+    <>
+      <Pressable accessibilityRole="button" accessibilityLabel={`${label}: ${current}`} style={k.pickPill} onPress={() => setOpen(true)}>
+        <Text style={k.note}>{label}</Text>
+        <Text style={k.strong} numberOfLines={1}>{current} ▾</Text>
+      </Pressable>
+      <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
+        <Pressable style={k.sheetWrap} accessibilityLabel="Close" onPress={() => setOpen(false)}>
+          <Pressable style={k.sheet} accessibilityRole="none">
+            <Text style={k.heading}>{label}</Text>
+            <ScrollView style={{ maxHeight: 380 }}>
+              {options.map(([v, l]) => (
+                <Pressable
+                  key={String(v)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: v === value }}
+                  style={k.sheetRow}
+                  onPress={() => {
+                    onChange(v);
+                    setOpen(false);
+                  }}
+                >
+                  <Text style={[k.strong, v === value && { color: T.primaryText }]}>{l}</Text>
+                  {v === value ? <Text style={{ color: T.primaryText, fontWeight: "800" }}>✓</Text> : null}
+                </Pressable>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </>
+  );
+}
 export const Pill = ({ text }: { text: string }) => (
   <Text style={k.pill}>{text}</Text>
 );
@@ -242,6 +291,10 @@ export async function pickAndUpload(
 }
 
 export const k = themed(() => StyleSheet.create({
+  pickPill: { flex: 1, minHeight: 44, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: T.line, backgroundColor: T.fill },
+  sheetWrap: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.35)" },
+  sheet: { backgroundColor: T.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 36, gap: 10 },
+  sheetRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", minHeight: 48, borderBottomWidth: 1, borderBottomColor: T.line },
   card: {
     backgroundColor: T.surface,
     borderWidth: 1,
