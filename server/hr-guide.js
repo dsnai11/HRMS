@@ -530,7 +530,7 @@ export const GUIDE = [
     keywords: "certificate design template border colour signature seal signatory logo heading",
     steps: [
       "LMS → Manage courses → Certificate design.",
-      "Choose a style and colour, set the heading and wording, and enter who signs it.",
+      "Click one of the five designs, choose a colour, set the heading and wording, and enter who signs it.",
       "Add a scan of the signature and the company seal (PNG or JPG, up to 512 KB). A PNG with a clear background looks best.",
       "The picture beside the form shows the result as you change it. Save design.",
     ],

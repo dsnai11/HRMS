@@ -46,16 +46,17 @@ function learnTeamHtml() {
 }
 
 let certDesign = null; // what is on the form, including chosen pictures
-const CERT_STYLES = { classic: "Classic (double border)", modern: "Modern (colour band)", simple: "Simple (thin border)" };
+const CERT_STYLES = { heritage: "Heritage", prestige: "Prestige", executive: "Executive", sovereign: "Sovereign", horizon: "Horizon" };
 
 async function certDesignHtml() {
   certDesign = { ...(await api("/admin/certificate-design")), signature: undefined, seal: undefined };
   const d = certDesign;
   const pic = (key, label, url) =>
     `<label class="full">${label}<input type="file" accept="image/png,image/jpeg" data-cert-file="${key}"></label><p class="full muted" data-cert-state="${key}">${url ? `A ${key} is on file. <button type="button" class="ghost" data-cert-clear="${key}">Remove</button>` : "None added."}</p>`;
-  return `<div class="cert-design"><div class="card"><h2>Certificate design</h2><p class="muted">The picture updates as you change this. New certificates use the saved design; ones already issued keep theirs.</p>
+  return `<div class="card"><h2>Choose a design</h2><p class="muted">Click a design. Your colour, wording, signature and seal appear on it.</p><div class="cert-gallery" id="cert-gallery"></div></div>
+    <div class="cert-design"><div class="card"><h2>Details</h2><p class="muted">New certificates use the saved design; ones already issued keep theirs.</p>
     <form class="form-grid" id="cert-form">
-      <label class="full">Style<select name="style">${Object.entries(CERT_STYLES).map(([k, l]) => `<option value="${k}" ${k === d.style ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <input type="hidden" name="style" value="${esc(d.style)}">
       <label class="full">Colour<input type="color" name="color" value="${esc(d.color)}"></label>
       <label class="full">Heading<input name="title" value="${esc(d.title)}" maxlength="80" required></label>
       <label class="full">Wording before the course name<input name="message" value="${esc(d.message)}" maxlength="200" required></label>
@@ -68,28 +69,60 @@ async function certDesignHtml() {
     <div class="card"><h2>Preview</h2><div id="cert-preview"></div><p class="muted">The name, course and dates here are only an example.</p></div></div>`;
 }
 
+const certSample = (f, style) => ({
+  ...certDesign,
+  ...f,
+  style,
+  person: "Employee Name",
+  course: "Name of the Course",
+  hours: 2,
+  completed: "1 January 2027",
+  score: 85,
+  validity: null,
+  number: "LIFC-2027-1A2B3C4D",
+  link: null,
+});
+const certFields = () => Object.fromEntries(new FormData(document.querySelector("#cert-form")));
+
+function certGallery() {
+  const box = document.querySelector("#cert-gallery");
+  if (!box) return;
+  const f = certFields();
+  box.innerHTML = Object.entries(CERT_STYLES)
+    .map(([k, label]) => `<div class="cert-pick" role="button" tabindex="0" data-cert-style="${k}" aria-pressed="${k === f.style}" aria-label="${label}">${certificateHtml(certSample(f, k))}<span class="cert-pick-name">${label}</span></div>`)
+    .join("");
+  certificateColour(box, f.color);
+  box.querySelectorAll("[data-cert-style]").forEach((p) => {
+    const choose = () => {
+      document.querySelector('#cert-form [name="style"]').value = p.dataset.certStyle;
+      box.querySelectorAll("[data-cert-style]").forEach((x) => x.setAttribute("aria-pressed", String(x === p)));
+      certPreview();
+    };
+    p.onclick = choose;
+    p.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        choose();
+      }
+    };
+  });
+}
+
 function certPreview() {
   const box = document.querySelector("#cert-preview");
   if (!box) return;
-  const f = Object.fromEntries(new FormData(document.querySelector("#cert-form")));
-  box.innerHTML = certificateHtml({
-    ...certDesign,
-    ...f,
-    person: "Employee Name",
-    course: "Name of the Course",
-    hours: 2,
-    completed: "1 January 2027",
-    score: 85,
-    validity: null,
-    number: "LIFC-2027-1A2B3C4D",
-    link: null,
-  });
+  const f = certFields();
+  box.innerHTML = certificateHtml(certSample(f, f.style));
   certificateColour(box, f.color);
+}
+function certRefresh() {
+  certGallery();
+  certPreview();
 }
 
 function certDesignWire() {
   const form = document.querySelector("#cert-form");
-  form.oninput = certPreview;
+  form.oninput = certRefresh;
   const state = (key, text) => (document.querySelector(`[data-cert-state="${key}"]`).textContent = text);
   document.querySelectorAll("[data-cert-file]").forEach(
     (input) =>
@@ -103,7 +136,7 @@ function certDesignWire() {
           certDesign[key] = { mime: file.type, data: await toB64(file) };
           certDesign[`${key}_url`] = URL.createObjectURL(file);
           state(key, `${file.name} will be used when you save.`);
-          certPreview();
+          certRefresh();
         } catch (e) {
           input.value = "";
           notice(e.message, "error");
@@ -117,7 +150,7 @@ function certDesignWire() {
         certDesign[key] = null;
         certDesign[`${key}_url`] = null;
         state(key, "It will be removed when you save.");
-        certPreview();
+        certRefresh();
       }),
   );
   form.onsubmit = (e) => {
@@ -129,5 +162,5 @@ function certDesignWire() {
       render();
     });
   };
-  certPreview();
+  certRefresh();
 }

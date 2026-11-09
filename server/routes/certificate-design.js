@@ -9,7 +9,7 @@ const MAX_IMAGE = 512 * 1024;
 const DEFAULTS = {
   title: "Certificate of Completion",
   message: "has successfully completed the course",
-  style: "classic",
+  style: "heritage",
 };
 
 export const currentDesignId = async (db, companyId) =>
@@ -60,7 +60,7 @@ export function registerCertificateDesign(router, app) {
     const b = await body(3_000_000);
     const title = string(b.title, "Heading", 80);
     const message = string(b.message, "Wording", 200);
-    const style = oneOf(b.style, "Style", ["classic", "modern", "simple"]);
+    const style = oneOf(b.style, "Style", ["heritage", "prestige", "executive", "sovereign", "horizon"]);
     const color = string(b.color, "Colour", 7).toLowerCase();
     if (!HEX.test(color)) throw new HttpError(400, "Colour must be like #c8102e.");
     if (contrast(color, "#ffffff") < 3) throw new HttpError(400, "That colour is too light to read on white paper. Choose a darker one.");
