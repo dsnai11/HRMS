@@ -558,7 +558,7 @@ function probationCard(rows) {
   if (!has("changes.manage")) return "";
   return `<div class="card"><div class="card-head"><div><h2>Probation reviews</h2><p class="muted">Due within 45 days or overdue. Confirming records a confirmation and ends probation.</p></div></div>${
     rows.length
-      ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Manager</th><th>Probation ends</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.name)}<small>${esc(r.employee_code || "")} · joined ${fmtDate(r.date_of_joining)}</small></td><td>${esc(r.manager_name || "—")}</td><td>${fmtDate(r.probation_end_date)} ${r.overdue ? '<span class="pill">Overdue</span>' : ""}</td><td><button class="secondary" data-confirm="${r.user_id}">Confirm</button> <button class="ghost" data-extend="${r.user_id}" data-name="${esc(r.name)}">Extend</button></td></tr>`).join("")}</tbody></table></div>`
+      ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Manager</th><th>Probation ends</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.name)}<small>${esc(r.employee_code || "")} · joined ${fmtDate(r.date_of_joining)}</small>${lateTrainingNote(r.overdue_training)}</td><td>${esc(r.manager_name || "—")}</td><td>${fmtDate(r.probation_end_date)} ${r.overdue ? '<span class="pill">Overdue</span>' : ""}</td><td><button class="secondary" data-confirm="${r.user_id}">Confirm</button> <button class="ghost" data-extend="${r.user_id}" data-name="${esc(r.name)}">Extend</button></td></tr>`).join("")}</tbody></table></div>`
       : empty("No reviews due", "Nobody's probation ends in the next 45 days.")
   }</div>`;
 }

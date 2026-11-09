@@ -298,7 +298,7 @@ async function perfHtml(tab) {
   }
   if (tab === "team") {
     const rows = await api("/reviews/team");
-    return `<div class="card"><h2>Reviews waiting for you</h2>${rows.length ? rows.map((r) => `<div class="activity"><strong>${esc(r.employee_name)}</strong> · ${esc(r.cycle_name)} · ${PHASE[r.phase] || ""}<br><small>${r.self_rating ? `Self-rating ${r.self_rating}/5 · ` : ""}${esc(r.self_comment || "")}</small> <button data-mgr="${r.id}" data-phase="${r.phase}" data-name="${esc(r.employee_name)}">Review</button> <button class="ghost" data-goals-of="${r.user_id}" data-name="${esc(r.employee_name)}">See goals</button></div>`).join("") : empty("Nothing waiting", "Self-reviews from your team appear here.")}</div>`;
+    return `<div class="card"><h2>Reviews waiting for you</h2>${rows.length ? rows.map((r) => `<div class="activity"><strong>${esc(r.employee_name)}</strong> · ${esc(r.cycle_name)} · ${PHASE[r.phase] || ""}${lateTrainingNote(r.overdue_training)}<br><small>${r.self_rating ? `Self-rating ${r.self_rating}/5 · ` : ""}${esc(r.self_comment || "")}</small> <button data-mgr="${r.id}" data-phase="${r.phase}" data-name="${esc(r.employee_name)}">Review</button> <button class="ghost" data-goals-of="${r.user_id}" data-name="${esc(r.employee_name)}">See goals</button></div>`).join("") : empty("Nothing waiting", "Self-reviews from your team appear here.")}</div>`;
   }
   if (tab === "feedback") {
     const [got, given] = await Promise.all([
@@ -489,7 +489,7 @@ function perfWire(tab) {
     pagedList(document.querySelector("dialog #cycle-list"), rows, {
       head: "<tr><th>Employee</th><th>Manager</th><th>Self</th><th>Manager rating</th><th>Status</th><th></th></tr>",
       row: (r) =>
-        `<tr><td>${esc(r.employee_name)}<small>${esc(r.employee_code || "")}</small></td><td>${esc(r.manager_name || "—")}</td><td>${r.self_rating ?? "—"}</td><td>${r.own && !r.released ? '<span class="muted">hidden until released</span>' : (r.manager_rating ?? "—")}</td><td>${REVIEW_STATUS[r.status]}${r.released ? " · released" : ""}</td><td>${r.status === "completed" && !r.released ? (r.own ? '<span class="muted">Your own: someone else releases it</span>' : `<button class="ghost" data-release="${r.id}">Release</button>`) : ""}</td></tr>`,
+        `<tr><td>${esc(r.employee_name)}<small>${esc(r.employee_code || "")}</small>${lateTrainingNote(r.overdue_training)}</td><td>${esc(r.manager_name || "—")}</td><td>${r.self_rating ?? "—"}</td><td>${r.own && !r.released ? '<span class="muted">hidden until released</span>' : (r.manager_rating ?? "—")}</td><td>${REVIEW_STATUS[r.status]}${r.released ? " · released" : ""}</td><td>${r.status === "completed" && !r.released ? (r.own ? '<span class="muted">Your own: someone else releases it</span>' : `<button class="ghost" data-release="${r.id}">Release</button>`) : ""}</td></tr>`,
       text: (r) => `${r.employee_name} ${r.employee_code || ""} ${r.manager_name || ""} ${REVIEW_STATUS[r.status]}${r.released ? " released" : ""}`,
       label: "reviews",
       placeholder: "Search name, manager or status",

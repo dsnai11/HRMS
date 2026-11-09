@@ -523,6 +523,38 @@ export const GUIDE = [
     tips: ["Certificates issued before this feature have old-style numbers that the public check does not find."],
   },
   {
+    id: "certificate-design",
+    area: "Performance & learning",
+    title: "Design the training certificate",
+    who: "HR (performance.manage)",
+    keywords: "certificate design template border colour signature seal signatory logo heading",
+    steps: [
+      "LMS → Manage courses → Certificate design.",
+      "Choose a style and colour, set the heading and wording, and enter who signs it.",
+      "Add a scan of the signature and the company seal (PNG or JPG, up to 512 KB). A PNG with a clear background looks best.",
+      "The picture beside the form shows the result as you change it. Save design.",
+    ],
+    tips: [
+      "A certificate keeps the design it was issued under, so a new signatory does not change certificates already given.",
+      "The logo comes from Appearance & branding.",
+    ],
+  },
+  {
+    id: "training-followup",
+    area: "Performance & learning",
+    title: "Overdue training and failed quizzes",
+    who: "HR (performance.manage), managers",
+    keywords: "overdue late training escalation manager department head failed quiz attempts reset appraisal probation",
+    steps: [
+      "The employee is reminded from 3 days before the due date, then weekly.",
+      "As soon as a course is late, the reporting manager is told. At 7 days late, the manager and HR are told.",
+      "At 15 days late, a mandatory course goes to the department head (to HR if the department has no head), and it shows beside the person on appraisal and probation reviews.",
+      "If someone uses all their quiz attempts, the manager and HR are told. HR clicks Allow more attempts under LMS → Manage courses → Overdue and failed.",
+      "Managers see their team under LMS → My Courses → My team.",
+    ],
+    tips: ["Nothing is blocked or deducted automatically: overdue training is shown to the people who decide."],
+  },
+  {
     id: "learning-report",
     area: "Performance & learning",
     title: "See training progress by department",

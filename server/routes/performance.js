@@ -11,6 +11,7 @@ import {
 import { branchScope, inBranchScope, requireOwned } from "../scope.js";
 import { can } from "../rbac.js";
 import { mayDecide } from "../approval.js";
+import { longOverdueTraining } from "../training-followup.js";
 
 export function registerPerformance(router, app) {
   const { db, transaction, clock } = app;
@@ -260,12 +261,13 @@ export function registerPerformance(router, app) {
           `SELECT r.*,u.name employee_name,u.employee_code,m.name manager_name FROM reviews r JOIN users u ON u.id=r.user_id LEFT JOIN users m ON m.id=r.manager_id WHERE r.cycle_id=?${scope.sql} ORDER BY u.name`,
         )
         .all(c.id, ...scope.params);
+      const late = await longOverdueTraining(app, companyId);
       return send(
         200,
         rows.map((r) =>
           r.user_id === user.id
             ? { ...shape(r, user.id), own: true }
-            : r,
+            : { ...r, overdue_training: late.get(r.user_id) ?? [] },
         ),
       );
     },
@@ -314,16 +316,15 @@ export function registerPerformance(router, app) {
       ).map((r) => shape(r, user.id)),
     ),
   );
-  router.get("/api/reviews/team", async ({ user, send }) =>
-    send(
-      200,
-      await db
-        .prepare(
-          `${MINE} WHERE r.manager_id=? AND c.status='open' AND r.status<>'pending_self' AND r.status<>'completed' ORDER BY u.name`,
-        )
-        .all(user.id),
-    ),
-  );
+  router.get("/api/reviews/team", async ({ user, send }) => {
+    const rows = await db
+      .prepare(
+        `${MINE} WHERE r.manager_id=? AND c.status='open' AND r.status<>'pending_self' AND r.status<>'completed' ORDER BY u.name`,
+      )
+      .all(user.id);
+    const late = await longOverdueTraining(app, user.company_id);
+    return send(200, rows.map((r) => ({ ...r, overdue_training: late.get(r.user_id) ?? [] })));
+  });
   router.get("/api/reviews/team/all", async ({ user, send }) =>
     send(
       200,

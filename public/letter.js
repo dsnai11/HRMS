@@ -30,6 +30,12 @@ const esc = (v) =>
   }
   const d = await res.json();
   document.title = `${d.title} · ${d.to}`;
+  if (d.certificate) {
+    box.innerHTML = `<p class="cert-bar no-print"><button id="print">Print / save as PDF</button></p>${certificateHtml(d.certificate)}`;
+    certificateColour(box, d.certificate.color);
+    box.querySelector("#print").addEventListener("click", () => print());
+    return;
+  }
   box.innerHTML = `<article class="slip letter"><header><div><img class="page-logo" src="/brand/logo.png" alt=""><h1>${esc(d.company)}</h1></div><button class="no-print" id="print">Print / save as PDF</button></header><p class="letter-date">${esc(d.date)}</p><h2>${esc(d.title)}</h2><p><strong>${esc(d.to)}</strong></p>${d.paragraphs.map((p) => `<p>${esc(p)}</p>`).join("")}<p class="letter-sign">${esc(d.signoff)}<br><br><br>Authorised signatory</p></article>`;
   box.querySelector("#print")?.addEventListener("click", () => print());
 })();

@@ -10,6 +10,8 @@ import {
 } from "../http.js";
 import { requireOwned } from "../scope.js";
 import { can } from "../rbac.js";
+import { currentDesignId, designFor } from "./certificate-design.js";
+import { alertAttemptsUsed, escalateOverdueTraining } from "../training-followup.js";
 
 const LESSON_KINDS = ["text", "link", "video"];
 const longDate = (d) =>
@@ -47,7 +49,7 @@ const verifyLink = (no) => {
   return base ? `${base}/verify.html?no=${encodeURIComponent(no)}` : null;
 };
 /** The printable certificate, from a training_certificates row joined with the course and person. */
-function certificateLetter(c, company, today) {
+function certificateLetter(c, company, today, design) {
   const link = VERIFIABLE.test(c.certificate_no)
     ? verifyLink(c.certificate_no)
     : null;
@@ -67,6 +69,20 @@ function certificateLetter(c, company, today) {
       ...(link ? [`Check this certificate at ${link}`] : []),
     ],
     signoff: `For ${company}`,
+    // The designed certificate (LMS → Manage courses → Certificate design).
+    certificate: {
+      ...design,
+      person: c.person,
+      course: c.title,
+      hours: c.hours,
+      completed: longDate(c.completed_on),
+      score: c.score,
+      validity: c.expires_on
+        ? `${c.expires_on < today ? "Expired" : "Valid until"} ${longDate(c.expires_on)}`
+        : null,
+      number: c.certificate_no,
+      link,
+    },
   };
 }
 const url = (v, label) => {
@@ -163,6 +179,7 @@ export function registerLearning(router, app) {
     const day = today();
     const no = certificateNo(day);
     const expires = r.valid_months ? addMonths(day, r.valid_months) : null;
+    const designId = await currentDesignId(db, r.company_id);
     await db
       .prepare(
         "UPDATE training_records SET status='completed',completed_on=?,score=?,certificate_no=?,expires_on=? WHERE id=?",
@@ -170,9 +187,9 @@ export function registerLearning(router, app) {
       .run(day, score, no, expires, r.id);
     await db
       .prepare(
-        "INSERT INTO training_certificates(company_id,training_id,user_id,certificate_no,completed_on,score,expires_on,created_at) VALUES(?,?,?,?,?,?,?,?)",
+        "INSERT INTO training_certificates(company_id,training_id,user_id,certificate_no,completed_on,score,expires_on,created_at,design_id) VALUES(?,?,?,?,?,?,?,?,?)",
       )
-      .run(r.company_id, r.training_id, r.user_id, no, day, score, expires, nowIso());
+      .run(r.company_id, r.training_id, r.user_id, no, day, score, expires, nowIso(), designId);
   }
 
   // ---- learner ------------------------------------------------------------------------------
@@ -307,6 +324,8 @@ export function registerLearning(router, app) {
           link: "learning",
         });
       const used = r.attempts + 1;
+      if (!passed && r.max_attempts > 0 && used >= r.max_attempts)
+        await alertAttemptsUsed(app, user, r.title, score, r.pass_mark, r.id);
       return send(200, {
         score,
         passed,
@@ -323,7 +342,7 @@ export function registerLearning(router, app) {
     async ({ user, params, send }) => {
       const r = await db
         .prepare(
-          "SELECT r.*,t.company_id,t.title,t.hours,u.name person FROM training_records r JOIN trainings t ON t.id=r.training_id JOIN users u ON u.id=r.user_id WHERE r.id=?",
+          "SELECT r.*,t.company_id,t.title,t.hours,u.name person,c.design_id FROM training_records r JOIN trainings t ON t.id=r.training_id JOIN users u ON u.id=r.user_id LEFT JOIN training_certificates c ON c.certificate_no=r.certificate_no WHERE r.id=?",
         )
         .get(integer(Number(params.id)));
       if (
@@ -338,9 +357,9 @@ export function registerLearning(router, app) {
           "No certificate: the course is not completed.",
         );
       const company = await db
-        .prepare("SELECT name FROM companies WHERE id=?")
+        .prepare("SELECT * FROM companies WHERE id=?")
         .get(r.company_id);
-      return send(200, certificateLetter(r, company.name, today()));
+      return send(200, certificateLetter(r, company.name, today(), await designFor(app, company, r.design_id)));
     },
   );
   // Every certificate the person has earned, including earlier ones of renewed courses.
@@ -372,9 +391,9 @@ export function registerLearning(router, app) {
     )
       throw new HttpError(404, "Certificate not found.");
     const company = await db
-      .prepare("SELECT name FROM companies WHERE id=?")
+      .prepare("SELECT * FROM companies WHERE id=?")
       .get(c.company_id);
-    return send(200, certificateLetter(c, company.name, today()));
+    return send(200, certificateLetter(c, company.name, today(), await designFor(app, company, c.design_id)));
   });
   // Public check of a certificate number, for anyone shown a printed certificate.
   router.get(
@@ -825,7 +844,7 @@ export async function renewExpiredTraining(app) {
       .run(r.id);
     await app.db
       .prepare(
-        "UPDATE training_records SET status='assigned',completed_on=NULL,score=NULL,certificate_no=NULL,expires_on=NULL,started_at=NULL,attempts=0,reminded_on=NULL,due_date=? WHERE id=?",
+        "UPDATE training_records SET status='assigned',completed_on=NULL,score=NULL,certificate_no=NULL,expires_on=NULL,started_at=NULL,attempts=0,reminded_on=NULL,escalation_level=0,due_date=? WHERE id=?",
       )
       .run(plusDays(day, r.due_days), r.id);
     await app.notify([r.user_id], {
@@ -872,6 +891,7 @@ export function scheduleLearningReminders(app) {
       await syncTrainingAudiences(app);
       await renewExpiredTraining(app);
       await sendTrainingReminders(app);
+      await escalateOverdueTraining(app);
     } catch (e) {
       console.error("Learning jobs failed:", e.message);
     }
