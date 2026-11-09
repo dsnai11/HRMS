@@ -6,7 +6,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import {
@@ -308,23 +307,152 @@ export function DateField({
     </View>
   );
 }
-function TimeField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+// A time chosen on a clock face, so nobody has to type 09:30. The value stays 24-hour HH:MM.
+const DIAL = 264;
+const DIAL_R = 104;
+const two = (n: number) => String(n).padStart(2, "0");
+const twelve = (h: number) => h % 12 || 12;
+const showTime = (v: string) => {
+  const h = Number(v.slice(0, 2));
+  return `${twelve(h)}:${v.slice(3, 5)} ${h < 12 ? "AM" : "PM"}`;
+};
+const dialSpot = (i: number) => {
+  const a = (i * Math.PI) / 6;
+  return { left: DIAL / 2 + DIAL_R * Math.sin(a) - 22, top: DIAL / 2 - DIAL_R * Math.cos(a) - 22 };
+};
+function TimeField({
+  label,
+  value,
+  onChange,
+  start,
+  optional,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  start: string;
+  optional?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hour, setHour] = useState(9);
+  const [minute, setMinute] = useState(30);
+  const [picking, setPicking] = useState<"hour" | "minute">("hour");
+  const pm = hour >= 12;
+  const show = () => {
+    const from = value || start;
+    setHour(Number(from.slice(0, 2)));
+    setMinute(Number(from.slice(3, 5)));
+    setPicking("hour");
+    setOpen(true);
+  };
+  const handAt = picking === "hour" ? (hour % 12) * 30 : minute * 6;
+  const faces =
+    picking === "hour"
+      ? [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+      : [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
   return (
     <View style={{ gap: 6, flex: 1 }}>
       <Text style={d.label}>{label}</Text>
-      <TextInput
-        accessibilityLabel={label}
-        style={d.input}
-        value={value}
-        placeholder="09:30"
-        placeholderTextColor={T.faint}
-        keyboardType="numbers-and-punctuation"
-        maxLength={5}
-        onChangeText={(t) => {
-          const digits = t.replace(/\D/g, "").slice(0, 4);
-          onChange(digits.length > 2 ? digits.slice(0, 2) + ":" + digits.slice(2) : digits);
-        }}
-      />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${label}: ${value ? showTime(value) : "not chosen"}`}
+        style={[d.input, d.timeInput]}
+        onPress={show}
+      >
+        <Text style={{ color: value ? C.ink : T.faint, fontSize: 15 }}>{value ? showTime(value) : "Select"}</Text>
+        <Icon name="time-outline" size={18} color={T.muted} />
+      </Pressable>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <Pressable style={d.backdrop} accessibilityLabel="Close" onPress={() => setOpen(false)}>
+          <Pressable style={d.clockCard} accessibilityRole="none" onPress={() => {}}>
+            <Text style={d.label}>{label}</Text>
+            <View style={d.clockTop}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Choose the hour" onPress={() => setPicking("hour")} style={[d.clockPart, picking === "hour" && d.clockPartOn]}>
+                <Text style={[d.clockDigits, picking === "hour" && { color: T.primaryText }]}>{twelve(hour)}</Text>
+              </Pressable>
+              <Text style={d.clockDigits}>:</Text>
+              <Pressable accessibilityRole="button" accessibilityLabel="Choose the minutes" onPress={() => setPicking("minute")} style={[d.clockPart, picking === "minute" && d.clockPartOn]}>
+                <Text style={[d.clockDigits, picking === "minute" && { color: T.primaryText }]}>{two(minute)}</Text>
+              </Pressable>
+              <View style={d.ampm}>
+                {(["AM", "PM"] as const).map((x) => {
+                  const on = (x === "PM") === pm;
+                  return (
+                    <Pressable
+                      key={x}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: on }}
+                      style={[d.ampmBtn, on && d.ampmOn]}
+                      onPress={() => setHour((h) => (x === "PM" ? (h % 12) + 12 : h % 12))}
+                    >
+                      <Text style={[d.ampmText, on && { color: "#fff" }]}>{x}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+            <View style={d.dial}>
+              <View style={d.dialCentre} />
+              <View style={[d.dialArm, { transform: [{ rotate: `${handAt}deg` }] }]}>
+                <View style={d.dialHand} />
+              </View>
+              {faces.map((n, i) => {
+                const on = picking === "hour" ? twelve(hour) === n : minute === n;
+                return (
+                  <Pressable
+                    key={n}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: on }}
+                    accessibilityLabel={picking === "hour" ? `${n} o'clock` : `${n} minutes`}
+                    style={[d.dialNum, dialSpot(i), on && d.dialNumOn]}
+                    onPress={() => {
+                      if (picking === "hour") {
+                        setHour((n % 12) + (pm ? 12 : 0));
+                        setPicking("minute");
+                      } else setMinute(n);
+                    }}
+                  >
+                    <Text style={[d.dialText, on && { color: "#fff" }]}>{picking === "hour" ? n : two(n)}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {/* Always takes its space, so the clock does not jump when moving to the minutes. */}
+            <View
+              style={[d.minuteRow, picking !== "minute" && { opacity: 0 }]}
+              accessibilityElementsHidden={picking !== "minute"}
+              importantForAccessibility={picking === "minute" ? "yes" : "no-hide-descendants"}
+            >
+              <Pressable accessibilityRole="button" accessibilityLabel="One minute earlier" hitSlop={8} disabled={picking !== "minute"} style={d.minuteBtn} onPress={() => setMinute((m) => (m + 59) % 60)}>
+                <Icon name="remove" size={18} color={T.primaryText} />
+              </Pressable>
+              <Text style={d.note}>Exact minute</Text>
+              <Pressable accessibilityRole="button" accessibilityLabel="One minute later" hitSlop={8} disabled={picking !== "minute"} style={d.minuteBtn} onPress={() => setMinute((m) => (m + 1) % 60)}>
+                <Icon name="add" size={18} color={T.primaryText} />
+              </Pressable>
+            </View>
+            <Btn
+              title="Set time"
+              onPress={() => {
+                onChange(`${two(hour)}:${two(minute)}`);
+                setOpen(false);
+              }}
+            />
+            {optional && !!value ? (
+              <Btn
+                title="Clear"
+                secondary
+                onPress={() => {
+                  onChange("");
+                  setOpen(false);
+                }}
+              />
+            ) : (
+              <Btn title="Cancel" secondary onPress={() => setOpen(false)} />
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -589,8 +717,8 @@ function RequestSheet({
       )}
       <DateField label="Attendance date" value={day} onChange={setDay} max={today()} />
       <View style={d.row2}>
-        <TimeField label={needsTimes ? "Time in" : "Time in (optional)"} value={inTime} onChange={setIn} />
-        <TimeField label={needsTimes ? "Time out" : "Time out (optional)"} value={outTime} onChange={setOut} />
+        <TimeField label={needsTimes ? "Time in" : "Time in (optional)"} value={inTime} onChange={setIn} start="09:30" optional={!needsTimes} />
+        <TimeField label={needsTimes ? "Time out" : "Time out (optional)"} value={outTime} onChange={setOut} start="18:30" optional={!needsTimes} />
       </View>
       <Field label="Reason" value={reason} onChange={setReason} multiline placeholder="Briefly say why" />
       <Btn
@@ -1539,6 +1667,25 @@ export const d = themed(() => StyleSheet.create({
   primarySmallText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   emptyIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: C.soft, alignItems: "center", justifyContent: "center" },
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: 20 },
+  timeInput: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  clockCard: { backgroundColor: T.surface, borderRadius: 22, padding: 18, gap: 12, width: "100%", maxWidth: 340, alignSelf: "center" },
+  clockTop: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4 },
+  clockPart: { minWidth: 72, alignItems: "center", paddingVertical: 4, borderRadius: 12, backgroundColor: T.fill },
+  clockPartOn: { backgroundColor: T.softer },
+  clockDigits: { color: T.ink, fontSize: 38, fontWeight: "400", fontVariant: ["tabular-nums"] },
+  ampm: { marginLeft: 10, gap: 4 },
+  ampmBtn: { minWidth: 48, minHeight: 28, alignItems: "center", justifyContent: "center", borderRadius: 8, backgroundColor: T.fill },
+  ampmOn: { backgroundColor: T.primary },
+  ampmText: { color: T.body, fontSize: 12, fontWeight: "700" },
+  dial: { width: DIAL, height: DIAL, borderRadius: DIAL / 2, alignSelf: "center", backgroundColor: T.fill },
+  dialCentre: { position: "absolute", left: DIAL / 2 - 4, top: DIAL / 2 - 4, width: 8, height: 8, borderRadius: 4, backgroundColor: T.primary },
+  dialArm: { position: "absolute", left: DIAL / 2 - 1, top: DIAL / 2 - DIAL_R, width: 2, height: DIAL_R * 2 },
+  dialHand: { width: 2, height: DIAL_R, backgroundColor: T.primary },
+  dialNum: { position: "absolute", width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  dialNumOn: { backgroundColor: T.primary },
+  dialText: { color: T.ink, fontSize: 15, fontWeight: "600" },
+  minuteRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 16 },
+  minuteBtn: { width: 40, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: T.softer },
   calendar: { backgroundColor: T.surface, borderRadius: 18, padding: 16, gap: 12, width: "100%", maxWidth: 420, alignSelf: "center" },
   calGrid: { flexDirection: "row", flexWrap: "wrap" },
   calHead: { width: "14.28%", textAlign: "center", color: C.muted, fontWeight: "700", fontSize: 12, paddingVertical: 4 },
