@@ -74,10 +74,10 @@ test("HR designs the certificate; a certificate keeps the design it was issued u
 
   const blank = await call("/admin/certificate-design", undefined, hr);
   assert.equal(blank.data.title, "Certificate of Completion");
-  assert.equal(blank.data.style, "classic");
+  assert.equal(blank.data.style, "heritage");
   assert.equal((await call("/admin/certificate-design", undefined, people.emp.token)).status, 403);
 
-  const design = { title: "Certificate of Achievement", message: "has passed", style: "modern", color: "#0B5CAD", signatory_name: "A. Signer", signatory_title: "Head of HR" };
+  const design = { title: "Certificate of Achievement", message: "has passed", style: "horizon", color: "#0B5CAD", signatory_name: "A. Signer", signatory_title: "Head of HR" };
   assert.equal((await call("/admin/certificate-design", { ...design, color: "#ffee00" }, hr, "PUT")).status, 400);
   assert.equal((await call("/admin/certificate-design", { ...design, style: "gold" }, hr, "PUT")).status, 400);
   const bad = await call("/admin/certificate-design", { ...design, signature: { mime: "image/png", data: Buffer.from("not an image").toString("base64") } }, hr, "PUT");
