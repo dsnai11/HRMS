@@ -523,6 +523,20 @@ export const GUIDE = [
     tips: ["Certificates issued before this feature have old-style numbers that the public check does not find."],
   },
   {
+    id: "team-attendance-mail",
+    area: "Attendance",
+    title: "Daily team attendance mail to supervisors",
+    who: "HR (leave.manage)",
+    keywords: "supervisor manager mail email late on leave absent not punched team attendance details daily",
+    steps: [
+      "Each working day, at the set time, every supervisor gets a mail listing the people reporting to them who are late, on leave or have not punched in.",
+      "A spreadsheet with the same people is attached. The supervisor also sees a short note in the portal and the app.",
+      "Nothing is sent to a supervisor whose whole team is on time, or on holidays and weekly offs.",
+      "To change the time or turn it off: Leave settings → Daily team attendance mail.",
+    ],
+    tips: ["People need a reporting manager set, and the manager needs an email address."],
+  },
+  {
     id: "certificate-design",
     area: "Performance & learning",
     title: "Design the training certificate",
