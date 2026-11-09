@@ -17,6 +17,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from "react-native-reanimated";
 import * as DocumentPicker from "expo-document-picker";
 import { File } from "expo-file-system";
 import { SupervisorScreen, openApprovalsAt, type ApprovalKind } from "./Supervisor";
@@ -501,17 +502,22 @@ async function attempt(fn: () => Promise<unknown>, done?: string) {
 // One tap punches in or out. The punch itself still needs the selfie and location checks.
 function PunchButton({
   label,
+  icon,
+  quiet,
   disabled,
   onPress,
 }: {
   label: string;
+  icon: IconName;
+  quiet?: boolean;
   disabled?: boolean;
   onPress: () => Promise<void> | void;
 }) {
   const [working, setWorking] = useState(false);
+  const ink = quiet ? "#ffffff" : T.primaryDeeper;
   return (
     <PressScale
-      style={[s.punchBtn, (disabled || working) && { opacity: 0.55 }]}
+      style={[s.punchBtn, quiet && s.punchBtnQuiet, (disabled || working) && { opacity: 0.55 }]}
       haptic
       disabled={disabled || working}
       accessibilityRole="button"
@@ -526,73 +532,134 @@ function PunchButton({
         }
       }}
     >
-      {working ? <ActivityIndicator color={T.primaryDark} /> : <Text style={s.punchBtnText}>{label}</Text>}
+      {working ? (
+        <ActivityIndicator color={ink} />
+      ) : (
+        <View style={s.punchBtnRow}>
+          <Icon name={icon} size={20} color={ink} />
+          <Text style={[s.punchBtnText, { color: ink }]}>{label}</Text>
+        </View>
+      )}
     </PressScale>
   );
 }
 
-// Today's attendance on Home: punch-in and punch-out times beside one punch button, with
-// the OD buttons underneath when OD is switched on for the person.
+// A small dot that breathes while the shift is running.
+function LiveDot({ live }: { live: boolean }) {
+  const o = useSharedValue(1);
+  useEffect(() => {
+    if (live) o.set(withRepeat(withSequence(withTiming(0.35, { duration: 900 }), withTiming(1, { duration: 900 })), -1));
+    else o.set(1);
+  }, [live, o]);
+  const anim = useAnimatedStyle(() => ({ opacity: o.value }));
+  return <Animated.View style={[s.heroDot, live && s.heroDotLive, anim]} />;
+}
+
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const spanText = (ms: number) => {
+  const mins = Math.max(0, Math.floor(ms / 60000));
+  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m`;
+};
+
+// Today's attendance on Home: a live clock, the day's punches and one clear action, with the
+// OD action underneath when OD is switched on for the person.
 function PunchHero({
   today,
+  status,
   onSlidePunch,
   onOdPunch,
 }: {
   today: TodayInfo | null;
+  status: string;
   onSlidePunch: () => Promise<void>;
   onOdPunch: () => void;
 }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 15000);
+    return () => clearInterval(t);
+  }, []);
   const open = today?.openShift,
     done = today?.todayShift;
   const odOpen = open?.source === "od_punch",
     odDone = !open && done?.od_purpose != null;
   const inAt = open?.in_at ?? done?.in_at ?? null;
+  const outAt = done?.out_at ?? null;
+  const worked = inAt ? (open ? now : outAt ? Date.parse(outAt) : Date.parse(inAt)) - Date.parse(inAt) : null;
+  const fullAt = open?.required_out_at ?? null;
+  const progress =
+    open && fullAt ? Math.min(1, (now - Date.parse(open.in_at)) / Math.max(1, Date.parse(fullAt) - Date.parse(open.in_at))) : null;
+  const d = new Date(now);
+  const hour = d.getHours() % 12 || 12;
+  const label = odOpen ? "OD Punch Out" : odDone ? "OD sent" : open ? "Punch Out" : done ? "Update Punch Out" : "Punch In";
+  const cells: [string, string][] = [
+    ["In", inAt ? clock(inAt) : "--:--"],
+    ["Worked", worked != null ? spanText(worked) : "--"],
+    ["Out", outAt ? clock(outAt) : "--:--"],
+  ];
   return (
     <View style={s.hero}>
-      <View style={s.heroBlob} />
-      <Text style={s.heroTitle}>Today&apos;s attendance</Text>
-      <View style={s.heroRow}>
-        <View style={s.heroTimes}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.heroLine}>↓ Punch in</Text>
-            <Text style={s.heroTime}>{inAt ? clock(inAt) : "--:--"}</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={s.heroLine}>↑ Punch out</Text>
-            <Text style={s.heroTime}>{done?.out_at ? clock(done.out_at) : "--:--"}</Text>
-          </View>
+      <View style={s.heroRing} />
+      <View style={s.heroRing2} />
+      <View style={s.heroTop}>
+        <View style={s.heroPill}>
+          <LiveDot live={!!open} />
+          <Text style={s.heroPillText} numberOfLines={1}>{status}</Text>
         </View>
-        <View>
-          <PunchButton
-            label={
-              odOpen
-                ? "OD Punch Out"
-                : odDone
-                  ? "OD sent"
-                  : open
-                    ? "↑ Punch Out"
-                    : done
-                      ? "Update Punch Out"
-                      : "↓ Punch In"
-            }
-            disabled={!today || odDone}
-            onPress={onSlidePunch}
-          />
-        </View>
+        {!!today?.shift && (
+          <Text style={s.heroShift} numberOfLines={1}>
+            {today.shift.name} · {today.shift.start}
+          </Text>
+        )}
       </View>
+      <View accessibilityRole="text" accessibilityLabel={`${hour}:${String(d.getMinutes()).padStart(2, "0")} ${d.getHours() < 12 ? "AM" : "PM"}`}>
+        <Text style={s.heroClock}>
+          {hour}:{String(d.getMinutes()).padStart(2, "0")}
+          <Text style={s.heroAmPm}> {d.getHours() < 12 ? "AM" : "PM"}</Text>
+        </Text>
+        <Text style={s.heroDate}>
+          {WEEKDAYS[d.getDay()]}, {d.getDate()} {MONTHS[d.getMonth()]}
+        </Text>
+      </View>
+      <View style={s.heroPanel}>
+        <View style={s.heroCells}>
+          {cells.map(([name, value], i) => (
+            <View key={name} style={[s.heroCell, i > 0 && s.heroCellLine]}>
+              <Text style={s.heroCellLabel}>{name}</Text>
+              <Text style={s.heroCellValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{value}</Text>
+            </View>
+          ))}
+        </View>
+        {progress != null && (
+          <View style={{ gap: 6 }}>
+            <View style={s.heroTrack} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}>
+              <View style={[s.heroFill, { width: `${Math.round(progress * 100)}%` }]} />
+            </View>
+            <Text style={s.heroHint}>{progress >= 1 ? "Full day completed" : `Full day after ${clock(fullAt as string)}`}</Text>
+          </View>
+        )}
+      </View>
+      <PunchButton
+        label={label}
+        icon={open ? "log-out-outline" : done ? "refresh-outline" : "log-in-outline"}
+        quiet={!open && !!done}
+        disabled={!today || odDone}
+        onPress={onSlidePunch}
+      />
       {/* OD Punch In before the day starts; OD Out / OD In during a normal shift. */}
       {today?.od_allowed && ((!open && !done) || (open && !odOpen)) && (
         <Pressable
-          style={({ pressed }) => [s.odBtn, pressed && { opacity: 0.8 }]}
+          style={({ pressed }) => [s.odBtn, pressed && { opacity: 0.7 }]}
           accessibilityRole="button"
           onPress={onOdPunch}
         >
-          <Text style={s.odBtnText}>
+          <Icon name="navigate-outline" size={16} color={T.onPrimarySoft} />
+          <Text style={s.odBtnText} numberOfLines={1}>
             {!open
-              ? "OD Punch In (on duty outside)"
+              ? "On duty outside? OD Punch In"
               : today.openTrip
                 ? "OD In (back from " + today.openTrip.purpose.slice(0, 24) + ")"
-                : "OD Out (going out for work)"}
+                : "Going out for work? OD Out"}
           </Text>
         </Pressable>
       )}
@@ -731,7 +798,7 @@ type TodayInfo = {
   user?: { od_punch?: boolean; photo_at?: string | null };
   od_allowed?: boolean;
   openTrip?: { purpose: string; out_at: string } | null;
-  openShift: { in_at: string; workplace_name: string; source?: string } | null;
+  openShift: { in_at: string; workplace_name: string; source?: string; required_out_at?: string | null } | null;
   todayShift: { in_at: string; out_at: string | null; od_purpose?: string | null } | null;
   workplace: { name: string } | null;
   shift?: { name: string; start: string; earliest_out: string } | null;
@@ -829,19 +896,10 @@ function HomeScreen({
           <Text style={s.greetName}>{me?.name ?? " "}</Text>
         </View>
       </Appear>
-      <Appear index={1} style={s.strip}>
-        <Text style={s.stripText}>
-          {new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date())}
-        </Text>
-        <View style={s.stripDivider} />
-        <Text style={s.stripText} numberOfLines={1}>
-          {t?.shift ? `${t.shift.name} ${t.shift.start}` : "—"}
-        </Text>
-        <Text style={[s.stripText, { color: T.primaryText, width: "100%" }]}>{status}</Text>
-      </Appear>
       <Appear index={2}>
       <PunchHero
         today={t}
+        status={status}
         onSlidePunch={async () => {
           await onSlidePunch();
           void today.reload();
@@ -3251,22 +3309,32 @@ const s = themed(() => StyleSheet.create({
   netValue: { color: "#fff", fontSize: 22, fontWeight: "700" },
   bubble: { backgroundColor: T.fill, borderRadius: 12, padding: 12, gap: 4 },
   hero: {
-    backgroundColor: T.primaryDark,
+    backgroundColor: T.primaryDeeper,
     borderRadius: 24,
-    padding: 18,
+    padding: 20,
     gap: 16,
     overflow: "hidden",
   },
-  heroBlob: {
-    position: "absolute",
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    backgroundColor: T.primary,
-    opacity: 0.55,
-    right: -70,
-    top: -90,
-  },
+  heroRing: { position: "absolute", width: 260, height: 260, borderRadius: 130, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", right: -90, top: -110 },
+  heroRing2: { position: "absolute", width: 180, height: 180, borderRadius: 90, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", right: -50, top: -70 },
+  heroTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  heroPill: { flexDirection: "row", alignItems: "center", gap: 7, flexShrink: 1, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.14)" },
+  heroPillText: { color: "#fff", fontSize: 13, fontWeight: "600", flexShrink: 1 },
+  heroDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "rgba(255,255,255,0.6)" },
+  heroDotLive: { backgroundColor: "#7ee2a8" },
+  heroShift: { color: T.onPrimarySoft, fontSize: 12, fontWeight: "500", flexShrink: 1 },
+  heroClock: { color: "#fff", fontSize: 50, fontWeight: "300", letterSpacing: -1.5, fontVariant: ["tabular-nums"] },
+  heroAmPm: { fontSize: 17, fontWeight: "500", letterSpacing: 0 },
+  heroDate: { color: T.onPrimarySoft, fontSize: 14, fontWeight: "500", marginTop: 2 },
+  heroPanel: { backgroundColor: "rgba(255,255,255,0.09)", borderRadius: 16, padding: 14, gap: 12 },
+  heroCells: { flexDirection: "row" },
+  heroCell: { flex: 1, gap: 3, alignItems: "center" },
+  heroCellLine: { borderLeftWidth: 1, borderLeftColor: "rgba(255,255,255,0.14)" },
+  heroCellLabel: { color: T.onPrimarySoft, fontSize: 11, fontWeight: "600", letterSpacing: 0.8, textTransform: "uppercase" },
+  heroCellValue: { color: "#fff", fontSize: 16, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  heroTrack: { height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.16)", overflow: "hidden" },
+  heroFill: { height: 4, borderRadius: 2, backgroundColor: "#ffffff" },
+  heroHint: { color: T.onPrimarySoft, fontSize: 12, textAlign: "center" },
   heroBlob2: {
     position: "absolute",
     width: 160,
@@ -3288,28 +3356,18 @@ const s = themed(() => StyleSheet.create({
   timeLabel: { color: T.soft, fontSize: 13, letterSpacing: 1 },
   timeValue: { color: "#fff", fontSize: 34, fontWeight: "800" },
   punchBtn: {
-    height: 56,
-    borderRadius: 28,
+    height: 54,
+    borderRadius: 16,
     // White in Day and Night: the main action of the screen, on the brand colour.
     backgroundColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",
   },
-  punchBtnText: { color: T.primaryDark, fontWeight: "800", fontSize: 17, letterSpacing: 0.5 },
-  odBtn: {
-    height: 46,
-    borderRadius: 23,
-    borderWidth: 1.5,
-    borderColor: "#ffffff",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  odBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
-  heroTitle: { color: "#fff", fontSize: 18, fontWeight: "800" },
-  heroRow: { gap: 14 },
-  heroTimes: { flexDirection: "row", gap: 14 },
-  heroLine: { color: T.onPrimarySoft, fontSize: 15, fontWeight: "600" },
-  heroTime: { color: "#fff", fontSize: 20, fontWeight: "800" },
+  punchBtnQuiet: { backgroundColor: "rgba(255,255,255,0.14)" },
+  punchBtnRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  punchBtnText: { fontWeight: "700", fontSize: 16, letterSpacing: 0.2 },
+  odBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, minHeight: 36 },
+  odBtnText: { color: T.onPrimarySoft, fontWeight: "600", fontSize: 14, flexShrink: 1 },
   sectionTitle: { color: T.ink, fontSize: 18, fontWeight: "700", textAlign: "center" },
   quickPage: { gap: 14 },
   quickHead: { flexDirection: "row", alignItems: "center", gap: 10 },
@@ -3355,20 +3413,6 @@ const s = themed(() => StyleSheet.create({
   },
   greetAvatarText: { color: "#fff", fontSize: 20, fontWeight: "800" },
   greetName: { color: T.ink, fontSize: 22, fontWeight: "800" },
-  strip: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: 10,
-    backgroundColor: T.surface,
-    borderWidth: 1,
-    borderColor: T.line,
-    borderRadius: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-  },
-  stripText: { color: T.ink, fontSize: 14, fontWeight: "700", flexShrink: 1 },
-  stripDivider: { width: 1, height: 18, backgroundColor: T.line },
   profileHead: {
     backgroundColor: T.surface,
     borderRadius: 22,
