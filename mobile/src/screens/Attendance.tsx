@@ -43,7 +43,7 @@ import {
 } from "../biometric";
 import { T, applyBrand, brand, isDark, restoreBrand, restoreTheme, themed, useBrandVersion } from "../theme";
 import { Avatar, Icon, type IconName, failure, success, tick } from "../ui";
-import Animated, { ZoomIn } from "react-native-reanimated";
+import Animated, { FadeInDown, ZoomIn } from "react-native-reanimated";
 type User = {
   id: number;
   name: string;
@@ -222,6 +222,7 @@ export default function Attendance() {
   // Which screen the menu has open: the punch screen, or one of More's sections.
   const [view, setView] = useState<Section | "Punch">("Home"),
     [menuOpen, setMenuOpen] = useState(false),
+    [menuGroup, setMenuGroup] = useState<string | null | undefined>(undefined),
     [counts, setCounts] = useState({ alerts: 0, messages: 0 });
   // Fingerprint / face unlock: offered only on phones that have it set up.
   const [bio, setBio] = useState<{ available: boolean; on: boolean }>({
@@ -763,6 +764,18 @@ export default function Attendance() {
   const passwordScreen = profile?.user.must_change_password || changing;
   const employeeView =
     !!profile && !passwordScreen && profile.user.role !== "super_admin";
+  // Side menu: one group open at a time, starting with the group of the current page.
+  const currentGroup = MENU.find(([, items]) => items.some(([id]) => id === view))?.[0] ?? null;
+  const shownGroup = menuGroup === undefined ? currentGroup : menuGroup;
+  const toggleGroup = (group: string) => {
+    tick();
+    setMenuGroup(shownGroup === group ? null : group);
+  };
+  const goTo = (id: Section | "Punch") => {
+    setView(id);
+    setMenuGroup(undefined);
+    setMenuOpen(false);
+  };
   return (
     <SafeAreaView style={s.safe} edges={employeeView ? ["top", "left", "right"] : undefined}>
       <StatusBar style={isDark() || (menuOpen && employeeView) ? "light" : "dark"} />
@@ -844,71 +857,123 @@ export default function Attendance() {
                   )}
                 </View>
               )}
-              {MENU.map(([group, items]) => (
-                <View key={group} style={{ marginBottom: 6 }}>
-                  <View style={s.menuGroupRow}>
-                    <Icon name={MENU_ICON[group] ?? "ellipse-outline"} size={16} color={T.onPrimarySoft} />
-                    <Text style={s.menuGroup}>{group}</Text>
-                  </View>
-                  {items.map(([id, label]) => (
+              {MENU.map(([group, items]) => {
+                const iconName = MENU_ICON[group] ?? "ellipse-outline";
+                const here = items.some(([id]) => id === view);
+                // A group with one page is a plain link; there is nothing to drop down.
+                if (items.length === 1)
+                  return (
                     <Pressable
-                      key={id}
-                      onPress={() => {
-                        setView(id);
-                        setMenuOpen(false);
-                      }}
-                      style={[s.menuItem, view === id && s.menuItemOn]}
+                      key={group}
+                      accessibilityRole="button"
+                      style={[s.menuGroupRow, here && s.menuRowOn]}
+                      onPress={() => goTo(items[0][0])}
+                    >
+                      <Icon name={iconName} size={20} color={here ? T.primaryText : T.muted} />
+                      <Text style={[s.menuGroup, here && s.menuTextOn]}>{items[0][1]}</Text>
+                    </Pressable>
+                  );
+                const open = shownGroup === group;
+                const waiting = items.reduce(
+                  (n, [id]) => n + (id === "Messages" ? counts.messages : id === "Alerts" ? counts.alerts : 0),
+                  0,
+                );
+                return (
+                  <View key={group}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: open }}
+                      style={s.menuGroupRow}
+                      onPress={() => toggleGroup(group)}
+                    >
+                      <Icon name={iconName} size={20} color={here ? T.primaryText : T.muted} />
+                      <Text style={[s.menuGroup, here && s.menuTextOn]}>{group}</Text>
+                      {!open && waiting > 0 && (
+                        <View style={s.menuCount}>
+                          <Text style={s.menuCountText}>{waiting}</Text>
+                        </View>
+                      )}
+                      <Icon name={open ? "chevron-up" : "chevron-down"} size={16} color={T.faint} />
+                    </Pressable>
+                    {open && (
+                      <Animated.View entering={FadeInDown.duration(160)} style={s.menuChildren}>
+                        {items.map(([id, label]) => {
+                          const count = id === "Messages" ? counts.messages : id === "Alerts" ? counts.alerts : 0;
+                          return (
+                            <Pressable
+                              key={id}
+                              accessibilityRole="button"
+                              onPress={() => goTo(id)}
+                              style={[s.menuItem, view === id && s.menuRowOn]}
+                            >
+                              <Text style={[s.menuText, view === id && s.menuTextOn]}>{label}</Text>
+                              {count > 0 && (
+                                <View style={s.menuCount}>
+                                  <Text style={s.menuCountText}>{count}</Text>
+                                </View>
+                              )}
+                            </Pressable>
+                          );
+                        })}
+                      </Animated.View>
+                    )}
+                  </View>
+                );
+              })}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ expanded: shownGroup === "Account" }}
+                style={s.menuGroupRow}
+                onPress={() => toggleGroup("Account")}
+              >
+                <Icon name="settings-outline" size={20} color={T.muted} />
+                <Text style={s.menuGroup}>Account</Text>
+                <Icon name={shownGroup === "Account" ? "chevron-up" : "chevron-down"} size={16} color={T.faint} />
+              </Pressable>
+              {shownGroup === "Account" && (
+                <Animated.View entering={FadeInDown.duration(160)} style={s.menuChildren}>
+                  {bio.available && (
+                    <Pressable
+                      style={s.menuItem}
+                      accessibilityRole="switch"
+                      accessibilityState={{ checked: bio.on }}
+                      onPress={() =>
+                        void (async () => {
+                          const r = await setBiometricLock(!bio.on);
+                          setBio((b) => ({ ...b, on: r.on }));
+                          if (r.error)
+                            Alert.alert("Fingerprint / face unlock", r.error);
+                        })()
+                      }
                     >
                       <Text style={s.menuText}>
-                        {label}
-                        {id === "Messages" && counts.messages
-                          ? " (" + counts.messages + ")"
-                          : ""}
-                        {id === "Alerts" && counts.alerts
-                          ? " (" + counts.alerts + ")"
-                          : ""}
+                        Fingerprint / face unlock: {bio.on ? "On" : "Off"}
                       </Text>
                     </Pressable>
-                  ))}
-                </View>
-              ))}
-              <Text style={s.menuGroup}>Account</Text>
-              {bio.available && (
-                <Pressable
-                  style={s.menuItem}
-                  accessibilityRole="switch"
-                  accessibilityState={{ checked: bio.on }}
-                  onPress={() =>
-                    void (async () => {
-                      const r = await setBiometricLock(!bio.on);
-                      setBio((b) => ({ ...b, on: r.on }));
-                      if (r.error)
-                        Alert.alert("Fingerprint / face unlock", r.error);
-                    })()
-                  }
-                >
-                  <Text style={s.menuText}>
-                    Fingerprint / face unlock: {bio.on ? "On" : "Off"}
-                  </Text>
-                </Pressable>
+                  )}
+                  <Pressable
+                    style={s.menuItem}
+                    accessibilityRole="button"
+                    onPress={() => {
+                      setMenuOpen(false);
+                      setChanging(true);
+                    }}
+                  >
+                    <Text style={s.menuText}>Change Password</Text>
+                  </Pressable>
+                </Animated.View>
               )}
+              <View style={s.menuRule} />
               <Pressable
-                style={s.menuItem}
-                onPress={() => {
-                  setMenuOpen(false);
-                  setChanging(true);
-                }}
-              >
-                <Text style={s.menuText}>Change Password</Text>
-              </Pressable>
-              <Pressable
-                style={s.menuItem}
+                style={s.menuGroupRow}
+                accessibilityRole="button"
                 onPress={() => {
                   setMenuOpen(false);
                   void logout();
                 }}
               >
-                <Text style={s.menuText}>Log Out</Text>
+                <Icon name="log-out-outline" size={20} color={T.danger} />
+                <Text style={[s.menuGroup, { color: T.danger }]}>Log Out</Text>
               </Pressable>
               <Text style={s.menuVersion}>
                 Version {Constants.expoConfig?.version ?? ""}
@@ -1599,7 +1664,13 @@ const s = themed(() => StyleSheet.create({
   },
   menuAvatarText: { color: T.primaryDark, fontWeight: "800", fontSize: 18 },
   menuAvatarRing: { alignSelf: "flex-start", padding: 3, borderRadius: 40, backgroundColor: T.surface },
-  menuGroupRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 18, paddingTop: 10 },
+  menuGroupRow: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 50, paddingHorizontal: 18 },
+  menuRowOn: { backgroundColor: T.softer },
+  menuChildren: { marginLeft: 27, paddingLeft: 8, marginBottom: 6, borderLeftWidth: 1, borderLeftColor: T.line },
+  menuTextOn: { color: T.primaryText, fontWeight: "700" },
+  menuRule: { height: 1, backgroundColor: T.line, marginHorizontal: 18, marginTop: 8 },
+  menuCount: { minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 5, alignItems: "center", justifyContent: "center", backgroundColor: T.primary },
+  menuCountText: { color: "#fff", fontSize: 11, fontWeight: "800" },
   bellBadge: {
     position: "absolute",
     top: -6,
@@ -1623,7 +1694,7 @@ const s = themed(() => StyleSheet.create({
   },
   menuSub: { color: T.onPrimarySoft, fontSize: 12 },
   menuVersion: {
-    color: T.onPrimarySoft,
+    color: T.faint,
     fontSize: 11,
     textAlign: "center",
     marginTop: 18,
@@ -1688,19 +1759,10 @@ const s = themed(() => StyleSheet.create({
     flexDirection: "row",
     backgroundColor: "rgba(0,0,0,0.35)",
   },
-  menu: { width: "84%", maxWidth: 320, backgroundColor: T.primaryDark, paddingBottom: 30 },
-  menuGroup: {
-    color: T.onPrimarySoft,
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    paddingBottom: 4,
-    paddingTop: 4,
-  },
-  menuItem: { paddingVertical: 11, paddingHorizontal: 26 },
-  menuItemOn: { backgroundColor: T.primaryDeeper },
-  menuText: { color: "#fff", fontSize: 15, fontWeight: "600" },
+  menu: { width: "84%", maxWidth: 320, backgroundColor: T.surface, paddingBottom: 30 },
+  menuGroup: { flex: 1, color: T.ink, fontSize: 15, fontWeight: "600" },
+  menuItem: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44, paddingHorizontal: 12, marginRight: 14, borderRadius: 10 },
+  menuText: { color: T.body, fontSize: 14, fontWeight: "500", flexShrink: 1 },
   historyRow: {
     paddingVertical: 16,
     borderBottomWidth: 1,
