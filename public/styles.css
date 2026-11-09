@@ -4698,3 +4698,100 @@ th.num {
   body:has(.cert-frame), #letter:has(.cert-frame) { margin: 0; padding: 0; max-width: none; }
   .cert-frame { max-width: none; width: 297mm; height: 209mm; overflow: hidden; }
 }
+
+/* ---- Interface polish: applied last, over the layers above ------------------------------- */
+/* Company name on one line; the logo and the footer stay put while the menu scrolls. */
+@media (min-width: 751px) {
+  .layout { grid-template-columns: 272px minmax(0, 1fr); }
+}
+.sidebar { overflow: hidden; }
+.sidebar .brand {
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px 12px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.sidebar .brand-logo { height: 30px; max-width: 64px; }
+.brand-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.sidebar .brand > .brand-name { overflow-wrap: normal; font-size: 12px; }
+.sidebar .nav {
+  flex: 1 1 0;
+  min-height: 0;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+.sidebar-foot { flex-shrink: 0; }
+@media (max-height: 560px) {
+  .sidebar-foot strong { display: none; }
+}
+
+/* Day: a light top bar and a calm page, so the content is what stands out. */
+:root[data-theme="light"] body {
+  background-image:
+    radial-gradient(900px 520px at 100% -10%, rgba(200, 16, 46, 0.07), transparent 60%),
+    radial-gradient(700px 460px at -10% 110%, rgba(200, 16, 46, 0.04), transparent 60%);
+  background-size: auto;
+}
+:root[data-theme="light"] .topbar {
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--ink);
+  box-shadow: 0 1px 0 var(--line), 0 10px 26px -22px rgba(20, 21, 28, 0.45);
+}
+:root[data-theme="light"] .topbar .bell { color: var(--ink); }
+:root[data-theme="light"] .topbar button:hover { background: var(--red-50); }
+:root[data-theme="light"] .me-text strong,
+:root[data-theme="light"] .me-button,
+:root[data-theme="light"] .me-button .chev { color: var(--ink); }
+:root[data-theme="light"] .me-text small { color: var(--muted); }
+:root[data-theme="light"] .me-button .avatar { box-shadow: 0 0 0 2px #fff, 0 2px 8px rgba(200, 16, 46, 0.35); }
+:root[data-theme="light"] .people-search input {
+  background: #f3f3f7;
+  border-color: var(--line);
+  color: var(--ink);
+}
+:root[data-theme="light"] .people-search input::placeholder { color: var(--muted); }
+:root[data-theme="light"] .people-search input:focus {
+  background: #fff;
+  border-color: var(--red);
+  box-shadow: var(--ring);
+}
+:root[data-theme="light"] .topbar .theme-switch {
+  background: #f3f3f7;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+:root[data-theme="light"] .topbar .theme-switch button[aria-pressed="false"] { color: #5e6070; }
+:root[data-theme="light"] .topbar .theme-switch button[aria-pressed="false"]:hover {
+  background: var(--red-50);
+  color: var(--red);
+}
+:root[data-theme="light"] .topbar::after { opacity: 0.35; }
+
+/* Tables: the row under the pointer is easy to follow. */
+tbody tr { transition: background-color 0.12s ease; }
+tbody tr:hover { background: color-mix(in srgb, var(--red) 4%, transparent); }
+
+/* Phones: a row of tabs scrolls sideways instead of stacking up. */
+@media (max-width: 750px) {
+  .tabbar {
+    display: flex;
+    flex-wrap: nowrap;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabbar::-webkit-scrollbar { display: none; }
+  .tabbar button { flex: none; }
+}
