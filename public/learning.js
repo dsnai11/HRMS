@@ -7,11 +7,16 @@ const LESSON_KIND = { text: "Text", link: "Link", video: "Video link" };
 // LMS → My Courses: what a person takes. LMS → Manage courses (HR, admins, the platform owner):
 // building courses, the report and training sessions.
 let learnManageTab = "manage";
+let learnTeam = { has_team: false, rows: [] };
 async function learningPage(id, mode = "learner") {
   const managing = mode === "manage" && has("performance.manage");
   const tabs = managing
-    ? { manage: "Manage courses", report: "Department report", sessions: "Training sessions" }
+    ? { manage: "Manage courses", report: "Department report", followup: "Overdue and failed", design: "Certificate design", sessions: "Training sessions" }
     : { mine: "My learning", catalogue: "Course catalogue", certificates: "My certificates" };
+  if (!managing) {
+    learnTeam = await api("/learning-team");
+    if (learnTeam.has_team) tabs.team = "My team";
+  }
   if (managing && !tabs[learnManageTab]) learnManageTab = "manage";
   if (!managing && !tabs[learnTab]) learnTab = "mine";
   const current = managing ? learnManageTab : learnTab;
@@ -43,6 +48,9 @@ async function learningPage(id, mode = "learner") {
 
 async function learningHtml(tab) {
   if (tab === "sessions") return sessionsAdminHtml();
+  if (tab === "followup") return learnFollowupHtml();
+  if (tab === "team") return learnTeamHtml();
+  if (tab === "design") return certDesignHtml();
   if (tab === "catalogue") {
     const rows = await api("/learning-catalogue");
     if (!rows.length)
@@ -360,6 +368,9 @@ async function audienceDialog(id, name) {
 
 function learningWire(tab) {
   if (tab === "sessions") return sessionsAdminWire();
+  if (tab === "followup") return learnFollowupWire();
+  if (tab === "team") return;
+  if (tab === "design") return certDesignWire();
   const on = (s, fn) =>
     document.querySelector(s)?.addEventListener("click", fn);
   const each = (s, fn) =>

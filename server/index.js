@@ -51,6 +51,8 @@ import { registerOvertime } from "./routes/overtime.js";
 import { registerSeparation } from "./routes/separation.js";
 import { registerSalaryBills } from "./routes/salary-bills.js";
 import { registerBudgets } from "./routes/budgets.js";
+import { registerCertificateDesign } from "./routes/certificate-design.js";
+import { registerTrainingFollowup } from "./training-followup.js";
 import { registerSalaryAllocation, scheduleSalaryAllocation } from "./salary-allocation.js";
 import { registerOptionalHolidays } from "./routes/optional-holidays.js";
 import { registerBranding } from "./routes/branding.js";
@@ -127,6 +129,8 @@ const STATIC = {
   "/hr-guide.js": ["hr-guide.js", "text/javascript"],
   "/dashboard.js": ["dashboard.js", "text/javascript"],
   "/budgets.js": ["budgets.js", "text/javascript"],
+  "/learning-followup.js": ["learning-followup.js", "text/javascript"],
+  "/certificate-view.js": ["certificate-view.js", "text/javascript"],
   "/salary-allocation.js": ["salary-allocation.js", "text/javascript"],
   "/branding.js": ["branding.js", "text/javascript"],
   "/theme.js": ["theme.js", "text/javascript"],
@@ -292,6 +296,8 @@ export function createApp({
     registerSeparation,
     registerSalaryBills,
     registerBudgets,
+    registerCertificateDesign,
+    registerTrainingFollowup,
     registerSalaryAllocation,
     registerOptionalHolidays,
     registerBranding,

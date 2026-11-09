@@ -13,6 +13,8 @@ const addMonths = (d, n) => {
   return x.toISOString().slice(0, 10);
 };
 
+import { longOverdueTraining } from "../training-followup.js";
+
 export function registerProbation(router, app) {
   const { db } = app;
   const today = () => app.dayOf(new Date(app.clock()).toISOString());
@@ -36,11 +38,13 @@ export function registerProbation(router, app) {
            ORDER BY u.probation_end_date`,
         )
         .all(companyId, plusDays(today(), within));
+      const late = await longOverdueTraining(app, companyId);
       return send(
         200,
         rows.map((r) => ({
           ...r,
           overdue: r.probation_end_date < today(),
+          overdue_training: late.get(r.user_id) ?? [],
         })),
       );
     },
