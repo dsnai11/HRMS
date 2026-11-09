@@ -764,6 +764,14 @@ export default function Attendance() {
   const passwordScreen = profile?.user.must_change_password || changing;
   const employeeView =
     !!profile && !passwordScreen && profile.user.role !== "super_admin";
+  const fixWord =
+    fix?.action === "od_out"
+      ? "OD Out"
+      : fix?.action === "od_in"
+        ? "OD In"
+        : fix?.action === "out"
+          ? "Punch Out"
+          : "Punch In";
   // Side menu: one group open at a time, starting with the group of the current page.
   const currentGroup = MENU.find(([, items]) => items.some(([id]) => id === view))?.[0] ?? null;
   const shownGroup = menuGroup === undefined ? currentGroup : menuGroup;
@@ -1279,14 +1287,14 @@ export default function Attendance() {
                           busy
                             ? "Checking attendance…"
                             : odOpen
-                              ? "OD punch out →"
+                              ? "OD punch out"
                               : open && trip
-                                ? "Punch out here (ends OD) →"
+                                ? "Punch out here (ends OD)"
                                 : open
-                                  ? "Punch out →"
+                                  ? "Punch out"
                                   : done
-                                    ? "Update punch-out →"
-                                    : "Punch in →"
+                                    ? "Update punch-out"
+                                    : "Punch in"
                         }
                         onPress={() => void punch()}
                         disabled={
@@ -1305,7 +1313,7 @@ export default function Attendance() {
                               title={
                                 busy
                                   ? "Checking attendance…"
-                                  : "OD In (I am back) →"
+                                  : "OD In (I am back)"
                               }
                               secondary
                               onPress={() =>
@@ -1337,7 +1345,7 @@ export default function Attendance() {
                               onChangeText={setOdPurpose}
                             />
                             <Button
-                              title={busy ? "Checking attendance…" : "OD Out →"}
+                              title={busy ? "Checking attendance…" : "OD Out"}
                               secondary
                               onPress={() =>
                                 void punch(false, undefined, {
@@ -1372,7 +1380,7 @@ export default function Attendance() {
                         />
                         <Button
                           title={
-                            busy ? "Checking attendance…" : "OD punch in →"
+                            busy ? "Checking attendance…" : "OD punch in"
                           }
                           secondary
                           onPress={() => void punch(false, odPurpose.trim())}
@@ -1456,15 +1464,9 @@ export default function Attendance() {
       >
         <View style={s.sheetWrap}>
           <View style={s.sheet}>
-            <Text style={s.sheetTitle}>
-              {fix?.action === "od_out"
-                ? "Mark OD OUT"
-                : fix?.action === "od_in"
-                  ? "Mark OD IN"
-                  : fix?.action === "out"
-                    ? "Mark OUT"
-                    : "Mark IN"}
-            </Text>
+            <View style={s.sheetHandle} />
+            <Text style={s.sheetTitle}>Confirm {fixWord}</Text>
+            <Text style={s.note}>Check your location, then confirm.</Text>
             {/* iPhone shows Apple Maps. Android shows the address only until the app
                 has a Google Maps key (set it in app.config.js before launch). */}
             {Platform.OS === "ios" && fix && (
@@ -1502,7 +1504,9 @@ export default function Attendance() {
               </MapView>
             )}
             <View style={s.pinRow}>
-              <Text style={s.pin}>📍</Text>
+              <View style={s.pinIcon}>
+                <Icon name="location" size={20} color={T.primaryText} />
+              </View>
               <View style={{ flex: 1 }}>
                 <Text style={s.sheetAddress}>{fix?.address}</Text>
                 <Text style={s.note}>
@@ -1511,7 +1515,7 @@ export default function Attendance() {
                 </Text>
               </View>
             </View>
-            <Button title="Confirm" onPress={() => answerFix(true)} />
+            <Button title={`Confirm ${fixWord}`} onPress={() => answerFix(true)} />
             <Button title="Cancel" secondary onPress={() => answerFix(false)} />
           </View>
         </View>
@@ -1751,8 +1755,9 @@ const s = themed(() => StyleSheet.create({
   },
   sheetTitle: { fontSize: 22, fontWeight: "800", color: T.ink },
   pinRow: { flexDirection: "row", gap: 12, alignItems: "center" },
-  map: { width: "100%", height: 260, borderRadius: 16, overflow: "hidden" },
-  pin: { fontSize: 34 },
+  map: { width: "100%", height: 200, borderRadius: 16, overflow: "hidden" },
+  pinIcon: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: T.softer },
+  sheetHandle: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: T.lineStrong },
   sheetAddress: { fontSize: 15, fontWeight: "700", color: T.ink },
   menuWrap: {
     flex: 1,
