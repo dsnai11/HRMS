@@ -1,7 +1,7 @@
 name: Build mobile apps
-# Android builds by itself when the phone app changes on main. Both apps can be built by hand
-# for any branch (Actions → Build mobile apps → Run workflow). The iPhone build runs only by
-# hand: it needs a Mac machine, which GitHub counts at ten times the minutes.
+# Both apps build by themselves when the phone app changes on main. They can also be built by
+# hand for any branch (Actions → Build mobile apps → Run workflow), where the iPhone build can
+# be left out: it needs a Mac machine, which GitHub counts at ten times the minutes.
 on:
   workflow_dispatch:
     inputs:
@@ -54,7 +54,7 @@ jobs:
           path: mobile/android/app/build/outputs/apk/release/*.apk
 
   ios-ipa:
-    if: github.event_name == 'workflow_dispatch' && inputs.ios
+    if: github.event_name == 'push' || inputs.ios
     runs-on: macos-latest
     defaults:
       run:
