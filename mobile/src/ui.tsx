@@ -1,8 +1,8 @@
 import React, { useEffect } from "react";
 import { Image, Pressable, StyleSheet, Text, View, type PressableProps, type StyleProp, type ViewStyle } from "react-native";
 import Animated, {
-  FadeIn,
   FadeInDown,
+  FadeInRight,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
@@ -62,7 +62,7 @@ export function Appear({
 /** A whole screen fading in when it opens. */
 export function ScreenIn({ children }: { children: React.ReactNode }) {
   return (
-    <Animated.View entering={FadeIn.duration(220)} style={{ gap: 14 }}>
+    <Animated.View entering={FadeInRight.duration(260)} style={{ gap: 14 }}>
       {children}
     </Animated.View>
   );

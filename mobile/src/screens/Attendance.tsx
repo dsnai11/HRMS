@@ -43,7 +43,7 @@ import {
 } from "../biometric";
 import { T, applyBrand, brand, isDark, restoreBrand, restoreTheme, themed, useBrandVersion } from "../theme";
 import { Avatar, Icon, type IconName, failure, success, tick } from "../ui";
-import Animated, { FadeInDown, ZoomIn } from "react-native-reanimated";
+import Animated, { FadeIn, FadeInDown, SlideInLeft, ZoomIn } from "react-native-reanimated";
 type User = {
   id: number;
   name: string;
@@ -844,11 +844,13 @@ export default function Attendance() {
       <Modal
         visible={menuOpen && employeeView}
         transparent
-        animationType="fade"
+        animationType="none"
         onRequestClose={() => setMenuOpen(false)}
       >
         <View style={s.menuWrap}>
-          <View style={s.menu}>
+          {/* The page dims while the menu slides in from the left edge. */}
+          <Animated.View entering={FadeIn.duration(220)} style={s.menuShade} pointerEvents="none" />
+          <Animated.View entering={SlideInLeft.duration(280)} style={s.menu}>
             <ScrollView>
               {profile && (
                 <View style={[s.menuUser, { paddingTop: insets.top + 10 }]}>
@@ -987,7 +989,7 @@ export default function Attendance() {
                 Version {Constants.expoConfig?.version ?? ""}
               </Text>
             </ScrollView>
-          </View>
+          </Animated.View>
           <Pressable
             style={{ flex: 1 }}
             accessibilityLabel="Close menu"
@@ -1759,11 +1761,8 @@ const s = themed(() => StyleSheet.create({
   pinIcon: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: T.softer },
   sheetHandle: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: T.lineStrong },
   sheetAddress: { fontSize: 15, fontWeight: "700", color: T.ink },
-  menuWrap: {
-    flex: 1,
-    flexDirection: "row",
-    backgroundColor: "rgba(0,0,0,0.35)",
-  },
+  menuWrap: { flex: 1, flexDirection: "row" },
+  menuShade: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.38)" },
   menu: { width: "84%", maxWidth: 320, backgroundColor: T.surface, paddingBottom: 30 },
   menuGroup: { flex: 1, color: T.ink, fontSize: 15, fontWeight: "600" },
   menuItem: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44, paddingHorizontal: 12, marginRight: 14, borderRadius: 10 },

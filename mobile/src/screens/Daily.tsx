@@ -748,11 +748,22 @@ function RequestSheet({
   );
 }
 
+const STATUS_LABEL: Record<string, string> = { all: "All", pending: "Pending", approved: "Approved", rejected: "Rejected" };
+
 export function RegularizationScreen({ api }: { api: Api }) {
   const list = useLoad(() => api<Correction[]>("/regularizations"));
   const [status, setStatus] = useState("all");
   const [kind, setKind] = useState("all");
   const [adding, setAdding] = useState(false);
+  // The filter sheet edits a draft; the list changes only on Apply.
+  const [filtering, setFiltering] = useState(false);
+  const [draftStatus, setDraftStatus] = useState("all");
+  const [draftKind, setDraftKind] = useState("all");
+  const openFilter = () => {
+    setDraftStatus(status);
+    setDraftKind(kind);
+    setFiltering(true);
+  };
   const rows = (list.data ?? []).filter(
     (r) =>
       !r.batch_id &&
@@ -762,18 +773,66 @@ export function RegularizationScreen({ api }: { api: Api }) {
   return (
     <>
       <Btn title="+ New request" onPress={() => setAdding(true)} />
-      <Segments
-        options={[["all", "All"], ["pending", "Pending"], ["approved", "Approved"], ["rejected", "Rejected"]]}
-        value={status}
-        onChange={setStatus}
-      />
-      <View style={d.wrap}>
-        {[["all", "All types"] as [string, string], ...KINDS.map(([v]) => [v, KIND_LABEL[v]] as [string, string])].map(([v, l]) => (
-          <Pressable key={v} onPress={() => setKind(v)} style={[d.chip, kind === v && d.chipOn]}>
-            <Text style={[d.chipText, kind === v && { color: "#fff" }]}>{l}</Text>
-          </Pressable>
-        ))}
+      <View style={d.filterBar}>
+        <Pressable accessibilityRole="button" onPress={openFilter} style={d.filterPill}>
+          <Text style={d.filterPillKey}>Status</Text>
+          <Text style={d.filterPillValue} numberOfLines={1}>{STATUS_LABEL[status]}</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" onPress={openFilter} style={[d.filterPill, { flex: 1.4 }]}>
+          <Text style={d.filterPillKey}>Type</Text>
+          <Text style={d.filterPillValue} numberOfLines={1}>{kind === "all" ? "All types" : KIND_LABEL[kind]}</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Filter requests" onPress={openFilter} style={d.filterBtn}>
+          <Icon name="options-outline" size={20} color="#fff" />
+          {(status !== "all" || kind !== "all") && <View style={d.filterDot} />}
+        </Pressable>
       </View>
+      <Sheet visible={filtering} title="Filter requests" onClose={() => setFiltering(false)}>
+        <View style={d.rowBetween}>
+          <Text style={d.filterHead}>Status</Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              setDraftStatus("all");
+              setDraftKind("all");
+            }}
+            style={d.resetPill}
+          >
+            <Icon name="refresh" size={14} color={C.red} />
+            <Text style={d.resetText}>Reset</Text>
+          </Pressable>
+        </View>
+        <View style={d.wrap}>
+          {Object.entries(STATUS_LABEL).map(([v, l]) => (
+            <Pressable key={v} accessibilityRole="button" accessibilityState={{ selected: draftStatus === v }} onPress={() => setDraftStatus(v)} style={[d.chip, draftStatus === v && d.chipOn]}>
+              <Text style={[d.chipText, draftStatus === v && { color: "#fff" }]}>{l}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={d.filterHead}>Type</Text>
+        <View style={d.wrap}>
+          {[["all", "All types"] as [string, string], ...KINDS.map(([v]) => [v, KIND_LABEL[v]] as [string, string])].map(([v, l]) => (
+            <Pressable key={v} accessibilityRole="button" accessibilityState={{ selected: draftKind === v }} onPress={() => setDraftKind(v)} style={[d.chip, draftKind === v && d.chipOn]}>
+              <Text style={[d.chipText, draftKind === v && { color: "#fff" }]}>{l}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <View style={{ flexDirection: "row", gap: 10, marginTop: 6 }}>
+          <View style={{ flex: 1 }}>
+            <Btn title="Cancel" secondary onPress={() => setFiltering(false)} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Btn
+              title="Apply"
+              onPress={() => {
+                setStatus(draftStatus);
+                setKind(draftKind);
+                setFiltering(false);
+              }}
+            />
+          </View>
+        </View>
+      </Sheet>
       <Status loading={list.loading} error={list.error} />
       {!list.loading && rows.length === 0 && (
         <EmptyCard title="No requests" text="Requests to correct your attendance appear here." />
@@ -1609,6 +1668,15 @@ export const d = themed(() => StyleSheet.create({
   rowBetween: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 },
   chip: { paddingVertical: 9, paddingHorizontal: 14, borderRadius: 18, backgroundColor: T.softer, minHeight: 36, justifyContent: "center" },
   chipOn: { backgroundColor: C.red },
+  filterBar: { flexDirection: "row", alignItems: "stretch", gap: 8 },
+  filterPill: { flex: 1, backgroundColor: T.surface, borderRadius: 14, borderWidth: 1, borderColor: T.line, paddingVertical: 8, paddingHorizontal: 12, justifyContent: "center" },
+  filterPillKey: { color: C.muted, fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.6 },
+  filterPillValue: { color: C.ink, fontSize: 14, fontWeight: "700", marginTop: 2 },
+  filterBtn: { width: 50, borderRadius: 14, backgroundColor: C.red, alignItems: "center", justifyContent: "center" },
+  filterDot: { position: "absolute", top: 9, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: "#fff" },
+  filterHead: { color: C.ink, fontSize: 15, fontWeight: "800" },
+  resetPill: { flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 16, backgroundColor: T.softer },
+  resetText: { color: C.red, fontWeight: "700", fontSize: 13 },
   chipText: { color: C.red, fontWeight: "600", fontSize: 13 },
   tag: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 12, alignSelf: "flex-start" },
   tagText: { fontSize: 12, fontWeight: "700" },
