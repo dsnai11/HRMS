@@ -21,6 +21,9 @@ async function world(t) {
   };
   const db = await openPglite();
   await createAdmin(db, { name: "Owner", email: "owner@example.test", password: "Owner-password-123", companyName: "Alpha Ltd" });
+  // Attendance would otherwise count from the real day the test company is created, which
+  // falls after the fixed dates these tests use once that day has passed.
+  await db.prepare("UPDATE companies SET attendance_start_date='2026-01-01'").run();
   const { server, app } = createApp({ db, clock: () => nowMs });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   t.after(() => new Promise((resolve) => {

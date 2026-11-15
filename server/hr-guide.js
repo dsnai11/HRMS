@@ -21,7 +21,7 @@ export const GUIDE = [
       "Administration → Organization: add branches, departments and designations. Add grades, cost centres and business units if you use them.",
       "Administration → Workplaces: add each office with its GPS point and radius (25 to 2,000 m). Punches only count inside a workplace.",
       "Workplaces page: set the shift rules (start time, grace, shift hours, earliest punch-out). Without them the standard 09:30 start, 15 minutes' grace and 9 hours apply.",
-      "Administration → Leave & holidays → Leave types: click “Add standard Indian types”, then change quotas to match your leave policy. Add holidays and set the weekly offs under Calendar & rules.",
+      "Administration → Leave & holidays → Leave types: click “Add company leave types (PL, CL, SL)”. Everyone then gets 2.5 days a month: 1 personal leave, 1 casual leave and half a day of sick leave.. Add holidays and set the weekly offs under Calendar & rules.",
       "Administration → Roles & rights: add the HR roles you need (HR Manager, Payroll Executive, Branch HR and so on) and give them to your team.",
       "Administration → Employees: add people one by one or import a CSV (see “Add or import employees”).",
       "Administration → Payroll → Salary structure: click “Add standard structure”, then enter each person's salary under Salaries.",

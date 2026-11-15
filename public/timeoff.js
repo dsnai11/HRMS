@@ -499,12 +499,12 @@ async function leaveAdminTabHtml(tab) {
   if (tab === "types") {
     const types = await api("/admin/leave-types");
     leaveAdminCache.types = types;
-    return `<div class="card"><div class="card-head"><div><h2>Leave types</h2><p class="muted">Balances accrue per leave year from the year leave was first set up.</p></div><div class="actions"><button class="secondary" id="seed">Add standard Indian types</button><button id="add-type">+ Add leave type</button></div></div>${
+    return `<div class="card"><div class="card-head"><div><h2>Leave types</h2><p class="muted">Balances accrue per leave year from the year leave was first set up.</p></div><div class="actions"><button class="secondary" id="seed">Add company leave types (PL, CL, SL)</button><button id="add-type">+ Add leave type</button></div></div>${
       types.length
         ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Paid</th><th>Yearly quota</th><th>Accrual</th><th>Carry forward</th><th>Status</th><th></th></tr></thead><tbody>${types.map((t) => `<tr><td>${esc(t.name)}<small>${esc(t.code)}${t.applicable_gender ? ` · ${esc(t.applicable_gender)} only` : ""}</small></td><td>${yn(t.paid)}</td><td>${t.unlimited ? "Unlimited" : t.quota_per_year}</td><td>${esc(t.accrual)}</td><td>${t.carry_forward_max || "—"}</td><td><span class="pill ${t.active ? "" : "neutral"}">${t.active ? "Active" : "Inactive"}</span></td><td><button class="secondary" data-edit-type="${t.id}">Edit</button></td></tr>`).join("")}</tbody></table></div>`
         : empty(
             "No leave types",
-            "Add the standard Indian types to start, then adjust them.",
+            "Add the company leave types to start: 1 personal, 1 casual and half a day of sick leave each month.",
           )
     }</div>`;
   }

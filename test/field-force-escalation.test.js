@@ -46,6 +46,9 @@ test("Field Force escalation: WhatsApp messages and buttons, IVR and AI calls, p
   let nowMs = IST("2026-11-09T07:00:00"); // a Monday
   const db = await openPglite();
   await createAdmin(db, { name: "Admin", email: "admin@example.test", password: "Admin-password-123" });
+  // Attendance would otherwise count from the real day the test company is created, which
+  // falls after the fixed dates these tests use once that day has passed.
+  await db.prepare("UPDATE companies SET attendance_start_date='2026-01-01'").run();
   const { server, app } = createApp({ db, clock: () => nowMs });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(

@@ -12,6 +12,9 @@ test("Field Force activation: morning nudge, reminder, reasons and the 12:30 rep
   let nowMs = IST("2026-11-09T07:00:00"); // a Monday
   const db = await openPglite();
   await createAdmin(db, { name: "Admin", email: "admin@example.test", password: "Admin-password-123" });
+  // Attendance would otherwise count from the real day the test company is created, which
+  // falls after the fixed dates these tests use once that day has passed.
+  await db.prepare("UPDATE companies SET attendance_start_date='2026-01-01'").run();
   const { server, app } = createApp({ db, clock: () => nowMs });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(
@@ -212,6 +215,9 @@ test("Field Force is a separate module: FIELD_FORCE=off leaves it out entirely",
   process.env.FIELD_FORCE = "off";
   const db = await openPglite();
   await createAdmin(db, { name: "Admin", email: "admin@example.test", password: "Admin-password-123" });
+  // Attendance would otherwise count from the real day the test company is created, which
+  // falls after the fixed dates these tests use once that day has passed.
+  await db.prepare("UPDATE companies SET attendance_start_date='2026-01-01'").run();
   const { server } = createApp({ db });
   if (before === undefined) delete process.env.FIELD_FORCE;
   else process.env.FIELD_FORCE = before;

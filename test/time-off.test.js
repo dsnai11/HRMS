@@ -216,8 +216,9 @@ test("leave accrues monthly, pro-rates joiners, and carries forward", async (t) 
 
   // October: ten months accrued.
   assert.equal((await balance(w, "a", "CL")).balance, 10);
-  assert.equal((await balance(w, "a", "SL")).balance, 5.83);
-  assert.equal((await balance(w, "a", "EL")).balance, 12.5);
+  // Each month: 1 personal, 1 casual and half a day of sick leave.
+  assert.equal((await balance(w, "a", "SL")).balance, 5);
+  assert.equal((await balance(w, "a", "PL")).balance, 10);
   assert.equal((await balance(w, "a", "LWP")).balance, null, "unlimited");
   assert.equal(
     await balance(w, "a", "ML"),
@@ -227,7 +228,8 @@ test("leave accrues monthly, pro-rates joiners, and carries forward", async (t) 
   assert.equal((await balance(w, "f", "ML")).balance, 182);
   // A joiner on 15 July accrues from July (month 7 of 12).
   assert.equal((await balance(w, "j", "CL")).balance, 4);
-  assert.equal((await balance(w, "j", "EL")).balance, 5);
+  assert.equal((await balance(w, "j", "PL")).balance, 4);
+  assert.equal((await balance(w, "j", "SL")).balance, 2);
   // Repeating changes nothing.
   assert.equal((await balance(w, "a", "CL")).balance, 10);
 
@@ -235,25 +237,25 @@ test("leave accrues monthly, pro-rates joiners, and carries forward", async (t) 
   w.setNow("2026-12-31T10:00:00+05:30");
   for (const [code, total] of [
     ["CL", 12],
-    ["SL", 7],
-    ["EL", 15],
+    ["PL", 12],
+    ["SL", 6],
   ])
     assert.equal((await balance(w, "a", code)).balance, total);
   assert.equal((await balance(w, "j", "CL")).balance, 6);
 
-  // January: earned leave carries forward (up to 30); casual leave lapses.
+  // January: personal leave carries forward (up to 30); casual and sick leave lapse.
   w.setNow("2027-01-15T10:00:00+05:30");
   assert.equal((await balance(w, "a", "CL")).balance, 1);
   assert.equal(
-    (await balance(w, "a", "EL")).balance,
-    16.25,
-    "15 carried + 1.25 accrued",
+    (await balance(w, "a", "PL")).balance,
+    13,
+    "12 carried + 1 accrued",
   );
-  assert.equal((await balance(w, "a", "SL")).balance, 0.58);
+  assert.equal((await balance(w, "a", "SL")).balance, 0.5);
   const ledger = (
     await w.call(`/admin/employees/${w.people.a.id}/leave`, undefined, w.hr)
   ).data.ledger;
-  assert.ok(ledger.some((l) => l.kind === "carry_forward" && l.days === 15));
+  assert.ok(ledger.some((l) => l.kind === "carry_forward" && l.days === 12));
 
   // Bulk accrual and manual adjustment.
   assert.equal(
@@ -302,7 +304,7 @@ test("applying, approving, rejecting and cancelling leave", async (t) => {
     (x) => x.code === "CL",
   ).id;
   const el = (await w.call("/admin/leave-types", undefined, w.hr)).data.find(
-    (x) => x.code === "EL",
+    (x) => x.code === "PL",
   ).id;
   const lwp = (await w.call("/admin/leave-types", undefined, w.hr)).data.find(
     (x) => x.code === "LWP",
