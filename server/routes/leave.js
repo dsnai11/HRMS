@@ -46,10 +46,13 @@ const intList = (v, label, min, max) => {
 };
 
 // Standard Indian leave types, offered as a starting point.
+// The company's standard set: 2.5 days a month in all, credited monthly as 1 personal leave,
+// 1 casual leave and half a day of sick leave. Personal leave carries forward; the rest lapse
+// at the end of the leave year.
 const DEFAULT_TYPES = [
+  { code: "PL", name: "Personal Leave", quota: 12, carry: 30 },
   { code: "CL", name: "Casual Leave", quota: 12, carry: 0 },
-  { code: "SL", name: "Sick Leave", quota: 7, carry: 0 },
-  { code: "EL", name: "Earned Leave", quota: 15, carry: 30 },
+  { code: "SL", name: "Sick Leave", quota: 6, carry: 0 },
   {
     code: "ML",
     name: "Maternity Leave",
