@@ -679,6 +679,8 @@ type QuickTile = { id: string; label: string; glyph: IconName; badge?: number; g
 function QuickLinks({ api, onSection }: { api: Api; onSection: (s: Section) => void }) {
   const [width, setWidth] = useState(0);
   const [pageNo, setPageNo] = useState(0);
+  const pager = useRef<ScrollView>(null);
+  const [held, setHeld] = useState(false);
   // Supervisors and HR get a first page with what is waiting for them.
   const waiting = useLoad(async () => {
     const [team, a, od] = await Promise.all([
@@ -720,18 +722,40 @@ function QuickLinks({ api, onSection }: { api: Api; onSection: (s: Section) => v
       links.map(([id, label, glyph]) => ({ id, label, glyph, go: () => onSection(id) })),
     ]),
   ];
+  // The pages turn on their own every few seconds, and wait while a finger is on them.
+  const pageCount = pages.length;
+  // Each card is a little narrower than the row so the edge of the next one peeks in.
+  const cardW = Math.round(width * 0.9);
+  const step = cardW + 10;
+  useEffect(() => {
+    if (!width || held || pageCount < 2) return;
+    const t = setTimeout(() => {
+      const next = (pageNo + 1) % pageCount;
+      pager.current?.scrollTo({ x: next * step, animated: true });
+      setPageNo(next);
+    }, 4500);
+    return () => clearTimeout(t);
+  }, [width, held, pageNo, pageCount, step]);
   return (
     <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)} style={{ gap: 10 }}>
       <Text style={s.sectionTitle}>Quick links</Text>
       {width > 0 && (
         <ScrollView
+          ref={pager}
           horizontal
-          pagingEnabled
+          snapToInterval={step}
+          decelerationRate="fast"
+          disableIntervalMomentum
+          contentContainerStyle={{ paddingRight: width - cardW }}
           showsHorizontalScrollIndicator={false}
-          onMomentumScrollEnd={(e) => setPageNo(Math.round(e.nativeEvent.contentOffset.x / width))}
+          onScrollBeginDrag={() => setHeld(true)}
+          onMomentumScrollEnd={(e) => {
+            setPageNo(Math.min(pageCount - 1, Math.round(e.nativeEvent.contentOffset.x / step)));
+            setHeld(false);
+          }}
         >
           {pages.map(([group, icon, links]) => (
-            <View key={group} style={[s.card, s.quickPage, { width }]}>
+            <View key={group} style={[s.card, s.quickPage, { width: cardW, marginRight: 10 }]}>
               <View style={s.quickHead}>
                 <View style={s.quickHeadIcon}>
                   <Icon name={icon} size={22} color={T.primaryText} />
@@ -761,7 +785,18 @@ function QuickLinks({ api, onSection }: { api: Api; onSection: (s: Section) => v
       )}
       <View style={s.dots} accessibilityLabel={`Page ${pageNo + 1} of ${pages.length}`}>
         {pages.map(([g], i) => (
-          <View key={g} style={[s.dotPage, i === pageNo && s.dotPageOn]} />
+          <Pressable
+            key={g}
+            accessibilityRole="button"
+            accessibilityLabel={`Show ${g}`}
+            hitSlop={8}
+            onPress={() => {
+              pager.current?.scrollTo({ x: i * step, animated: true });
+              setPageNo(i);
+            }}
+          >
+            <View style={[s.dotPage, i === pageNo && s.dotPageOn]} />
+          </Pressable>
         ))}
       </View>
     </View>

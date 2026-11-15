@@ -22,6 +22,7 @@ import {
 } from "./kit";
 
 import { T, isDark, themed } from "../theme";
+import Animated, { FadeInLeft, FadeInRight, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { Appear, Icon, tick } from "../ui";
 // The day-to-day screens of the phone app: attendance log and summary, regularization,
 // Multiple OD, leave (summary, request, history), holidays and optional holidays. The
@@ -146,8 +147,18 @@ function Segments<T extends string>({
   value: T;
   onChange: (v: T) => void;
 }) {
+  // The red pill glides to the chosen tab instead of jumping.
+  const [w, setW] = useState(0);
+  const idx = Math.max(0, options.findIndex(([v]) => v === value));
+  const pillW = w ? (w - 8 - 4 * (options.length - 1)) / options.length : 0;
+  const x = useSharedValue(0);
+  useEffect(() => {
+    x.value = withTiming(idx * (pillW + 4), { duration: 240 });
+  }, [idx, pillW, x]);
+  const pill = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
   return (
-    <View style={d.segments} accessibilityRole="tablist">
+    <View style={d.segments} accessibilityRole="tablist" onLayout={(e) => setW(e.nativeEvent.layout.width)}>
+      {pillW > 0 && <Animated.View pointerEvents="none" style={[d.segmentPill, { width: pillW }, pill]} />}
       {options.map(([v, l]) => (
         <Pressable
           key={v}
@@ -157,7 +168,7 @@ function Segments<T extends string>({
             if (v !== value) tick();
             onChange(v);
           }}
-          style={[d.segment, value === v && d.segmentOn]}
+          style={[d.segment, value === v && !pillW && d.segmentOn]}
         >
           <Text style={[d.segmentText, value === v && { color: "#fff" }]} numberOfLines={1}>
             {l}
@@ -165,6 +176,20 @@ function Segments<T extends string>({
         </Pressable>
       ))}
     </View>
+  );
+}
+// Tab content slides in from the side the chosen tab lies on.
+function TabBody({ index, children }: { index: number; children: React.ReactNode }) {
+  const [last, setLast] = useState(index);
+  const [dir, setDir] = useState(1);
+  if (index !== last) {
+    setDir(index > last ? 1 : -1);
+    setLast(index);
+  }
+  return (
+    <Animated.View key={index} entering={(dir > 0 ? FadeInRight : FadeInLeft).duration(240)} style={{ gap: 14 }}>
+      {children}
+    </Animated.View>
   );
 }
 function Meter({ pct, color = C.red }: { pct: number; color?: string }) {
@@ -748,6 +773,104 @@ function RequestSheet({
   );
 }
 
+const STATUS_LABEL: Record<string, string> = { all: "All", pending: "Pending", approved: "Approved", rejected: "Rejected" };
+
+// Status (and optionally type) shown as two summary pills; the filter button opens a sheet
+// that edits a draft, and the list changes only on Apply.
+function FilterBar({
+  title,
+  status,
+  kind,
+  kinds,
+  onApply,
+}: {
+  title: string;
+  status: string;
+  kind?: string;
+  kinds?: [string, string][];
+  onApply: (status: string, kind?: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draftStatus, setDraftStatus] = useState(status);
+  const [draftKind, setDraftKind] = useState(kind ?? "all");
+  const show = () => {
+    setDraftStatus(status);
+    setDraftKind(kind ?? "all");
+    setOpen(true);
+  };
+  const kindLabel = kinds?.find(([v]) => v === kind)?.[1];
+  const filtered = status !== "all" || (kind !== undefined && kind !== "all");
+  return (
+    <>
+      <View style={d.filterBar}>
+        <Pressable accessibilityRole="button" onPress={show} style={d.filterPill}>
+          <Text style={d.filterPillKey}>Status</Text>
+          <Text style={d.filterPillValue} numberOfLines={1}>{STATUS_LABEL[status]}</Text>
+        </Pressable>
+        {kinds && (
+          <Pressable accessibilityRole="button" onPress={show} style={[d.filterPill, { flex: 1.4 }]}>
+            <Text style={d.filterPillKey}>Type</Text>
+            <Text style={d.filterPillValue} numberOfLines={1}>{kindLabel}</Text>
+          </Pressable>
+        )}
+        <Pressable accessibilityRole="button" accessibilityLabel={title} onPress={show} style={d.filterBtn}>
+          <Icon name="options-outline" size={20} color="#fff" />
+          {filtered && <View style={d.filterDot} />}
+        </Pressable>
+      </View>
+      <Sheet visible={open} title={title} onClose={() => setOpen(false)}>
+        <View style={d.rowBetween}>
+          <Text style={d.filterHead}>Status</Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              setDraftStatus("all");
+              setDraftKind("all");
+            }}
+            style={d.resetPill}
+          >
+            <Icon name="refresh" size={14} color={C.red} />
+            <Text style={d.resetText}>Reset</Text>
+          </Pressable>
+        </View>
+        <View style={d.wrap}>
+          {Object.entries(STATUS_LABEL).map(([v, l]) => (
+            <Pressable key={v} accessibilityRole="button" accessibilityState={{ selected: draftStatus === v }} onPress={() => setDraftStatus(v)} style={[d.chip, draftStatus === v && d.chipOn]}>
+              <Text style={[d.chipText, draftStatus === v && { color: "#fff" }]}>{l}</Text>
+            </Pressable>
+          ))}
+        </View>
+        {kinds && (
+          <>
+            <Text style={d.filterHead}>Type</Text>
+            <View style={d.wrap}>
+              {kinds.map(([v, l]) => (
+                <Pressable key={v} accessibilityRole="button" accessibilityState={{ selected: draftKind === v }} onPress={() => setDraftKind(v)} style={[d.chip, draftKind === v && d.chipOn]}>
+                  <Text style={[d.chipText, draftKind === v && { color: "#fff" }]}>{l}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </>
+        )}
+        <View style={{ flexDirection: "row", gap: 10, marginTop: 6 }}>
+          <View style={{ flex: 1 }}>
+            <Btn title="Cancel" secondary onPress={() => setOpen(false)} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Btn
+              title="Apply"
+              onPress={() => {
+                onApply(draftStatus, kinds ? draftKind : undefined);
+                setOpen(false);
+              }}
+            />
+          </View>
+        </View>
+      </Sheet>
+    </>
+  );
+}
+
 export function RegularizationScreen({ api }: { api: Api }) {
   const list = useLoad(() => api<Correction[]>("/regularizations"));
   const [status, setStatus] = useState("all");
@@ -762,18 +885,16 @@ export function RegularizationScreen({ api }: { api: Api }) {
   return (
     <>
       <Btn title="+ New request" onPress={() => setAdding(true)} />
-      <Segments
-        options={[["all", "All"], ["pending", "Pending"], ["approved", "Approved"], ["rejected", "Rejected"]]}
-        value={status}
-        onChange={setStatus}
+      <FilterBar
+        title="Filter requests"
+        status={status}
+        kind={kind}
+        kinds={[["all", "All types"] as [string, string], ...KINDS.map(([v]) => [v, KIND_LABEL[v]] as [string, string])]}
+        onApply={(st, k) => {
+          setStatus(st);
+          setKind(k ?? "all");
+        }}
       />
-      <View style={d.wrap}>
-        {[["all", "All types"] as [string, string], ...KINDS.map(([v]) => [v, KIND_LABEL[v]] as [string, string])].map(([v, l]) => (
-          <Pressable key={v} onPress={() => setKind(v)} style={[d.chip, kind === v && d.chipOn]}>
-            <Text style={[d.chipText, kind === v && { color: "#fff" }]}>{l}</Text>
-          </Pressable>
-        ))}
-      </View>
       <Status loading={list.loading} error={list.error} />
       {!list.loading && rows.length === 0 && (
         <EmptyCard title="No requests" text="Requests to correct your attendance appear here." />
@@ -1059,6 +1180,7 @@ export function LeaveHub({ api }: { api: Api }) {
         value={tab}
         onChange={setTab}
       />
+      <TabBody index={["summary", "request", "history"].indexOf(tab)}>
       {tab === "summary" && <LeaveSummary bal={bal} />}
       {tab === "request" && (
         <LeaveRequestForm
@@ -1081,6 +1203,7 @@ export function LeaveHub({ api }: { api: Api }) {
           }}
         />
       )}
+      </TabBody>
     </>
   );
 }
@@ -1268,11 +1391,7 @@ function LeaveHistory({
   const rows = (reqs.data ?? []).filter((r) => status === "all" || r.status === status);
   return (
     <>
-      <Segments
-        options={[["all", "All"], ["pending", "Pending"], ["approved", "Approved"], ["rejected", "Rejected"]]}
-        value={status}
-        onChange={setStatus}
-      />
+      <FilterBar title="Filter leave" status={status} onApply={(st) => setStatus(st)} />
       <Status loading={reqs.loading} error={reqs.error} />
       {!reqs.loading && rows.length === 0 && <EmptyCard title="No leave requests" text="Requests you send appear here." />}
       {rows.map((r, i) => {
@@ -1609,12 +1728,22 @@ export const d = themed(() => StyleSheet.create({
   rowBetween: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 },
   chip: { paddingVertical: 9, paddingHorizontal: 14, borderRadius: 18, backgroundColor: T.softer, minHeight: 36, justifyContent: "center" },
   chipOn: { backgroundColor: C.red },
+  filterBar: { flexDirection: "row", alignItems: "stretch", gap: 8 },
+  filterPill: { flex: 1, backgroundColor: T.surface, borderRadius: 14, borderWidth: 1, borderColor: T.line, paddingVertical: 8, paddingHorizontal: 12, justifyContent: "center" },
+  filterPillKey: { color: C.muted, fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.6 },
+  filterPillValue: { color: C.ink, fontSize: 14, fontWeight: "700", marginTop: 2 },
+  filterBtn: { width: 50, borderRadius: 14, backgroundColor: C.red, alignItems: "center", justifyContent: "center" },
+  filterDot: { position: "absolute", top: 9, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: "#fff" },
+  filterHead: { color: C.ink, fontSize: 15, fontWeight: "800" },
+  resetPill: { flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 16, backgroundColor: T.softer },
+  resetText: { color: C.red, fontWeight: "700", fontSize: 13 },
   chipText: { color: C.red, fontWeight: "600", fontSize: 13 },
   tag: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 12, alignSelf: "flex-start" },
   tagText: { fontSize: 12, fontWeight: "700" },
   segments: { flexDirection: "row", backgroundColor: T.surface, borderRadius: 14, borderWidth: 1, borderColor: C.line, padding: 4, gap: 4 },
   segment: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center", minHeight: 40, justifyContent: "center" },
   segmentOn: { backgroundColor: C.red },
+  segmentPill: { position: "absolute", top: 4, bottom: 4, left: 4, borderRadius: 10, backgroundColor: C.red },
   segmentText: { color: C.ink, fontWeight: "600", fontSize: 13 },
   meter: { height: 8, borderRadius: 4, backgroundColor: T.fill, overflow: "hidden" },
   meterFill: { height: 8, borderRadius: 4 },
