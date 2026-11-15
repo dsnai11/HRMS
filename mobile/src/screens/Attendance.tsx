@@ -43,7 +43,7 @@ import {
 } from "../biometric";
 import { T, applyBrand, brand, isDark, restoreBrand, restoreTheme, themed, useBrandVersion } from "../theme";
 import { Avatar, Icon, type IconName, failure, success, tick } from "../ui";
-import Animated, { FadeIn, FadeInDown, SlideInLeft, ZoomIn } from "react-native-reanimated";
+import Animated, { FadeInDown, ZoomIn, useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 type User = {
   id: number;
   name: string;
@@ -66,6 +66,12 @@ type Shift = {
   source?: string;
   od_purpose?: string | null;
 };
+const TABS = [
+  ["Home", "home", "Home"],
+  ["Profile", "person", "Profile"],
+  ["OD", "briefcase", "OD"],
+  ["My Attendance", "time", "Att Log"],
+] as const;
 type Profile = {
   user: User;
   company?: {
@@ -221,9 +227,31 @@ export default function Attendance() {
     [timezone, setTimezone] = useState("Asia/Kolkata");
   // Which screen the menu has open: the punch screen, or one of More's sections.
   const [view, setView] = useState<Section | "Punch">("Home"),
-    [menuOpen, setMenuOpen] = useState(false),
+    [menuOpen, setMenuOpenNow] = useState(false),
+    [menuClosing, setMenuClosing] = useState(false),
     [menuGroup, setMenuGroup] = useState<string | null | undefined>(undefined),
     [counts, setCounts] = useState({ alerts: 0, messages: 0 });
+  // The menu slides in from the left over a dimming page, and slides back out when it
+  // closes; the window stays up until the slide-out has finished.
+  const menuX = useSharedValue(-340),
+    menuShade = useSharedValue(0);
+  const setMenuOpen = (open: boolean) => {
+    if (open) {
+      setMenuClosing(false);
+      setMenuOpenNow(true);
+      menuX.value = withTiming(0, { duration: 280 });
+      menuShade.value = withTiming(1, { duration: 220 });
+      return;
+    }
+    if (!menuOpen) return;
+    setMenuOpenNow(false);
+    setMenuClosing(true);
+    menuX.value = withTiming(-340, { duration: 220 });
+    menuShade.value = withTiming(0, { duration: 220 });
+    setTimeout(() => setMenuClosing(false), 230);
+  };
+  const menuPanel = useAnimatedStyle(() => ({ transform: [{ translateX: menuX.value }] }));
+  const menuDim = useAnimatedStyle(() => ({ opacity: menuShade.value }));
   // Fingerprint / face unlock: offered only on phones that have it set up.
   const [bio, setBio] = useState<{ available: boolean; on: boolean }>({
     available: false,
@@ -779,6 +807,16 @@ export default function Attendance() {
     tick();
     setMenuGroup(shownGroup === group ? null : group);
   };
+  // The raised red circle glides along the bar to the chosen tab.
+  const [tabBarW, setTabBarW] = useState(0);
+  const tabIndex = TABS.findIndex(([id]) => id === view);
+  const tabX = useSharedValue(0);
+  useEffect(() => {
+    if (tabIndex < 0 || !tabBarW) return;
+    const itemW = (tabBarW - 16) / TABS.length;
+    tabX.value = withSpring(8 + tabIndex * itemW + itemW / 2 - 27, { damping: 18, stiffness: 180 });
+  }, [tabIndex, tabBarW, tabX]);
+  const tabCircle = useAnimatedStyle(() => ({ transform: [{ translateX: tabX.value }] }));
   const goTo = (id: Section | "Punch") => {
     setView(id);
     setMenuGroup(undefined);
@@ -842,15 +880,15 @@ export default function Attendance() {
         </View>
       )}
       <Modal
-        visible={menuOpen && employeeView}
+        visible={(menuOpen || menuClosing) && employeeView}
         transparent
         animationType="none"
         onRequestClose={() => setMenuOpen(false)}
       >
         <View style={s.menuWrap}>
           {/* The page dims while the menu slides in from the left edge. */}
-          <Animated.View entering={FadeIn.duration(220)} style={s.menuShade} pointerEvents="none" />
-          <Animated.View entering={SlideInLeft.duration(280)} style={s.menu}>
+          <Animated.View style={[s.menuShade, menuDim]} pointerEvents="none" />
+          <Animated.View style={[s.menu, menuPanel]}>
             <ScrollView>
               {profile && (
                 <View style={[s.menuUser, { paddingTop: insets.top + 10 }]}>
@@ -858,13 +896,25 @@ export default function Attendance() {
                   <View style={s.menuAvatarRing}>
                     <Avatar name={profile.user.name} uri={photoUri} headers={imgHeaders} size={64} />
                   </View>
-                  <Text style={s.menuName}>{profile.user.name}</Text>
-                  {!!profile.user.email && (
-                    <Text style={s.menuSub}>{profile.user.email}</Text>
-                  )}
-                  {!!profile.user.designation && (
-                    <Text style={s.menuSub}>{profile.user.designation}</Text>
-                  )}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Open my profile"
+                    onPress={() => goTo("Profile")}
+                    style={({ pressed }) => [s.menuUserCard, pressed && { opacity: 0.8 }]}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.menuName} numberOfLines={1}>{profile.user.name}</Text>
+                      {!!profile.user.email && (
+                        <Text style={s.menuSub} numberOfLines={1}>{profile.user.email}</Text>
+                      )}
+                      {!!profile.user.designation && (
+                        <Text style={s.menuSub} numberOfLines={1}>{profile.user.designation}</Text>
+                      )}
+                    </View>
+                    <View style={s.menuUserGo}>
+                      <Icon name="chevron-forward" size={16} color="#fff" />
+                    </View>
+                  </Pressable>
                 </View>
               )}
               {MENU.map(([group, items]) => {
@@ -1418,15 +1468,12 @@ export default function Attendance() {
         </ScrollView>
       </KeyboardAvoidingView>
       {employeeView && (
-        <View style={[s.tabBar, { paddingBottom: insets.bottom + 6 }]}>
-          {(
-            [
-              ["Home", "home", "Home"],
-              ["Profile", "person", "Profile"],
-              ["OD", "briefcase", "OD"],
-              ["My Attendance", "time", "Att Log"],
-            ] as const
-          ).map(([id, icon, label]) => (
+        <View
+          style={[s.tabBar, { paddingBottom: insets.bottom + 6 }]}
+          onLayout={(e) => setTabBarW(e.nativeEvent.layout.width)}
+        >
+          {tabIndex >= 0 && tabBarW > 0 && <Animated.View pointerEvents="none" style={[s.tabCircle, tabCircle]} />}
+          {TABS.map(([id, icon, label]) => (
             <Pressable
               key={id}
               accessibilityRole="tab"
@@ -1652,6 +1699,23 @@ const s = themed(() => StyleSheet.create({
     justifyContent: "center",
   },
   eyeText: { color: T.primary, fontSize: 14, fontWeight: "700" },
+  menuUserCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 8,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.12)",
+  },
+  menuUserGo: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.18)",
+  },
   menuUser: {
     backgroundColor: T.primaryDeeper,
     paddingTop: 48,
@@ -1733,6 +1797,15 @@ const s = themed(() => StyleSheet.create({
     height: 54,
     borderRadius: 27,
     marginTop: -26,
+  },
+  // Drawn once under the tab icons and moved to the chosen tab.
+  tabCircle: {
+    position: "absolute",
+    top: -14,
+    left: 0,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     backgroundColor: T.primary,
     borderWidth: 4,
     borderColor: T.surface,
