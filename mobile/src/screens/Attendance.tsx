@@ -34,6 +34,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import * as Notifications from "expo-notifications";
 import More, { MENU, type Section } from "./More";
+import TransferAck from "./TransferAck";
 import {
   SESSION_KEY,
   biometricAvailable,
@@ -841,6 +842,7 @@ export default function Attendance() {
           </View>
         </View>
       </Modal>
+      {employeeView && profile && <TransferAck api={moreApi} />}
       {employeeView && profile && (
         <View style={s.topbar}>
           <Pressable

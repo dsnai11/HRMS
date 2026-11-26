@@ -22,6 +22,7 @@ import { registerPayrollRuns } from "./routes/payroll-runs.js";
 import { registerPayrollExtras } from "./routes/payroll-extras.js";
 import { registerRecruitment } from "./routes/recruitment.js";
 import { registerExit } from "./routes/exit.js";
+import { registerAlumni, scheduleFnfMails } from "./routes/alumni.js";
 import { registerDocuments } from "./routes/documents.js";
 import { registerPerformance } from "./routes/performance.js";
 import { registerShiftPolicies } from "./routes/shift-policies.js";
@@ -35,6 +36,8 @@ import { registerInsights } from "./routes/insights.js";
 import { registerRoles } from "./routes/roles.js";
 import { registerHome } from "./routes/home.js";
 import { scheduleApprovalReminders } from "./approval-chain.js";
+import { scheduleTicketEscalation } from "./ticket-escalation.js";
+import { scheduleNoPunchMails } from "./no-punch-mail.js";
 import { registerFeedbackRounds } from "./routes/feedback-rounds.js";
 import { registerForm16 } from "./routes/form16.js";
 import { registerEmployeeDetails } from "./routes/employee-details.js";
@@ -146,6 +149,8 @@ const STATIC = {
   "/letter.html": ["letter.html", "text/html"],
   "/letter.js": ["letter.js", "text/javascript"],
   "/verify.html": ["verify.html", "text/html"],
+  "/alumni.html": ["alumni.html", "text/html"],
+  "/alumni.js": ["alumni.js", "text/javascript"],
   "/verify.js": ["verify.js", "text/javascript"],
   "/payslip.html": ["payslip.html", "text/html"],
   "/payslip.js": ["payslip.js", "text/javascript"],
@@ -163,6 +168,17 @@ const STATIC = {
 };
 
 const TWO_FACTOR_SETUP = new Set(["/api/me", "/api/2fa", "/api/2fa/setup", "/api/2fa/enable", "/api/logout", "/api/password"]);
+
+// The employee an activity-log entry is about, when the entry names one.
+function auditSubject(action, detail) {
+  const n = (v) => (typeof v === "number" || typeof v === "string") && Number.isInteger(Number(v)) && Number(v) > 0 ? Number(v) : null;
+  if (!detail || typeof detail !== "object") return null;
+  return (
+    n(detail.employeeId) ??
+    n(detail.userId) ??
+    (["employee_created", "employee_updated"].includes(action) ? n(detail.id) : null)
+  );
+}
 
 export function createApp({
   db,
@@ -211,7 +227,7 @@ export function createApp({
     audit: (actor, action, detail, companyId = actor?.company_id ?? null) =>
       db
         .prepare(
-          "INSERT INTO audit(actor_id,action,detail,created_at,company_id) VALUES(?,?,?,?,?)",
+          "INSERT INTO audit(actor_id,action,detail,created_at,company_id,subject_id) VALUES(?,?,?,?,?,?)",
         )
         .run(
           actor?.id ?? null,
@@ -219,6 +235,7 @@ export function createApp({
           JSON.stringify(detail),
           new Date(clock()).toISOString(),
           companyId,
+          auditSubject(action, detail),
         ),
   };
   app.notify = createNotifier(app);
@@ -274,6 +291,7 @@ export function createApp({
     registerProbation,
     registerLearning,
     registerExit,
+    registerAlumni,
     registerEngagement,
     registerSecurity,
     registerPeople,
@@ -545,6 +563,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   scheduleFieldForce(app);
   scheduleSalaryAllocation(app);
   scheduleTeamAttendanceMails(app);
+  scheduleTicketEscalation(app);
+  scheduleFnfMails(app);
+  scheduleNoPunchMails(app);
   server.listen(Number(process.env.PORT) || 3000, "0.0.0.0", () =>
     console.log(`HRMS listening on port ${process.env.PORT || 3000}`),
   );

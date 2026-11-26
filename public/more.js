@@ -8,6 +8,10 @@ const DOC_KIND = {
   bank: "Bank proof",
   offer_letter: "Offer letter",
   medical: "Medical",
+  form16: "Form 16",
+  photo: "Photo",
+  esi_card: "ESI card (e-Pehchan)",
+  hr_document: "HR document (letter, certificate…)",
   other: "Other",
 };
 const REVIEW_STATUS = {
@@ -98,13 +102,14 @@ async function documentsPage(id) {
       "Your identity, address and other documents kept with HR.",
       '<button id="add-doc">Add a document</button>',
     ) +
-    `<div class="card"><h2>My documents</h2><div id="mine">${docTable(mine, { canVerify: false, canDelete: (d) => !d.verified_at })}</div></div>` +
+    `<div class="card"><h2>My documents</h2><div id="mine">${docTable(mine, { canVerify: false, canDelete: (d) => !d.verified_at && !["esi_card", "hr_document", "form16", "offer_letter"].includes(d.kind) })}</div></div>` +
     (manage
       ? '<div class="card"><h2>Employee documents</h2><div class="actions spaced"><select id="who"></select><button class="secondary" id="load-who">Show</button><button class="ghost" id="missing">Who is missing documents</button></div><div id="theirs"></div></div>'
       : "");
   document.querySelector("#add-doc").onclick = () => uploadDialog(undefined);
   wireDocs(document.querySelector("#mine"), () => render());
   await lettersCard(id);
+  await hrDocumentsCard(id);
   if (!manage) return;
   const people = (await api("/admin/employees?limit=200&active=1")).items;
   document.querySelector("#who").innerHTML = people

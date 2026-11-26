@@ -261,14 +261,18 @@ export function registerPeoplePlus(router, app) {
   router.get("/api/org-chart", async ({ user, send }) => {
     const rows = await db
       .prepare(
-        `SELECT u.id,u.name,u.manager_id,u.employee_code,g.name designation,d.name department
+        `SELECT u.id,u.name,u.manager_id,u.employee_code,u.department_id,g.name designation,d.name department
          FROM users u LEFT JOIN designations g ON g.id=u.designation_id LEFT JOIN departments d ON d.id=u.department_id
          WHERE u.company_id=? AND u.active=1 AND u.role<>'super_admin' ORDER BY u.name LIMIT 5000`,
       )
       .all(user.company_id);
     const ids = new Set(rows.map((r) => r.id));
+    const departments = await db
+      .prepare("SELECT id,name,head_id FROM departments WHERE company_id=? ORDER BY name")
+      .all(user.company_id);
     return send(200, {
       me: user.id,
+      departments: departments.map((d) => ({ ...d, head_id: ids.has(d.head_id) ? d.head_id : null })),
       people: rows.map((r) => ({
         ...r,
         manager_id: ids.has(r.manager_id) ? r.manager_id : null,

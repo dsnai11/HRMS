@@ -172,7 +172,7 @@ async function hiringTabHtml(tab) {
   }
   if (tab === "changes") return await changesHtml();
   const rows = await api("/admin/exits");
-  return `${await separationAdminHtml()}<div class="card"><div class="card-head"><div><h2>Exits</h2><p class="muted">Resignations and exits, with clearance and full and final settlement.</p></div><button id="new-exit">Start an exit</button></div>${
+  return `${await separationAdminHtml()}<div class="card"><div class="card-head"><div><h2>Exits</h2><p class="muted">Resignations and exits, with clearance and full and final settlement.</p></div><div class="actions"><button class="secondary" id="exit-settings">Settings</button><button id="new-exit">Start an exit</button></div></div>${
     rows.length
       ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th>Notice given</th><th>Last day</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((x) => `<tr><td>${esc(x.employee_name)}<small>${esc(x.employee_code || "")} · ${esc(x.department_name || "")}</small></td><td>${EXIT_KIND[x.kind]}</td><td>${fmtDate(x.notice_given_on)}</td><td>${x.last_working_day ? fmtDate(x.last_working_day) : "—"}</td><td><span class="pill ${["rejected", "withdrawn", "completed"].includes(x.status) ? "neutral" : ""}">${EXIT_STATUS[x.status]}</span></td><td><button class="secondary" data-exit="${x.id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
       : empty(
@@ -283,6 +283,7 @@ async function hiringWire(tab) {
     changesWire();
   } else {
     on("#new-exit", startExitDialog);
+    on("#exit-settings", exitSettingsDialog);
     each("[data-exit]", (b) => exitView(Number(b.dataset.exit)));
     separationAdminWire();
   }
@@ -338,8 +339,46 @@ async function candidateDialogNew(openingId) {
   );
 }
 
+// Ex-employee check: who they matched, how they left, and the HR decision so far.
+const EXIT_KIND_SHORT = { resignation: "Resigned", termination: "Terminated", retirement: "Retired", end_of_contract: "Contract ended", other: "Left" };
+function exEmployeeHtml(x) {
+  if (!x || (!x.matches.length && !x.status)) return "";
+  const m = x.matches[0];
+  const who = m
+    ? `<strong>${esc(m.name)}</strong>${m.employee_code ? ` (${esc(m.employee_code)})` : ""} · ${EXIT_KIND_SHORT[m.exit_kind] || "Left"}${m.left ? ` ${fmtDate(m.left)}` : ""}${m.reason ? ` · ${esc(m.reason)}` : ""}${m.would_rejoin == null ? "" : m.would_rejoin ? " · said they would rejoin" : " · said they would not rejoin"} <small>(matched on ${esc(m.matched_on.join(", "))})</small>${x.matches.length > 1 ? ` <small>and ${x.matches.length - 1} more</small>` : ""}`
+    : "";
+  if (x.status === "hold")
+    return `<div class="callout warn"><strong>On hold: ex-employee</strong><p>${who}</p><p class="muted">Check their old records, then accept to continue hiring or reject to close the profile.</p><div class="actions"><button id="rehire-accept">Accept</button> <button class="ghost" id="rehire-reject">Reject</button></div></div>`;
+  if (x.status === "rejected") return `<p><span class="pill danger">Ex-employee: rejected</span> ${who}</p>`;
+  if (x.status) return `<p><span class="pill">Ex-employee: rehire ${x.status === "accepted" ? "accepted" : "confirmed"}</span> ${who}</p>`;
+  return `<div class="callout warn"><strong>This is an ex-employee</strong><p>${who}</p></div>`;
+}
+function exEmployeePop(id, x, reopen) {
+  const host = document.querySelector("dialog[open]");
+  if (!host || !x.matches.length || x.status) return;
+  const m = x.matches[0];
+  const pop = document.createElement("div");
+  pop.className = "rehire-pop";
+  pop.setAttribute("role", "alertdialog");
+  pop.innerHTML = `<div class="rehire-box"><h2>Ex-employee</h2><p><strong>${esc(m.name)}</strong>${m.employee_code ? ` (${esc(m.employee_code)})` : ""} worked here${m.joined ? ` from ${fmtDate(m.joined)}` : ""}${m.left ? ` to ${fmtDate(m.left)}` : ""}${m.exit_kind ? ` · ${EXIT_KIND_SHORT[m.exit_kind]}` : ""}.</p><p class="muted">Matched on ${esc(m.matched_on.join(", "))}. Check your records. Continue with this candidate?</p><div class="actions"><button id="rehire-yes">Yes, continue</button> <button class="secondary" id="rehire-no">No, put on hold</button></div></div>`;
+  host.append(pop);
+  const decide = (decision) => async () => {
+    try {
+      await api(`/admin/candidates/${id}/ex-employee`, { decision });
+      notice(decision === "continue" ? "Noted. You can carry on." : "Profile put on hold.");
+      pop.remove();
+      await reopen();
+      render();
+    } catch (e) {
+      notice(e.message, true);
+    }
+  };
+  pop.querySelector("#rehire-yes").onclick = decide("continue");
+  pop.querySelector("#rehire-no").onclick = decide("hold");
+}
 async function candidateView(id) {
   const c = await api(`/admin/candidates/${id}`);
+  const ex = c.user_id ? null : await api(`/admin/candidates/${id}/ex-employee`).catch(() => null);
   const live = ["applied", "screening", "interview", "offer"].includes(c.stage);
   const offer = c.offers.find((o) =>
     ["draft", "sent", "accepted"].includes(o.status),
@@ -352,7 +391,7 @@ async function candidateView(id) {
     !c.user_id && c.offers.some((o) => ["sent", "accepted"].includes(o.status))
       ? await api(`/admin/candidates/${id}/preboarding`)
       : null;
-  const html = `<p class="muted">${esc(c.email || "")} ${esc(c.phone || "")} · ${esc(c.opening_title || "No opening")} · ${stagePill(c.stage)}${c.user_id ? " · now an employee" : ""}</p>${matchPill(c)} ${c.qualification ? `<small>${esc(c.qualification)}</small>` : ""} ${c.experience_years != null ? `<small>${c.experience_years} yrs experience</small>` : ""}${JSON.parse(c.skills || "[]").length ? `<p><strong>Skills:</strong> ${JSON.parse(c.skills).map(esc).join(", ")}</p>` : ""}${files.map((f) => `<button class="ghost" data-cfile="${f.id}">View ${esc(f.name)}</button>`).join(" ")} <button class="ghost" id="edit-skills">Edit skills</button>${c.notes ? `<p>${esc(c.notes)}</p>` : ""}${c.resume_url ? `<p><a href="${esc(c.resume_url)}" target="_blank" rel="noopener noreferrer">Resume</a></p>` : ""}
+  const html = `<p class="muted">${esc(c.email || "")} ${esc(c.phone || "")} · ${esc(c.opening_title || "No opening")} · ${stagePill(c.stage)}${c.user_id ? " · now an employee" : ""}</p>${exEmployeeHtml(ex)}${matchPill(c)} ${c.qualification ? `<small>${esc(c.qualification)}</small>` : ""} ${c.experience_years != null ? `<small>${c.experience_years} yrs experience</small>` : ""}${JSON.parse(c.skills || "[]").length ? `<p><strong>Skills:</strong> ${JSON.parse(c.skills).map(esc).join(", ")}</p>` : ""}${files.map((f) => `<button class="ghost" data-cfile="${f.id}">View ${esc(f.name)}</button>`).join(" ")} <button class="ghost" id="edit-skills">Edit skills</button>${c.notes ? `<p>${esc(c.notes)}</p>` : ""}${c.resume_url ? `<p><a href="${esc(c.resume_url)}" target="_blank" rel="noopener noreferrer">Resume</a></p>` : ""}
     ${
       live
         ? `<div class="actions spaced">${["applied", "screening", "interview"]
@@ -373,6 +412,21 @@ async function candidateView(id) {
     <h3>History</h3>${c.events.map((e) => `<div class="activity"><small>${time(e.created_at)} · ${esc(e.kind.replaceAll("_", " "))}${e.detail ? ` · ${esc(e.detail)}` : ""}${e.actor_name ? ` · ${esc(e.actor_name)}` : ""}</small></div>`).join("")}`;
   viewDialog(c.name, html);
   const reopen = () => candidateView(id);
+  if (ex) {
+    exEmployeePop(id, ex, reopen);
+    for (const [sel, decision] of [["#rehire-accept", "accept"], ["#rehire-reject", "reject"]])
+      document.querySelector(`dialog ${sel}`)?.addEventListener("click", async () => {
+        if (decision === "reject" && !confirm("Reject this profile? It will be closed.")) return;
+        try {
+          await api(`/admin/candidates/${id}/ex-employee`, { decision });
+          notice(decision === "accept" ? "Accepted. Hiring can continue." : "Profile rejected.");
+          await reopen();
+          render();
+        } catch (e) {
+          notice(e.message, true);
+        }
+      });
+  }
   const on = (s, fn) =>
     document.querySelector(`dialog ${s}`)?.addEventListener("click", fn);
   document.querySelectorAll("dialog [data-move]").forEach(
@@ -755,8 +809,46 @@ function exitExtrasHtml(x) {
       : ""
   }`;
 }
+// Exit settings: when the settlement statement is mailed, how long the documents link works,
+// and which documents ex-employees get by default.
+async function exitSettingsDialog() {
+  const st = await api("/admin/exit-settings");
+  dialog(
+    "Exit settings",
+    `${input("fnf_mail_days", "Mail the settlement statement this many days after the last working day", st.fnf_mail_days, 'type="number" min="1" max="365" required')}${input("alumni_link_days", "The ex-employee's documents link works for (days)", st.alumni_link_days, 'type="number" min="1" max="730" required')}<p class="full muted">Documents ex-employees can download by default. You can change this for each exit.</p><div class="full">${Object.entries(st.choices)
+      .map(([k, label]) => `<label class="check"><input type="checkbox" name="doc_${k}" ${st.alumni_default_docs.includes(k) ? "checked" : ""}> ${esc(label)}</label>`)
+      .join("")}</div>`,
+    async (b) => {
+      await api(
+        "/admin/exit-settings",
+        {
+          fnf_mail_days: Number(b.fnf_mail_days),
+          alumni_link_days: Number(b.alumni_link_days),
+          alumni_default_docs: Object.keys(st.choices).filter((k) => document.querySelector(`dialog [name="doc_${k}"]`)?.checked),
+        },
+        "PUT",
+      );
+      notice("Exit settings saved.");
+    },
+  );
+}
 async function exitView(id) {
   const x = await api(`/admin/exits/${id}`);
+  const team =
+    x.status === "accepted" && has("employees.read")
+      ? await api(`/admin/employees/${x.user_id}/team`).catch(() => null)
+      : null;
+  const alumni =
+    ["accepted", "completed"].includes(x.status) ? await api(`/admin/exits/${id}/alumni`).catch(() => null) : null;
+  const alumniHtml = alumni
+    ? `<h3>Ex-employee access</h3><p class="muted">After the exit, ${esc(x.employee_name)} gets a private link that shows only the documents ticked here. Nothing else in the HRMS is visible to them.${alumni.custom ? "" : " (Company default; change it under Exits → Settings.)"}</p><div class="alumni-docs">${Object.entries(alumni.choices)
+        .map(([k, label]) => `<label class="check"><input type="checkbox" data-alumni-doc="${k}" ${alumni.docs.includes(k) ? "checked" : ""}> ${esc(label)}</label>`)
+        .join("")}</div><div class="actions"><button class="secondary" id="alumni-save">Save documents</button>${x.status === "completed" ? `<button id="alumni-link">${alumni.link_active ? "Send a new link" : "Send the link"}</button>` : ""}</div><p class="muted">${alumni.link_active ? `Link works until ${fmtDate(alumni.link_expires_at.slice(0, 10))}. ` : ""}${alumni.fnf_mailed_at ? `Settlement statement mailed ${fmtDate(alumni.fnf_mailed_at.slice(0, 10))}.` : x.status === "completed" ? "The settlement statement is mailed automatically after the days set under Settings." : ""}</p>`
+    : "";
+  const teamHtml =
+    team && (team.people.length || team.departments.length)
+      ? `<h3>Team handover</h3><p class="muted">${esc(x.employee_name)} has ${team.people.length} direct ${team.people.length === 1 ? "report" : "reports"}${team.departments.length ? ` and heads ${esc(team.departments.join(", "))}` : ""}: ${team.people.slice(0, 12).map((p) => esc(p.name)).join(", ")}${team.people.length > 12 ? "…" : ""}. When the exit is completed they move to the person below, or to ${team.manager ? esc(team.manager.name) : "nobody"} (their manager) if left empty.</p><label>New manager's employee code<input id="team-to" maxlength="30" autocomplete="off" placeholder="${esc(team.manager?.employee_code || "")}"></label>`
+      : "";
   const canPay = has("payroll.manage");
   let preview = null;
   if (x.status === "accepted" && !x.settlement && has("payroll.read"))
@@ -769,12 +861,34 @@ async function exitView(id) {
   ${x.status === "pending" ? '<div class="actions"><button id="accept">Accept…</button> <button class="ghost" id="decline">Do not accept</button></div>' : ""}
   ${x.status === "accepted" ? `<h3>Clearance</h3>${x.clearance.map((c) => `<label class="check"><input type="checkbox" data-clear="${c.id}" ${c.cleared ? "checked" : ""}> ${esc(c.item)} <small>${esc(c.department)}</small></label>`).join("")}` : ""}
   ${x.status === "accepted" ? `<h3>Full and final settlement</h3>${x.settlement ? `<p class="muted">Posted to the ${monthLabel(x.settlement.pay_in_month)} payroll, where tax and net pay are worked out.</p>${x.settlement.data.lines.map(money).join("")}${x.settlement.data.info.map((i) => `<p class="muted">${esc(i)}</p>`).join("")}${canPay ? '<div class="actions"><button class="ghost" id="void-settle">Void and redo</button></div>' : ""}` : preview ? `${preview.lines.map(money).join("") || '<p class="muted">No earnings or recoveries calculated.</p>'}${preview.info.map((i) => `<p class="muted">${esc(i)}</p>`).join("")}${canPay ? '<div class="actions"><button id="post-settle">Post to payroll…</button></div>' : ""}` : '<p class="muted">Payroll staff prepare the settlement.</p>'}` : ""}
-  ${x.status === "accepted" ? `<h3>Exit interview</h3><p class="muted">${x.interview_notes ? esc(x.interview_notes) : "Not recorded."}</p><div class="actions"><button class="secondary" id="interview">Record exit interview</button> <button class="secondary" id="change-lwd">Change last day</button> <button class="ghost" id="cancel-exit">Cancel exit</button> <button id="complete">Complete exit</button></div>` : ""}
+  <!--team-->${x.status === "accepted" ? `<h3>Exit interview</h3><p class="muted">${x.interview_notes ? esc(x.interview_notes) : "Not recorded."}</p><div class="actions"><button class="secondary" id="interview">Record exit interview</button> <button class="secondary" id="change-lwd">Change last day</button> <button class="ghost" id="cancel-exit">Cancel exit</button> <button id="complete">Complete exit</button></div>` : ""}
   ${x.status === "completed" ? `<div class="actions spaced"><a class="button secondary" target="_blank" rel="noopener" href="/letter.html?type=exit&kind=relieving&id=${x.id}">Relieving letter</a> <a class="button secondary" target="_blank" rel="noopener" href="/letter.html?type=exit&kind=experience&id=${x.id}">Experience certificate</a> <button class="secondary" id="email-letters">Email both letters</button></div>${x.personal_email ? `<p class="muted">Personal email given at resignation: ${esc(x.personal_email)}. The letters are emailed there when the exit is completed (once email is set up).</p>` : ""}` : ""}`;
-  viewDialog(`Exit · ${x.employee_name}`, html);
+  viewDialog(`Exit · ${x.employee_name}`, html.replace("<!--team-->", teamHtml) + alumniHtml);
   const on = (s, fn) =>
     document.querySelector(`dialog ${s}`)?.addEventListener("click", fn);
   const reopen = () => exitView(id);
+  const ticked = () => [...document.querySelectorAll("dialog [data-alumni-doc]:checked")].map((c) => c.dataset.alumniDoc);
+  on("#alumni-save", async (e) =>
+    busy(e.target, async () => {
+      await api(`/admin/exits/${id}/alumni`, { docs: ticked() }, "PUT");
+      notice("Saved. The link shows only these documents.");
+    }).catch((err) => notice(err.message, true)),
+  );
+  on("#alumni-link", () =>
+    dialog(
+      "Send the documents link",
+      `<p class="full muted">A private link to download the ticked documents. Sending a new link stops the old one.</p>${input("to", "Send to (personal email)", x.personal_email || "", 'type="email" maxlength="150"')}`,
+      async (b) => {
+        await api(`/admin/exits/${id}/alumni`, { docs: ticked() }, "PUT");
+        const r = await api(`/admin/exits/${id}/alumni/link`, b.to ? { to: b.to } : {});
+        if (r.mailed) notice(`Link mailed to ${r.to}.`);
+        else {
+          notice("Email is not set up or no address was given. Copy the link and share it yourself.", true);
+          prompt("Private link (copy it):", r.link);
+        }
+      },
+    ),
+  );
   // Relieving letter and experience certificate as PDFs to the leaver's personal email.
   on("#email-letters", () =>
     dialog(
@@ -896,7 +1010,9 @@ async function exitView(id) {
   });
   on("#complete", async (e) =>
     busy(e.target, async () => {
-      await api(`/admin/exits/${id}/complete`, {});
+      await api(`/admin/exits/${id}/complete`, {
+        team_to_code: document.querySelector("dialog #team-to")?.value.trim() || "",
+      });
       notice("Exit completed. The login is now closed.");
       document.querySelector("dialog")?.remove();
       render();

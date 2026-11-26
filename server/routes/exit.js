@@ -16,6 +16,7 @@ import { balances } from "../leave-ledger.js";
 import { exitLetter } from "../letters.js";
 import { textPdf } from "../text-pdf.js";
 import { loadConfig } from "./payroll-setup.js";
+import { moveTeam, personByCode } from "../team-move.js";
 
 const KINDS = [
   "resignation",
@@ -1011,8 +1012,10 @@ export function registerExit(router, app) {
   router.post(
     "/api/admin/exits/:id/complete",
     { perm: "exit.manage" },
-    async ({ user, params, companyId, send, audit }) => {
+    async ({ user, params, companyId, body, send, audit }) => {
       const x = await loadAccepted(params.id, companyId);
+      // Who takes over the leaver's team: the employee code HR gives, or else their own manager.
+      const teamTo = await personByCode(db, companyId, (await body().catch(() => ({})))?.team_to_code);
       const open = await db
         .prepare(
           "SELECT COUNT(*) n FROM exit_clearance WHERE exit_id=? AND cleared=0",
@@ -1056,6 +1059,11 @@ export function registerExit(router, app) {
             "UPDATE exits SET status='completed',completed_at=? WHERE id=?",
           )
           .run(nowIso(), x.id);
+        const leaver = await db.prepare("SELECT manager_id FROM users WHERE id=?").get(x.user_id);
+        const to = teamTo?.id ?? leaver.manager_id ?? null;
+        const moved = await moveTeam(db, companyId, x.user_id, to);
+        if (moved.people || moved.departments.length)
+          await audit("team_reassigned_on_exit", { employeeId: x.user_id, to, people: moved.people, departments: moved.departments });
         await db.prepare("UPDATE users SET active=0 WHERE id=?").run(x.user_id);
         await db
           .prepare(
@@ -1094,6 +1102,7 @@ export function registerExit(router, app) {
       }),
     };
   }
+  app.exitLetterFor = exitLetterFor;
   // Both letters as PDFs to an email address; false when email is not set up.
   async function emailLetters(exitId, companyId, to, audit) {
     const letters = await Promise.all(["relieving", "experience"].map((k) => exitLetterFor(exitId, companyId, k)));

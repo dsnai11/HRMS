@@ -67,17 +67,37 @@ export function registerAdmin(router, app) {
       ),
   );
 
-  router.get(
-    "/api/admin/audit",
-    { perm: "audit.read" },
-    async ({ companyId, send }) =>
-      send(
-        200,
-        await db
-          .prepare(
-            "SELECT a.*,u.name actor_name FROM audit a LEFT JOIN users u ON u.id=a.actor_id WHERE a.company_id=? ORDER BY a.id DESC LIMIT 100",
-          )
-          .all(companyId),
-      ),
-  );
+  // The activity log. ?employee=<code or id> narrows it to one employee: what they did and what
+  // was done to their record. ?before=<id> pages back through older entries.
+  router.get("/api/admin/audit", { perm: "audit.read" }, async ({ companyId, query, send }) => {
+    const pick = (query.get("employee") || "").trim();
+    const before = Number(query.get("before")) || null;
+    let person = null;
+    if (pick) {
+      person = await db
+        .prepare(
+          "SELECT id,name,employee_code FROM users WHERE company_id=? AND (LOWER(employee_code)=LOWER(?) OR CAST(id AS TEXT)=?) ORDER BY (LOWER(employee_code)=LOWER(?)) DESC LIMIT 1",
+        )
+        .get(companyId, pick, pick, pick);
+      if (!person) return send(404, { error: `No employee with code ${pick}.` });
+    }
+    const where = ["a.company_id=?"];
+    const args = [companyId];
+    if (person) {
+      where.push("(a.actor_id=? OR a.subject_id=?)");
+      args.push(person.id, person.id);
+    }
+    if (before) {
+      where.push("a.id<?");
+      args.push(before);
+    }
+    const rows = await db
+      .prepare(
+        `SELECT a.*,u.name actor_name,u.employee_code actor_code,s.name subject_name,s.employee_code subject_code
+         FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN users s ON s.id=a.subject_id
+         WHERE ${where.join(" AND ")} ORDER BY a.id DESC LIMIT 100`,
+      )
+      .all(...args);
+    return send(200, person ? { employee: person, entries: rows } : rows);
+  });
 }

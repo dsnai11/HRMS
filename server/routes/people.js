@@ -15,6 +15,7 @@ import { passwordHash } from "../db.js";
 import { branchScope, requireOwned, staffWith } from "../scope.js";
 import { can } from "../rbac.js";
 import { changeLetter } from "../letters.js";
+import { textPdf } from "../text-pdf.js";
 
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 const CHANGE_KINDS = ["promotion", "transfer", "increment", "confirmation"];
@@ -279,7 +280,86 @@ export function registerPeople(router, app) {
       link: "myemployment",
       email: true,
     });
+    await sendChangeLetter(c, person).catch((e) => console.error("Change letter mail failed:", e.message));
   }
+  // Once a change is approved and applied, its letter (promotion, transfer, increment or
+  // confirmation) is mailed to the employee as a PDF and kept under their HR documents.
+  async function sendChangeLetter(c, person) {
+    const company = await db.prepare("SELECT name FROM companies WHERE id=?").get(c.company_id);
+    const names = await db
+      .prepare(
+        `SELECT g.name designation,d.name department,b.name branch,m.name manager FROM employee_changes c
+         LEFT JOIN designations g ON g.id=c.designation_id LEFT JOIN departments d ON d.id=c.department_id
+         LEFT JOIN branches b ON b.id=c.branch_id LEFT JOIN users m ON m.id=c.manager_id WHERE c.id=?`,
+      )
+      .get(c.id);
+    const letter = changeLetter({ company: company.name, person: { name: person.name }, change: c, names, today: app.dayOf(nowIso()) });
+    const pdf = textPdf({ heading: company.name, ...letter });
+    const file = `${letter.title} ${c.effective_date}`.replace(/[\\/\r\n"]/g, "_").slice(0, 120);
+    await db
+      .prepare("INSERT INTO documents(company_id,user_id,kind,name,mime,size,data,uploaded_by,created_at) VALUES(?,?,'hr_document',?,'application/pdf',?,?,NULL,?)")
+      .run(c.company_id, person.id, file, pdf.length, await app.blobs.put(pdf.toString("base64"), "documents"), nowIso());
+    const to = (await db.prepare("SELECT email FROM users WHERE id=?").get(person.id))?.email;
+    if (to)
+      await app.notify.mail(
+        c.company_id,
+        to,
+        `${company.name}: ${letter.title}`,
+        `Dear ${person.name},\n\nPlease find attached your ${letter.title.toLowerCase()}. It is also kept in the HR app under Profile → HR documents.\n\n${company.name}, HR`,
+        [{ filename: `${letter.title.replace(/\s+/g, "-")}.pdf`, content: pdf.toString("base64") }],
+      );
+  }
+  // ---- transfer acknowledgement ------------------------------------------------------------------
+  const MAX_SKIPS = 2;
+  const ackView = async (c) => {
+    const n = await db
+      .prepare(
+        `SELECT g.name designation,d.name department,b.name branch,m.name manager,w.name workplace FROM employee_changes c
+         LEFT JOIN designations g ON g.id=c.designation_id LEFT JOIN departments d ON d.id=c.department_id
+         LEFT JOIN branches b ON b.id=c.branch_id LEFT JOIN users m ON m.id=c.manager_id
+         LEFT JOIN workplaces w ON w.id=c.workplace_id WHERE c.id=?`,
+      )
+      .get(c.id);
+    const to = [n.branch && `Branch: ${n.branch}`, n.department && `Department: ${n.department}`, n.workplace && `Workplace: ${n.workplace}`, n.manager && `Reporting to: ${n.manager}`].filter(Boolean);
+    return {
+      id: c.id,
+      kind: c.kind,
+      effective_date: c.effective_date,
+      details: to,
+      note: c.note,
+      skips: c.ack_skips,
+      skips_left: Math.max(0, MAX_SKIPS - c.ack_skips),
+      can_skip: c.ack_skips < MAX_SKIPS,
+    };
+  };
+  // Transfers waiting for my acknowledgement (the app and portal show these as a popup).
+  router.get("/api/me/acknowledgements", async ({ user, send }) => {
+    const rows = await db
+      .prepare("SELECT * FROM employee_changes WHERE user_id=? AND kind='transfer' AND status IN ('pending','applied') AND acknowledged_at IS NULL ORDER BY id")
+      .all(user.id);
+    const out = [];
+    for (const c of rows) out.push(await ackView(c));
+    return send(200, out);
+  });
+  router.post("/api/me/acknowledgements/:id", async ({ user, params, body, send, audit }) => {
+    const c = await db
+      .prepare("SELECT * FROM employee_changes WHERE id=? AND user_id=? AND kind='transfer' AND status IN ('pending','applied')")
+      .get(Number(params.id), user.id);
+    if (!c) throw new HttpError(404, "Transfer not found.");
+    if (c.acknowledged_at) return send(200, { acknowledged_at: c.acknowledged_at });
+    const action = oneOf((await body()).action, "Action", ["skip", "acknowledge"]);
+    if (action === "skip") {
+      if (c.ack_skips >= MAX_SKIPS)
+        throw new HttpError(409, "You have already skipped twice. Please acknowledge the transfer.");
+      const log = [...JSON.parse(c.ack_skip_log || "[]"), nowIso()];
+      await db.prepare("UPDATE employee_changes SET ack_skips=ack_skips+1,ack_skip_log=? WHERE id=?").run(JSON.stringify(log), c.id);
+      await audit("transfer_ack_skipped", { id: c.id, employeeId: user.id, skips: c.ack_skips + 1 });
+      return send(200, { skips: c.ack_skips + 1, skips_left: MAX_SKIPS - c.ack_skips - 1 });
+    }
+    await db.prepare("UPDATE employee_changes SET acknowledged_at=? WHERE id=?").run(nowIso(), c.id);
+    await audit("transfer_acknowledged", { id: c.id, employeeId: user.id, skips: c.ack_skips });
+    return send(200, { acknowledged_at: nowIso(), skips: c.ack_skips });
+  });
   router.get(
     "/api/admin/changes",
     { perm: "changes.manage" },
@@ -381,6 +461,15 @@ export function registerPeople(router, app) {
         });
         return id;
       });
+      // A transfer pops up on the employee's phone (push) and asks to be acknowledged.
+      if (kind === "transfer")
+        await app.notify([person.id], {
+          companyId,
+          kind: "transfer",
+          title: "Transfer: please acknowledge",
+          body: `You are being transferred from ${effective}. Open the HR app to see the details and acknowledge.`,
+          link: "transfer-ack",
+        });
       return send(201, { id });
     },
   );

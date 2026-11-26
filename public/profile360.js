@@ -32,37 +32,116 @@ function collectCustom(b) {
 }
 
 // ---- organisation chart -----------------------------------------------------------------------------
-async function orgChartPage(id) {
+async function orgChartPage(id, view = "people") {
   const data = await api("/org-chart");
   if (id !== renderId) return;
-  const byMgr = new Map();
-  for (const p of data.people) {
-    const k = p.manager_id ?? 0;
-    if (!byMgr.has(k)) byMgr.set(k, []);
-    byMgr.get(k).push(p);
-  }
-  // Open the path down to the signed-in person, collapse the rest.
   const byId = new Map(data.people.map((p) => [p.id, p]));
-  const open = new Set();
-  for (let p = byId.get(data.me); p; p = byId.get(p.manager_id)) open.add(p.id);
-  const node = (p, depth) => {
-    const kids = byMgr.get(p.id) || [];
-    const card = `<div class="chart-card ${p.id === data.me ? "me" : ""}"><span class="avatar">${initials(p.name)}</span><div><strong>${esc(p.name)}</strong><small>${esc(p.designation || "")}${p.designation && p.department ? " · " : ""}${esc(p.department || "")}</small></div>${kids.length ? `<button class="ghost" data-toggle="${p.id}" aria-expanded="${open.has(p.id)}">${kids.length} ${kids.length === 1 ? "report" : "reports"}</button>` : ""}</div>`;
-    return `<li data-node="${p.id}">${card}${kids.length ? `<ul class="chart-kids" ${open.has(p.id) ? "" : "hidden"}>${kids.map((k) => node(k, depth + 1)).join("")}</ul>` : ""}</li>`;
+  // A tree from manager links; "within" keeps it to one set of people (a department), and anyone
+  // whose manager is outside that set hangs under the given root instead.
+  const treeOf = (people, rootId) => {
+    const inSet = new Set(people.map((p) => p.id));
+    const byMgr = new Map();
+    for (const p of people) {
+      if (p.id === rootId) continue;
+      const k = inSet.has(p.manager_id) && p.manager_id !== p.id ? p.manager_id : (rootId ?? 0);
+      if (!byMgr.has(k)) byMgr.set(k, []);
+      byMgr.get(k).push(p);
+    }
+    return byMgr;
   };
-  const roots = byMgr.get(0) || [];
+  const totals = (byMgr) => {
+    const memo = new Map();
+    const count = (pid, seen = new Set()) => {
+      if (memo.has(pid)) return memo.get(pid);
+      if (seen.has(pid)) return 0;
+      seen.add(pid);
+      const n = (byMgr.get(pid) || []).reduce((t, k) => t + 1 + count(k.id, seen), 0);
+      memo.set(pid, n);
+      return n;
+    };
+    return count;
+  };
+  const open = new Set();
+  for (let p = byId.get(data.me), hops = 0; p && hops < 50; p = byId.get(p.manager_id), hops++) open.add(p.id);
+  const render = (byMgr, roots, extraOpen = new Set()) => {
+    const total = totals(byMgr);
+    const node = (p, depth) => {
+      const kids = depth > 40 ? [] : byMgr.get(p.id) || [];
+      const all = total(p.id);
+      const isOpen = open.has(p.id) || extraOpen.has(p.id);
+      const card = `<div class="chart-card ${p.id === data.me ? "me" : ""}"><span class="avatar">${initials(p.name)}</span><div><strong>${esc(p.name)}</strong>${p.employee_code ? ` <small class="chart-code">${esc(p.employee_code)}</small>` : ""}<small>${esc(p.designation || "")}${p.designation && p.department ? " · " : ""}${esc(p.department || "")}</small></div>${kids.length ? `<button class="ghost" data-toggle="${p.id}" aria-expanded="${isOpen}" title="${all} in the whole team">${kids.length} direct · ${all} total</button><button class="ghost" data-team-csv="${p.id}" title="Download ${esc(p.name)}'s full team">⬇</button>` : ""}</div>`;
+      return `<li data-node="${p.id}">${card}${kids.length ? `<ul class="chart-kids" ${isOpen ? "" : "hidden"}>${kids.map((k) => node(k, depth + 1)).join("")}</ul>` : ""}</li>`;
+    };
+    return { html: roots.map((r) => node(r, 0)).join(""), total };
+  };
+  let body = "";
+  const csvTrees = new Map(); // root id → byMgr used for that download
+  if (view === "hod") {
+    const blocks = [];
+    for (const d of data.departments) {
+      const members = data.people.filter((p) => p.department_id === d.id);
+      if (!members.length && !d.head_id) continue;
+      const head = d.head_id ? byId.get(d.head_id) : null;
+      const set = head && !members.some((m) => m.id === head.id) ? [head, ...members] : members;
+      const byMgr = treeOf(set, head?.id ?? null);
+      const roots = head ? [head] : byMgr.get(0) || [];
+      if (head) csvTrees.set(head.id, byMgr);
+      const { html } = render(byMgr, roots, new Set(head ? [head.id] : []));
+      const count = members.filter((m) => m.id !== head?.id).length;
+      blocks.push(
+        `<div class="card hod-block"><div class="card-head"><div><h2>${esc(d.name)}</h2><p class="muted">HOD: ${head ? `<strong>${esc(head.name)}</strong>${head.employee_code ? ` (${esc(head.employee_code)})` : ""}` : "not set (Administration → Departments)"} · ${count} ${count === 1 ? "employee" : "employees"}</p></div></div><ul class="chart">${html || '<li class="muted">No people yet.</li>'}</ul></div>`,
+      );
+    }
+    const none = data.people.filter((p) => !p.department_id);
+    if (none.length)
+      blocks.push(`<div class="card"><h2>No department</h2><p class="muted">${none.length} ${none.length === 1 ? "person has" : "people have"} no department: ${none.slice(0, 30).map((p) => esc(p.name)).join(", ")}${none.length > 30 ? "…" : ""}</p></div>`);
+    body = blocks.join("") || '<div class="card"><p class="muted">No departments yet.</p></div>';
+  } else {
+    const byMgr = treeOf(data.people, null);
+    for (const p of data.people) csvTrees.set(p.id, byMgr);
+    const { html } = render(byMgr, byMgr.get(0) || []);
+    body = `<div class="card"><ul class="chart">${html || '<li class="muted">No people yet.</li>'}</ul></div>`;
+  }
   document.querySelector("#content").innerHTML =
     heading(
       "Organisation chart",
-      "Who reports to whom. Select a person's reports to expand.",
+      view === "hod"
+        ? "Each department under its head (HOD), with everyone below them and the headcount."
+        : "Who reports to whom, with each person's direct and total team. Select a person's team to expand.",
     ) +
-    `<div class="card"><div class="actions"><input id="chart-q" placeholder="Find a person" aria-label="Find a person"><button class="secondary" id="expand-all">Expand all</button><button class="secondary" id="collapse-all">Collapse all</button></div><ul class="chart">${roots.map((r) => node(r, 0)).join("") || '<li class="muted">No people yet.</li>'}</ul></div>`;
+    `<div class="card"><div class="actions"><div class="seg" role="tablist"><button class="${view === "people" ? "" : "secondary"}" data-view="people">Reporting lines</button><button class="${view === "hod" ? "" : "secondary"}" data-view="hod">By department (HOD)</button></div><input id="chart-q" placeholder="Find a person or code" aria-label="Find a person"><button class="secondary" id="expand-all">Expand all</button><button class="secondary" id="collapse-all">Collapse all</button></div></div>` +
+    body;
+  document.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => orgChartPage(renderId, b.dataset.view)));
   const kidsOf = (li) => li.querySelector(":scope > .chart-kids");
   document.querySelectorAll("[data-toggle]").forEach((b) => {
     b.onclick = () => {
       const ul = kidsOf(b.closest("li"));
       ul.hidden = !ul.hidden;
       b.setAttribute("aria-expanded", String(!ul.hidden));
+    };
+  });
+  // Everyone below a person, as a CSV: name, code, designation, department, reports to, level.
+  document.querySelectorAll("[data-team-csv]").forEach((b) => {
+    b.onclick = () => {
+      const rootId = Number(b.dataset.teamCsv);
+      const byMgr = csvTrees.get(rootId) || treeOf(data.people, null);
+      const rows = [["Name", "Employee code", "Designation", "Department", "Reports to", "Level below"]];
+      const walk = (pid, level, seen) => {
+        for (const k of byMgr.get(pid) || []) {
+          if (seen.has(k.id)) continue;
+          seen.add(k.id);
+          rows.push([k.name, k.employee_code || "", k.designation || "", k.department || "", byId.get(k.manager_id)?.name || byId.get(pid)?.name || "", level]);
+          walk(k.id, level + 1, seen);
+        }
+      };
+      walk(rootId, 1, new Set([rootId]));
+      const f = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const blob = new Blob([rows.map((r) => r.map(f).join(",")).join("\n")], { type: "text/csv" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `team-${(byId.get(rootId)?.employee_code || byId.get(rootId)?.name || rootId).toString().replace(/[^A-Za-z0-9_-]+/g, "_")}.csv`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     };
   });
   const setAll = (show) =>

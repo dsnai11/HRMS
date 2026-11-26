@@ -415,6 +415,9 @@ test("helpdesk tickets carry response times and new request types", async (t) =>
     low: 72,
     normal: 48,
     high: 24,
+    escalate_to: null,
+    escalate_to_code: "",
+    escalate_to_name: "",
   });
   assert.equal(
     (

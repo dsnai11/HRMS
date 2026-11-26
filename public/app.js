@@ -683,11 +683,43 @@ function table(rows) {
     : empty("No attendance records yet", "Recorded punches will appear here.");
 }
 let renderId = 0;
+// A transfer waiting for the employee's acknowledgement pops up once per visit. "Remind me
+// later" works twice; the third time it must be acknowledged.
+let ackChecked = false;
+async function transferAckCheck() {
+  if (ackChecked || me.must_change_password || me.needs_2fa) return;
+  ackChecked = true;
+  const list = await api("/me/acknowledgements").catch(() => []);
+  const a = list[0];
+  if (!a) return;
+  document.querySelector(".ack-pop")?.remove();
+  const pop = document.createElement("div");
+  pop.className = "rehire-pop ack-pop";
+  pop.setAttribute("role", "alertdialog");
+  pop.innerHTML = `<div class="rehire-box"><h2>You are being transferred</h2><p>From ${fmtDate(a.effective_date)}</p>${a.details.map((d) => `<p><strong>${esc(d)}</strong></p>`).join("")}${a.note ? `<p>${esc(a.note)}</p>` : ""}<p class="muted">${a.can_skip ? `You can choose "Remind me later" ${a.skips_left} more ${a.skips_left === 1 ? "time" : "times"}.` : "You have skipped this twice. Please acknowledge to continue."}</p><p class="error-text" id="ack-err"></p><div class="actions"><button id="ack-yes">I acknowledge</button>${a.can_skip ? '<button class="secondary" id="ack-later">Remind me later</button>' : ""}</div></div>`;
+  document.body.append(pop);
+  const act = (action) => async () => {
+    try {
+      await api(`/me/acknowledgements/${a.id}`, { action });
+      pop.remove();
+      if (action === "acknowledge") notice("Thank you. Your acknowledgement is recorded.");
+      if (list.length > 1) {
+        ackChecked = false;
+        void transferAckCheck();
+      }
+    } catch (e) {
+      pop.querySelector("#ack-err").textContent = e.message;
+    }
+  };
+  pop.querySelector("#ack-yes").onclick = act("acknowledge");
+  pop.querySelector("#ack-later")?.addEventListener("click", act("skip"));
+}
 async function render() {
   const id = ++renderId;
   // Announcements are on the front page (older alerts still link to the old page).
   if (page === "announcements") page = landing();
   shell();
+  void transferAckCheck();
   if (me.needs_2fa) {
     document.querySelector("#content").innerHTML = heading(
       "Turn on two-factor login",
@@ -880,10 +912,11 @@ async function render() {
       document.querySelector("#content").innerHTML =
         heading(
           "Activity log",
-          "Latest 100 account, workplace, and attendance events.",
+          "Account, workplace and attendance events, newest first. Enter an employee code to see one employee's full history.",
         ) +
         `<div class="card"><h2>Storage</h2><p>${mb(store.database_bytes)} MB of ${mb(store.limit_bytes)} MB used (${store.percent}%)${store.percent >= 80 ? ' <span class="pill">Nearly full</span>' : ""}</p><p class="muted">${store.documents.count} documents (${mb(store.documents.bytes)} MB) · ${store.selfies.count} punch selfies (${mb(store.selfies.bytes)} MB, deleted after 90 days).</p></div>` +
-        `<div class="card">${logs.map((l) => `<div class="activity"><strong>${esc(l.actor_name)}</strong> · ${esc(l.action.replaceAll("_", " "))}<br><small>${time(l.created_at)} · ${esc(l.detail)}</small></div>`).join("") || empty("No events yet", "Activity will appear here.")}</div>`;
+        `<div class="card"><form id="audit-find" class="audit-find"><label>Employee code<input name="employee" placeholder="e.g. LIFC0123" autocomplete="off"></label><button type="submit">Show history</button><button type="button" class="secondary" id="audit-all" hidden>Show everyone</button></form><p class="muted" id="audit-who"></p><div id="audit-list"></div><p class="center"><button type="button" class="secondary" id="audit-more" hidden>Load older entries</button></p></div>`;
+      auditLog(logs);
     }
   } catch (e) {
     notice(e.message, true);
@@ -891,6 +924,63 @@ async function render() {
       document.querySelector("#content").innerHTML =
         '<p class="error-text">This view could not be loaded. Please refresh or sign in again.</p>';
   }
+}
+// The activity log list: each entry shows who did it and whom it was about, by name and
+// employee code. Clicking a person opens that person's history.
+function auditLog(first) {
+  const list = document.querySelector("#audit-list");
+  const more = document.querySelector("#audit-more");
+  const who = document.querySelector("#audit-who");
+  const all = document.querySelector("#audit-all");
+  const form = document.querySelector("#audit-find");
+  let employee = "";
+  const person = (name, code, id) =>
+    name
+      ? `<a href="#" class="audit-person" data-pick="${esc(code || String(id))}">${esc(name)}${code ? ` <span class="muted">(${esc(code)})</span>` : ""}</a>`
+      : "System";
+  const row = (l) =>
+    `<div class="activity"><strong>${person(l.actor_name, l.actor_code, l.actor_id)}</strong> · ${esc(l.action.replaceAll("_", " "))}${l.subject_id && l.subject_id !== l.actor_id ? ` · about ${person(l.subject_name, l.subject_code, l.subject_id)}` : ""}<br><small>${time(l.created_at)} · ${esc(l.detail)}</small></div>`;
+  const show = (rows, append) => {
+    list.insertAdjacentHTML(append ? "beforeend" : "afterbegin", rows.map(row).join(""));
+    if (!append && !rows.length) list.innerHTML = empty("No events yet", "Activity will appear here.");
+    more.hidden = rows.length < 100;
+    more.dataset.before = rows.length ? rows[rows.length - 1].id : "";
+  };
+  const load = async (append) => {
+    const q = new URLSearchParams();
+    if (employee) q.set("employee", employee);
+    if (append && more.dataset.before) q.set("before", more.dataset.before);
+    const r = await api(`/admin/audit${q.size ? `?${q}` : ""}`);
+    const rows = Array.isArray(r) ? r : r.entries;
+    if (!append) list.innerHTML = "";
+    who.textContent = r.employee
+      ? `History of ${r.employee.name}${r.employee.employee_code ? ` (${r.employee.employee_code})` : ""}: what they did and what was done to their record.`
+      : "";
+    all.hidden = !employee;
+    show(rows, append);
+  };
+  const pick = async (code) => {
+    employee = code;
+    form.employee.value = code;
+    try {
+      await load(false);
+    } catch (e) {
+      notice(e.message, true);
+    }
+  };
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    pick(form.employee.value.trim());
+  };
+  all.onclick = () => pick("");
+  more.onclick = () => load(true).catch((e) => notice(e.message, true));
+  list.onclick = (e) => {
+    const a = e.target.closest(".audit-person");
+    if (!a) return;
+    e.preventDefault();
+    pick(a.dataset.pick);
+  };
+  show(first, false);
 }
 function dialog(title, fields, onSubmit, mandatory = false) {
   document.querySelector("dialog")?.remove();
@@ -1110,20 +1200,51 @@ function employeeDialog(org, e) {
       }
       if (e) {
         b.active = b.active === "true";
+        if (!b.team_to || b.active) delete b.team_to;
         if (!b.password) delete b.password;
         if (!b.employee_code) delete b.employee_code;
       } else if (!b.employee_code) delete b.employee_code;
-      const saved = await api(
-        e ? `/admin/employees/${e.id}` : "/admin/employees",
-        b,
-        e ? "PATCH" : "POST",
-      );
+      let saved;
+      try {
+        saved = await api(
+          e ? `/admin/employees/${e.id}` : "/admin/employees",
+          b,
+          e ? "PATCH" : "POST",
+        );
+      } catch (err) {
+        // Someone who used to work here: confirm before adding them again.
+        if (err.code !== "ex_employee") throw err;
+        if (!confirm(`${err.message}\n\nAdd them as a new employee anyway?`)) throw err;
+        saved = await api("/admin/employees", { ...b, ex_employee_ok: true });
+      }
       // A grade outside the designation's grades is saved, with a warning.
       if (saved?.warning) notice(saved.warning, true);
       else notice(e ? "Employee updated." : "Employee created.");
     },
   );
   dgWireEmployeeForm(org);
+  if (e) employeeTeamSection(e);
+}
+// In "Manage employee": who reports to this person, a box to name who takes them over if the
+// account is switched off, and a button to move the team right away.
+async function employeeTeamSection(e) {
+  const team = await api(`/admin/employees/${e.id}/team`).catch(() => null);
+  const grid = document.querySelector("dialog .form-grid");
+  if (!team || !grid || (!team.people.length && !team.departments.length)) return;
+  const box = document.createElement("div");
+  box.className = "full team-handover";
+  box.innerHTML = `<strong>Team</strong><p class="muted">${team.people.length} direct ${team.people.length === 1 ? "report" : "reports"}${team.departments.length ? `, heads ${esc(team.departments.join(", "))}` : ""}: ${team.people.slice(0, 12).map((p) => esc(p.name)).join(", ")}${team.people.length > 12 ? "…" : ""}</p><div class="actions"><label>If switched off, hand the team to (employee code)<input name="team_to" maxlength="30" autocomplete="off" placeholder="${esc(team.manager?.employee_code || "their manager")}"></label>${has("employees.write") ? '<button type="button" class="secondary" id="move-team-now">Move team now…</button>' : ""}</div>`;
+  grid.append(box);
+  box.querySelector("#move-team-now")?.addEventListener("click", () => {
+    const code = prompt(`Move all ${team.people.length} of ${e.name}'s direct reports${team.departments.length ? " and departments" : ""} to which employee code?`);
+    if (!code?.trim()) return;
+    api(`/admin/employees/${e.id}/move-team`, { to_code: code.trim() })
+      .then((r) => {
+        notice(`${r.people} ${r.people === 1 ? "person" : "people"} now report to ${r.to.name}${r.departments.length ? `; ${r.to.name} now heads ${r.departments.join(", ")}` : ""}.`);
+        box.remove();
+      })
+      .catch((err) => notice(err.message, true));
+  });
 }
 
 const ORG_TABS = {

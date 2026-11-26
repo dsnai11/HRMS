@@ -2,6 +2,7 @@ import { HttpError, integer, oneOf, string } from "../http.js";
 import { requireOwned } from "../scope.js";
 import { can } from "../rbac.js";
 import { mayDecide } from "../approval.js";
+import { readPrivate } from "./payroll-setup.js";
 
 export const KINDS = [
   "id_proof",
@@ -14,8 +15,13 @@ export const KINDS = [
   "medical",
   "form16",
   "photo",
+  "esi_card",
+  "hr_document",
   "other",
 ];
+// Files HR gives to the employee (as opposed to proofs the employee hands in). They show under
+// "HR documents" in the employee's app and portal.
+export const HR_ISSUED = ["offer_letter", "form16", "esi_card", "hr_document"];
 export const TYPES = {
   "application/pdf": "pdf",
   "image/jpeg": "jpg",
@@ -84,6 +90,10 @@ export function registerDocuments(router, app) {
       .prepare("SELECT id FROM users WHERE id=? AND company_id=?")
       .get(target, user.company_id);
     if (!owner) throw new HttpError(404, "Employee not found.");
+    const kind = oneOf(b.kind ?? "other", "Type", KINDS);
+    // Only HR adds the files HR gives out (ESI card, letters and so on).
+    if (["esi_card", "hr_document"].includes(kind) && !can(user, "employees.write"))
+      throw new HttpError(403, "Only HR can add this type of document.");
     const { mime, data, bytes } = checkFile(b);
     if (
       (
@@ -107,7 +117,7 @@ export function registerDocuments(router, app) {
           .run(
             user.company_id,
             target,
-            oneOf(b.kind ?? "other", "Type", KINDS),
+            kind,
             string(b.name, "Name", 120).replace(/[\\/\r\n"]/g, "_"),
             mime,
             bytes.length,
@@ -120,6 +130,29 @@ export function registerDocuments(router, app) {
     await audit("document_uploaded", { id, employeeId: target });
     return send(201, { id });
   });
+  // My ESI card: the ESI (IP) number payroll holds, masked except the last four digits, and the
+  // e-Pehchan card HR uploaded, if any.
+  router.get("/api/my-esi", async ({ user, send }) => {
+    const ip = String((await readPrivate(app, user.id)).esi_ip ?? "");
+    const card = await db
+      .prepare(`${LIST} WHERE d.user_id=? AND d.kind='esi_card' AND d.deleted_at IS NULL ORDER BY d.id DESC LIMIT 1`)
+      .get(user.id);
+    return send(200, {
+      esi_number: ip ? `${"•".repeat(Math.max(0, ip.length - 4))}${ip.slice(-4)}` : null,
+      card: card ?? null,
+    });
+  });
+  // Files HR has given me: letters, Form 16, ESI card and other HR documents.
+  router.get("/api/my-hr-documents", async ({ user, send }) =>
+    send(
+      200,
+      await db
+        .prepare(
+          `${LIST} WHERE d.user_id=? AND d.deleted_at IS NULL AND d.kind IN (${HR_ISSUED.map(() => "?").join(",")}) ORDER BY d.id DESC`,
+        )
+        .all(user.id, ...HR_ISSUED),
+    ),
+  );
   router.get(
     "/api/documents/:id/file",
     async ({ user, params, res, headers, audit }) => {
