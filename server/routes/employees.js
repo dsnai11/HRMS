@@ -15,6 +15,8 @@ import {
 import { ROLES, assignableRoles, can } from "../rbac.js";
 import { branchScope, inBranchScope, requireOwned } from "../scope.js";
 import { gradeWarning } from "./designation-grades.js";
+import { moveTeam, personByCode } from "../team-move.js";
+import { findExEmployees } from "../ex-employee.js";
 
 const GENDERS = ["male", "female", "other"];
 const EMPLOYMENT = [
@@ -357,11 +359,59 @@ export function registerEmployees(router, app) {
     "/api/admin/employees",
     { perm: "employees.write" },
     async ({ user, companyId, body, send, audit }) => {
-      const id = await createEmployee(user, companyId, await body(), audit);
+      const b = await body();
+      // Adding someone who used to work here: HR confirms first (ex_employee_ok).
+      if (!b.ex_employee_ok) {
+        const [m] = await findExEmployees(app, companyId, { name: b.name, email: b.email, phone: b.phone, date_of_birth: b.date_of_birth });
+        if (m)
+          throw new HttpError(
+            409,
+            `${m.name}${m.employee_code ? ` (${m.employee_code})` : ""} is an ex-employee${m.left ? ` who left on ${m.left}` : ""} (matched on ${m.matched_on.join(", ")}). Check your records before adding them again.`,
+            "ex_employee",
+          );
+      }
+      const id = await createEmployee(user, companyId, b, audit);
+      if (b.ex_employee_ok) await audit("ex_employee_rehired", { employeeId: id });
       return send(201, { id, warning: await gradeWarningFor(id) });
     },
   );
 
+  // Who reports to this person and which departments they head, so HR can hand them over.
+  router.get(
+    "/api/admin/employees/:id/team",
+    { perm: "employees.read" },
+    async ({ params, companyId, send }) => {
+      const id = Number(params.id);
+      const person = await requireOwned(db, "users", id, companyId, "employee");
+      const manager = person.manager_id
+        ? await db.prepare("SELECT id,name,employee_code FROM users WHERE id=?").get(person.manager_id)
+        : null;
+      return send(200, {
+        manager: manager ?? null,
+        people: await db
+          .prepare("SELECT id,name,employee_code FROM users WHERE manager_id=? AND company_id=? AND active=1 ORDER BY name")
+          .all(id, companyId),
+        departments: (
+          await db.prepare("SELECT name FROM departments WHERE head_id=? AND company_id=? ORDER BY name").all(id, companyId)
+        ).map((d) => d.name),
+      });
+    },
+  );
+  // Move a manager's whole team (and departments they head) to someone else.
+  router.post(
+    "/api/admin/employees/:id/move-team",
+    { perm: "employees.write" },
+    async ({ params, companyId, body, send, audit }) => {
+      const id = Number(params.id);
+      await requireOwned(db, "users", id, companyId, "employee");
+      const b = await body();
+      const to = await personByCode(db, companyId, b.to_code);
+      if (!to) throw new HttpError(400, "Enter the employee code of the new manager.");
+      const r = await transaction(() => moveTeam(db, companyId, id, to.id));
+      await audit("team_moved", { employeeId: id, to: to.id, people: r.people, departments: r.departments });
+      return send(200, { ...r, to });
+    },
+  );
   router.patch(
     "/api/admin/employees/:id",
     { perm: "employees.write" },
@@ -466,6 +516,9 @@ export function registerEmployees(router, app) {
             .prepare("SELECT id FROM users WHERE manager_id=? AND active=1")
             .all(id)
         : [];
+      // HR may name who takes over the team (b.team_to: an employee code); otherwise it goes to
+      // the leaver's own manager.
+      const teamTo = leaving && b.team_to ? await personByCode(db, companyId, b.team_to) : null;
       const keys = Object.keys(set);
       await transaction(async () => {
         if (openShift) {
@@ -484,15 +537,17 @@ export function registerEmployees(router, app) {
             );
           await audit("shift_closed_on_deactivation", { id: openShift.id, employeeId: id });
         }
-        if (team.length) {
-          await db
-            .prepare("UPDATE users SET manager_id=? WHERE manager_id=? AND active=1")
-            .run(target.manager_id ?? null, id);
-          await audit("team_reassigned_on_deactivation", {
-            from: id,
-            to: target.manager_id ?? null,
-            people: team.length,
-          });
+        if (leaving) {
+          const to = teamTo?.id ?? target.manager_id ?? null;
+          const r = await moveTeam(db, companyId, id, to);
+          if (r.people || r.departments.length)
+            await audit("team_reassigned_on_deactivation", {
+              from: id,
+              to,
+              people: r.people,
+              departments: r.departments,
+              employeeId: id,
+            });
         }
         if (keys.length)
           await db

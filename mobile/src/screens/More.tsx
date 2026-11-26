@@ -1869,6 +1869,62 @@ function Form16Card({ api, files }: { api: Api; files: Files }) {
   );
 }
 
+// My ESI card: the ESI number (last four digits) and the e-Pehchan card HR uploaded.
+type DocRow = { id: number; kind: string; name: string; created_at: string };
+function EsiCard({ api, files }: { api: Api; files: Files }) {
+  const esi = useLoad(() => api<{ esi_number: string | null; card: DocRow | null }>("/my-esi"));
+  return (
+    <View style={s.card}>
+      <Text style={s.heading}>ESI card</Text>
+      <Status loading={esi.loading} error={esi.error} />
+      {esi.data && (
+        <>
+          <View style={s.row}>
+            <Text style={s.note}>ESI number</Text>
+            <Text style={s.strong}>{esi.data.esi_number || "Not on file"}</Text>
+          </View>
+          {esi.data.card ? (
+            <Pressable style={s.row} onPress={() => void openFile(api, files, "document", esi.data!.card!.id)}>
+              <Text style={s.strong}>{esi.data.card.name}</Text>
+              <Text style={s.link}>Open</Text>
+            </Pressable>
+          ) : (
+            <Text style={s.note}>Your ESI card appears here once HR uploads it.</Text>
+          )}
+        </>
+      )}
+    </View>
+  );
+}
+const HR_DOC_LABEL: Record<string, string> = {
+  offer_letter: "Offer letter",
+  form16: "Form 16",
+  esi_card: "ESI card",
+  hr_document: "HR document",
+};
+// Files HR has given me: letters, certificates, Form 16, ESI card.
+function HrDocumentsCard({ api, files }: { api: Api; files: Files }) {
+  const list = useLoad(() => api<DocRow[]>("/my-hr-documents"));
+  return (
+    <View style={s.card}>
+      <Text style={s.heading}>HR documents</Text>
+      <Status loading={list.loading} error={list.error} />
+      {(list.data ?? []).length === 0 && !list.loading && (
+        <Text style={s.note}>Letters and certificates HR uploads for you appear here.</Text>
+      )}
+      {(list.data ?? []).map((d) => (
+        <Pressable key={d.id} style={s.row} onPress={() => void openFile(api, files, "document", d.id)}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.strong}>{d.name}</Text>
+            <Text style={s.note}>{HR_DOC_LABEL[d.kind] ?? ""} · {d.created_at.slice(0, 10)}</Text>
+          </View>
+          <Text style={s.link}>Open</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 // ---- engagement gallery: still photos, one bunch per event -------------------------------------
 type GalleryPhoto = {
   id: number;
@@ -3115,7 +3171,7 @@ function ProfileScreen({
     who.data?.user.photo_at
       ? `${files.base}/api/people/${who.data.user.id}/photo?v=${encodeURIComponent(who.data.user.photo_at)}`
       : null;
-  const [doc, setDoc] = useState<"" | "payslip" | "form16">("");
+  const [doc, setDoc] = useState<"" | "payslip" | "form16" | "esi" | "hrdocs">("");
   const p = me.data;
   const work: [string, string | null | undefined][] = p
     ? [
@@ -3201,8 +3257,30 @@ function ProfileScreen({
           </Pressable>
         ))}
       </View>
+      <View style={s.contactRow}>
+        {(
+          [
+            ["esi", "ESI card", "medkit-outline"],
+            ["hrdocs", "HR documents", "folder-open-outline"],
+          ] as const
+        ).map(([id, label, glyph]) => (
+          <Pressable
+            key={id}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: doc === id }}
+            style={[s.contactTile, doc === id && s.docOn]}
+            onPress={() => setDoc(doc === id ? "" : id)}
+          >
+            <Icon name={glyph} size={24} color={doc === id ? "#fff" : T.primary} />
+            <Text style={[s.strong, doc === id && { color: "#fff" }]}>{label}</Text>
+            <Text style={[s.note, doc === id && { color: T.soft }]}>{doc === id ? "Tap to close" : "Tap to open"}</Text>
+          </Pressable>
+        ))}
+      </View>
       {doc === "payslip" && <PayslipsScreen api={api} files={files} />}
       {doc === "form16" && <Form16Card api={api} files={files} />}
+      {doc === "esi" && <EsiCard api={api} files={files} />}
+      {doc === "hrdocs" && <HrDocumentsCard api={api} files={files} />}
       <AppearanceCard />
       <Btn title="Change password" secondary onPress={onPassword} />
       <Btn title="Sign out" secondary onPress={onSignOut} />

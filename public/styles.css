@@ -4795,3 +4795,19 @@ tbody tr:hover { background: color-mix(in srgb, var(--red) 4%, transparent); }
   .tabbar::-webkit-scrollbar { display: none; }
   .tabbar button { flex: none; }
 }
+
+/* Activity log: find one employee's history */
+.audit-find { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 8px; }
+.audit-find label { flex: 1 1 220px; }
+.audit-person { color: inherit; text-decoration: underline dotted; }
+
+/* Org chart: employee code and the HOD view */
+.chart-code { display: inline; color: var(--muted, #667); font-size: 12px; margin-left: 4px; }
+.seg { display: inline-flex; gap: 4px; }
+.hod-block .chart { margin-top: 8px; }
+
+/* Ex-employee check popup inside the candidate window */
+.rehire-pop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); padding: 16px; }
+.rehire-box { background: #fff; color: #14151c; border-radius: 16px; padding: 20px; max-width: 440px; width: 100%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); border: 2px solid var(--warn, #d97706); }
+.rehire-box h2 { margin-top: 0; }
+[data-theme="dark"] .rehire-box { background: #12141c; color: #eceef4; }

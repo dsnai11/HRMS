@@ -596,6 +596,8 @@ export function registerPreboarding(router, app) {
       );
       if (c.stage === "hired")
         throw new HttpError(409, "This candidate has already joined.");
+      if (c.rehire_status === "hold")
+        throw new HttpError(409, "This profile is on hold as an ex-employee. Accept or reject it first.");
       const offer = await db
         .prepare(
           "SELECT * FROM offers WHERE candidate_id=? AND status IN ('sent','accepted') ORDER BY id DESC",

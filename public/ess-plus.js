@@ -15,6 +15,20 @@ async function lettersCard(id) {
   document.querySelector("#content").append(card);
 }
 
+// Files HR has given me (ESI card, Form 16, letters, certificates) and my ESI number.
+async function hrDocumentsCard(id) {
+  const [docs, esi] = await Promise.all([api("/my-hr-documents"), api("/my-esi")]);
+  if (id !== renderId) return;
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>HR documents</h2><p class="muted">Files HR has given you. Pay slips are under Payslips.</p>${esi.esi_number || esi.card ? `<div class="activity"><strong>ESI card</strong> <small>${esi.esi_number ? `ESI number ${esc(esi.esi_number)}` : "ESI number not on file"}</small>${esi.card ? ` <button class="secondary" data-open-doc="${esi.card.id}">Open</button>` : ' <span class="pill neutral">Card not uploaded yet</span>'}</div>` : ""}${
+    docs.filter((d) => d.kind !== "esi_card").map((d) => `<div class="activity"><strong>${esc(d.name)}</strong> <small>${esc(DOC_KIND[d.kind] || "")} · ${fmtDate(d.created_at.slice(0, 10))}</small> <button class="secondary" data-open-doc="${d.id}">Open</button></div>`).join("") ||
+    (esi.card ? "" : '<p class="muted">Nothing yet. Letters and certificates HR uploads for you appear here.</p>')
+  }`;
+  document.querySelector("#content").append(card);
+  card.querySelectorAll("[data-open-doc]").forEach((b) => (b.onclick = () => openDocument(b.dataset.openDoc)));
+}
+
 async function bankCard(id) {
   const rows = await api("/profile/bank-change");
   if (id !== renderId) return;

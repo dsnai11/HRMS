@@ -369,9 +369,17 @@ export function registerEssPlus(router, app) {
     { perm: "helpdesk.manage" },
     async ({ companyId, send }) => {
       const c = await db
-        .prepare("SELECT ticket_sla FROM companies WHERE id=?")
+        .prepare("SELECT ticket_sla,ticket_escalate_to FROM companies WHERE id=?")
         .get(companyId);
-      return send(200, JSON.parse(c.ticket_sla));
+      const top = c.ticket_escalate_to
+        ? await db.prepare("SELECT name,employee_code FROM users WHERE id=?").get(c.ticket_escalate_to)
+        : null;
+      return send(200, {
+        ...JSON.parse(c.ticket_sla),
+        escalate_to: c.ticket_escalate_to ?? null,
+        escalate_to_code: top?.employee_code ?? "",
+        escalate_to_name: top?.name ?? "",
+      });
     },
   );
   router.put(
@@ -389,11 +397,25 @@ export function registerEssPlus(router, app) {
           );
         sla[k] = h;
       }
+      // The final escalation person for tickets left open too long (admins if nobody).
+      let escalateTo = null;
+      const code = String(b.escalate_to_code ?? "").trim();
+      if (code || b.escalate_to) {
+        const who = await db
+          .prepare(
+            code
+              ? "SELECT id FROM users WHERE LOWER(employee_code)=LOWER(?) AND company_id=? AND active=1"
+              : "SELECT id FROM users WHERE id=? AND company_id=? AND active=1",
+          )
+          .get(code || Number(b.escalate_to), companyId);
+        if (!who) throw new HttpError(400, `No active employee with code ${code || b.escalate_to}.`);
+        escalateTo = who.id;
+      }
       await db
-        .prepare("UPDATE companies SET ticket_sla=? WHERE id=?")
-        .run(JSON.stringify(sla), companyId);
-      await audit("helpdesk_sla_saved", sla);
-      return send(200, sla);
+        .prepare("UPDATE companies SET ticket_sla=?,ticket_escalate_to=? WHERE id=?")
+        .run(JSON.stringify(sla), escalateTo, companyId);
+      await audit("helpdesk_sla_saved", { ...sla, escalate_to: escalateTo });
+      return send(200, { ...sla, escalate_to: escalateTo });
     },
   );
 }

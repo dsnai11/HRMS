@@ -109,7 +109,7 @@ export function registerLeave(router, app) {
   const approvalSettings = async (companyId) => {
     const c = await db
       .prepare(
-        "SELECT approval_reminder_hours,approval_escalate_hours,team_mail_enabled,team_mail_time FROM companies WHERE id=?",
+        "SELECT approval_reminder_hours,approval_escalate_hours,team_mail_enabled,team_mail_time,no_punch_mail_days FROM companies WHERE id=?",
       )
       .get(companyId);
     return {
@@ -120,6 +120,7 @@ export function registerLeave(router, app) {
       approval_escalate_hours: c?.approval_escalate_hours ?? 72,
       team_mail_enabled: Boolean(c?.team_mail_enabled ?? 1),
       team_mail_time: c?.team_mail_time ?? "11:00",
+      no_punch_mail_days: c?.no_punch_mail_days ?? 3,
     };
   };
   router.get(
@@ -216,6 +217,8 @@ export function registerLeave(router, app) {
           set[key] = Math.round(number(b[key], label, 1, 720));
       if (b.team_mail_enabled !== undefined)
         set.team_mail_enabled = Number(bool(b.team_mail_enabled, "Daily team attendance mail"));
+      if (b.no_punch_mail_days !== undefined)
+        set.no_punch_mail_days = Math.round(number(b.no_punch_mail_days, "Mail after days without a punch", 0, 30));
       if (b.team_mail_time !== undefined) {
         if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(b.team_mail_time)))
           throw new HttpError(400, "Send time must be like 11:00.");

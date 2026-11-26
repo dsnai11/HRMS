@@ -167,7 +167,7 @@ async function helpdeskPage(id) {
   if (id !== renderId) return;
   const table = (rows, admin) =>
     rows.length
-      ? `<div class="table-wrap"><table><thead><tr>${admin ? "<th>From</th>" : ""}<th>Subject</th><th>Category</th><th>Status</th><th>Response</th><th>Updated</th><th></th></tr></thead><tbody>${rows.map((t) => `<tr>${admin ? `<td>${esc(t.employee_name)}<small>${esc(t.employee_code || "")}</small></td>` : ""}<td>${t.priority === "high" ? '<span class="pill">High</span> ' : ""}${esc(t.subject)}</td><td>${TICKET_CATEGORY[t.category]}</td><td><span class="pill ${["resolved", "closed"].includes(t.status) ? "neutral" : ""}">${TICKET_STATUS[t.status]}</span></td><td>${slaPill(t)}</td><td>${time(t.updated_at)}</td><td><button class="secondary" data-ticket="${t.id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
+      ? `<div class="table-wrap"><table><thead><tr>${admin ? "<th>From</th>" : ""}<th>Subject</th><th>Category</th><th>Status</th><th>Response</th><th>Updated</th><th></th></tr></thead><tbody>${rows.map((t) => `<tr>${admin ? `<td>${esc(t.employee_name)}<small>${esc(t.employee_code || "")}</small></td>` : ""}<td>${t.priority === "high" ? '<span class="pill">High</span> ' : ""}${t.escalation_level ? `<span class="pill danger">Escalated L${t.escalation_level}</span> ` : ""}${esc(t.subject)}</td><td>${TICKET_CATEGORY[t.category]}</td><td><span class="pill ${["resolved", "closed"].includes(t.status) ? "neutral" : ""}">${TICKET_STATUS[t.status]}</span></td><td>${slaPill(t)}</td><td>${time(t.updated_at)}</td><td><button class="secondary" data-ticket="${t.id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
       : empty("Nothing here", "No tickets.");
   document.querySelector("#content").innerHTML =
     heading(
@@ -184,8 +184,8 @@ async function helpdeskPage(id) {
     ?.addEventListener("click", async () => {
       const sla = await api("/admin/helpdesk/sla");
       dialog(
-        "Response times",
-        `<p class="full muted">How many hours HR has to resolve a ticket, by the priority the employee chose. Tickets past their time are flagged and listed first.</p>${input("low", "Low priority (hours)", sla.low, 'type="number" min="1" max="720"')}${input("normal", "Normal (hours)", sla.normal, 'type="number" min="1" max="720"')}${input("high", "High (hours)", sla.high, 'type="number" min="1" max="720"')}`,
+        "Response times and escalation",
+        `<p class="full muted">How many hours HR has to resolve a ticket, by the priority the employee chose. Tickets past their time are flagged and listed first.</p>${input("low", "Low priority (hours)", sla.low, 'type="number" min="1" max="720"')}${input("normal", "Normal (hours)", sla.normal, 'type="number" min="1" max="720"')}${input("high", "High (hours)", sla.high, 'type="number" min="1" max="720"')}<p class="full muted">Escalation: once a ticket passes its time it becomes high priority and goes to the assignee's manager and the helpdesk team (level 1). If it is still open after the same time again, it goes to the final escalation person (level 2). Leave the code empty to send level 2 to the admins.</p>${input("escalate_to_code", `Final escalation person: employee code${sla.escalate_to_name ? ` (now ${esc(sla.escalate_to_name)})` : ""}`, sla.escalate_to_code || "", 'maxlength=30 autocomplete="off"')}`,
         async (f) => {
           await api(
             "/admin/helpdesk/sla",
@@ -193,6 +193,7 @@ async function helpdeskPage(id) {
               low: Number(f.low),
               normal: Number(f.normal),
               high: Number(f.high),
+              escalate_to_code: f.escalate_to_code.trim(),
             },
             "PUT",
           );

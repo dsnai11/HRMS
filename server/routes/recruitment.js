@@ -13,6 +13,7 @@ import { gradeWarning } from "./designation-grades.js";
 import { requireOwned } from "../scope.js";
 import { can } from "../rbac.js";
 import { offerLetter } from "../letters.js";
+import { textPdf } from "../text-pdf.js";
 import {
   candidateExtras,
   candidateMail,
@@ -27,6 +28,7 @@ import { assignJoinerCourses } from "./learning.js";
 import { preboardingForHire } from "./preboarding.js";
 import { storePrivate } from "./payroll-setup.js";
 import { encryptionKey } from "../crypto-store.js";
+import { candidateIdentity, findExEmployees } from "../ex-employee.js";
 
 const STAGES = [
   "applied",
@@ -456,6 +458,52 @@ export function registerRecruitment(router, app) {
       return send(200, { ok: true });
     },
   );
+  // ---- ex-employee check ------------------------------------------------------------------------
+  // A profile on hold (HR said "No" to continuing with an ex-employee) cannot move on until HR
+  // accepts it; a rejected one is closed.
+  function rehireGate(c) {
+    if (c.rehire_status === "hold")
+      throw new HttpError(409, "This profile is on hold as an ex-employee. Accept or reject it first.");
+  }
+  router.get(
+    "/api/admin/candidates/:id/ex-employee",
+    { perm: "recruitment.manage" },
+    async ({ params, companyId, send }) => {
+      const c = await owned("candidates", params.id, companyId, "candidate");
+      const matches = c.user_id ? [] : await findExEmployees(app, companyId, await candidateIdentity(app, c));
+      return send(200, { status: c.rehire_status ?? null, rehire_of: c.rehire_of ?? null, matches });
+    },
+  );
+  //   continue → Yes, carry on (confirmed);   hold → No, put the profile on hold;
+  //   accept   → a held profile goes ahead;   reject → a held profile is closed as rejected.
+  router.post(
+    "/api/admin/candidates/:id/ex-employee",
+    { perm: "recruitment.manage" },
+    async ({ user, params, companyId, body, send, audit }) => {
+      const c = await owned("candidates", params.id, companyId, "candidate");
+      const b = await body();
+      const decision = oneOf(b.decision, "Decision", ["continue", "hold", "accept", "reject"]);
+      if (["accept", "reject"].includes(decision) && c.rehire_status !== "hold")
+        throw new HttpError(409, "Only a profile on hold can be accepted or rejected.");
+      if (["continue", "hold"].includes(decision) && c.rehire_status)
+        throw new HttpError(409, "The ex-employee check has already been answered.");
+      const matches = await findExEmployees(app, companyId, await candidateIdentity(app, c));
+      if (!matches.length && !c.rehire_of) throw new HttpError(409, "This candidate does not match any ex-employee.");
+      const status = { continue: "confirmed", hold: "hold", accept: "accepted", reject: "rejected" }[decision];
+      await transaction(async () => {
+        await db
+          .prepare("UPDATE candidates SET rehire_status=?,rehire_of=COALESCE(rehire_of,?),rehire_decided_by=?,rehire_decided_at=?,updated_at=? WHERE id=?")
+          .run(status, matches[0]?.id ?? null, user.id, nowIso(), nowIso(), c.id);
+        await db
+          .prepare("INSERT INTO candidate_events(candidate_id,kind,detail,actor_id,created_at) VALUES(?,?,?,?,?)")
+          .run(c.id, "ex_employee", { continue: "Ex-employee: HR chose to continue", hold: "Ex-employee: put on hold", accept: "Ex-employee: hold accepted", reject: "Ex-employee: rejected" }[decision], user.id, nowIso());
+        await audit("candidate_ex_employee", { id: c.id, decision, exEmployee: matches[0]?.id ?? c.rehire_of });
+      });
+      if (decision === "reject" && !["rejected", "withdrawn", "hired"].includes(c.stage))
+        await moveStage({ ...c, rehire_status: "rejected" }, "rejected", "Ex-employee: not rehired", user, companyId, { mail: false });
+      return send(200, { status });
+    },
+  );
   router.post(
     "/api/admin/candidates/:id/stage",
     { perm: "recruitment.manage" },
@@ -472,6 +520,7 @@ export function registerRecruitment(router, app) {
   // and tells a rejected candidate.
   async function moveStage(c, wanted, why, user, companyId, { mail = true } = {}) {
     const stage = oneOf(wanted, "Stage", MANUAL);
+    if (!["rejected", "withdrawn"].includes(stage)) rehireGate(c);
     if (["hired"].includes(c.stage))
       throw new HttpError(409, "This candidate has already been hired.");
     const reason = optionalString(why, "Reason", 300);
@@ -607,6 +656,7 @@ export function registerRecruitment(router, app) {
           409,
           "This candidate is no longer in the pipeline.",
         );
+      rehireGate(c);
       if (
         await db
           .prepare(
@@ -744,7 +794,12 @@ export function registerRecruitment(router, app) {
       if (status === "sent") {
         // Sending the offer also issues the candidate's private joining link and emails it.
         link = (await createInvite(app, user.id, companyId, cand)).link;
-        await candidateMail(app, cand, "offer_sent", { link });
+        // The offer letter goes with the mail as a PDF.
+        const company = await db.prepare("SELECT name FROM companies WHERE id=?").get(companyId);
+        const letter = offerLetter({ company: company.name, candidate: cand, offer: o, today: app.dayOf(nowIso()) });
+        await candidateMail(app, cand, "offer_sent", { link }, [
+          { filename: "Offer-letter.pdf", content: textPdf({ heading: company.name, ...letter }).toString("base64") },
+        ]);
       }
       return send(200, { ok: true, link });
     },
@@ -782,6 +837,9 @@ export function registerRecruitment(router, app) {
       const c = await owned("candidates", params.id, companyId, "candidate");
       if (c.stage === "hired")
         throw new HttpError(409, "This candidate has already been hired.");
+      rehireGate(c);
+      if (!c.rehire_status && (await findExEmployees(app, companyId, await candidateIdentity(app, c))).length)
+        throw new HttpError(409, "This candidate matches an ex-employee. Open the candidate and answer the ex-employee check first.");
       const offer = await db
         .prepare(
           "SELECT * FROM offers WHERE candidate_id=? AND status='accepted'",
