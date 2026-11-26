@@ -32,8 +32,22 @@ function collectCustom(b) {
 }
 
 // ---- organisation chart -----------------------------------------------------------------------------
-async function orgChartPage(id, view = "people") {
+// Tree (boxes joined by lines) or List (indented); the choice is remembered on this browser.
+const chartLayout = (set) => {
+  try {
+    if (set) localStorage.setItem("hrms.chartLayout", set);
+    return localStorage.getItem("hrms.chartLayout") || "tree";
+  } catch {
+    return set || "tree";
+  }
+};
+// One steady colour per department, so a department reads the same across the chart.
+// (A class, not an inline style: the site's security policy blocks inline styles.)
+const deptClass = (id) => (id ? `dc${id % 12}` : "dc-none");
+
+async function orgChartPage(id, view = "people", layout = chartLayout()) {
   const data = await api("/org-chart");
+  const tree = layout === "tree";
   if (id !== renderId) return;
   const byId = new Map(data.people.map((p) => [p.id, p]));
   // A tree from manager links; "within" keeps it to one set of people (a department), and anyone
@@ -68,11 +82,25 @@ async function orgChartPage(id, view = "people") {
     const node = (p, depth) => {
       const kids = depth > 40 ? [] : byMgr.get(p.id) || [];
       const all = total(p.id);
-      const isOpen = open.has(p.id) || extraOpen.has(p.id);
+      const isOpen = open.has(p.id) || extraOpen.has(p.id) || (tree && depth < 2);
+      if (tree) {
+        const chip = kids.length
+          ? `<button class="tchip" data-toggle="${p.id}" aria-expanded="${isOpen}" title="${kids.length} report directly · ${all} in the whole team"><span class="tchev">▾</span>${kids.length} direct${all > kids.length ? ` · ${all} team` : ""}</button><button class="ghost tcsv" data-team-csv="${p.id}" title="Download ${esc(p.name)}'s full team" aria-label="Download team">⬇</button>`
+          : "";
+        const tcard = p.virtual
+          ? `<div class="chart-card tcard tcompany"><strong>${esc(p.name)}</strong><small>${all} people</small>${chip}</div>`
+          : `<div class="chart-card tcard ${deptClass(p.department_id)} ${p.id === data.me ? "me" : ""}"><span class="avatar">${initials(p.name)}</span><strong title="${esc(p.name)}">${esc(p.name)}</strong>${p.employee_code ? `<small class="chart-code">${esc(p.employee_code)}</small>` : ""}<small class="tdesig">${esc(p.designation || "—")}</small>${p.department ? `<span class="tdept">${esc(p.department)}</span>` : ""}${chip}</div>`;
+        return `<li data-node="${p.id}">${tcard}${kids.length ? `<ul class="chart-kids" ${isOpen ? "" : "hidden"}>${kids.map((k) => node(k, depth + 1)).join("")}</ul>` : ""}</li>`;
+      }
       const card = `<div class="chart-card ${p.id === data.me ? "me" : ""}"><span class="avatar">${initials(p.name)}</span><div><strong>${esc(p.name)}</strong>${p.employee_code ? ` <small class="chart-code">${esc(p.employee_code)}</small>` : ""}<small>${esc(p.designation || "")}${p.designation && p.department ? " · " : ""}${esc(p.department || "")}</small></div>${kids.length ? `<button class="ghost" data-toggle="${p.id}" aria-expanded="${isOpen}" title="${all} in the whole team">${kids.length} direct · ${all} total</button><button class="ghost" data-team-csv="${p.id}" title="Download ${esc(p.name)}'s full team">⬇</button>` : ""}</div>`;
       return `<li data-node="${p.id}">${card}${kids.length ? `<ul class="chart-kids" ${isOpen ? "" : "hidden"}>${kids.map((k) => node(k, depth + 1)).join("")}</ul>` : ""}</li>`;
     };
     return { html: roots.map((r) => node(r, 0)).join(""), total };
+  };
+  // In tree mode the chart sits on a canvas that can be zoomed and dragged.
+  const wrap = (html, dept) => {
+    const list = `<ul class="chart${tree ? " tree" : ""}">${html || '<li class="muted">No people yet.</li>'}</ul>`;
+    return tree ? `<div class="tree-wrap"><div class="tree-canvas">${list}</div></div>` : list;
   };
   let body = "";
   const csvTrees = new Map(); // root id → byMgr used for that download
@@ -89,7 +117,7 @@ async function orgChartPage(id, view = "people") {
       const { html } = render(byMgr, roots, new Set(head ? [head.id] : []));
       const count = members.filter((m) => m.id !== head?.id).length;
       blocks.push(
-        `<div class="card hod-block"><div class="card-head"><div><h2>${esc(d.name)}</h2><p class="muted">HOD: ${head ? `<strong>${esc(head.name)}</strong>${head.employee_code ? ` (${esc(head.employee_code)})` : ""}` : "not set (Administration → Departments)"} · ${count} ${count === 1 ? "employee" : "employees"}</p></div></div><ul class="chart">${html || '<li class="muted">No people yet.</li>'}</ul></div>`,
+        `<div class="card hod-block"><div class="card-head"><div><h2>${esc(d.name)}</h2><p class="muted">HOD: ${head ? `<strong>${esc(head.name)}</strong>${head.employee_code ? ` (${esc(head.employee_code)})` : ""}` : "not set (Administration → Departments)"} · ${count} ${count === 1 ? "employee" : "employees"}</p></div></div>${wrap(html, d.id)}</div>`,
       );
     }
     const none = data.people.filter((p) => !p.department_id);
@@ -99,8 +127,19 @@ async function orgChartPage(id, view = "people") {
   } else {
     const byMgr = treeOf(data.people, null);
     for (const p of data.people) csvTrees.set(p.id, byMgr);
-    const { html } = render(byMgr, byMgr.get(0) || []);
-    body = `<div class="card"><ul class="chart">${html || '<li class="muted">No people yet.</li>'}</ul></div>`;
+    let roots = byMgr.get(0) || [];
+    // Several people at the top: hang them under one company box so the tree has a single top.
+    if (tree && roots.length > 1) {
+      const company = { id: 0, virtual: true, name: (typeof me !== "undefined" && me?.company?.name) || "Company" };
+      open.add(0);
+      roots = [company];
+    }
+    const { html } = render(byMgr, roots);
+    const depts = data.departments.filter((d) => data.people.some((p) => p.department_id === d.id));
+    const legend = tree && depts.length
+      ? `<div class="tree-legend">${depts.map((d) => `<span class="${deptClass(d.id)}"><i></i>${esc(d.name)}</span>`).join("")}</div>`
+      : "";
+    body = `<div class="card">${legend}${wrap(html)}</div>`;
   }
   document.querySelector("#content").innerHTML =
     heading(
@@ -109,15 +148,67 @@ async function orgChartPage(id, view = "people") {
         ? "Each department under its head (HOD), with everyone below them and the headcount."
         : "Who reports to whom, with each person's direct and total team. Select a person's team to expand.",
     ) +
-    `<div class="card"><div class="actions"><div class="seg" role="tablist"><button class="${view === "people" ? "" : "secondary"}" data-view="people">Reporting lines</button><button class="${view === "hod" ? "" : "secondary"}" data-view="hod">By department (HOD)</button></div><input id="chart-q" placeholder="Find a person or code" aria-label="Find a person"><button class="secondary" id="expand-all">Expand all</button><button class="secondary" id="collapse-all">Collapse all</button></div></div>` +
+    `<div class="card"><div class="actions"><div class="seg" role="tablist"><button class="${view === "people" ? "" : "secondary"}" data-view="people">Reporting lines</button><button class="${view === "hod" ? "" : "secondary"}" data-view="hod">By department (HOD)</button></div><input id="chart-q" placeholder="Find a person or code" aria-label="Find a person"><div class="seg" role="tablist" aria-label="Layout"><button class="${tree ? "" : "secondary"}" data-layout="tree">Tree</button><button class="${tree ? "secondary" : ""}" data-layout="list">List</button></div><button class="secondary" id="expand-all">Expand all</button><button class="secondary" id="collapse-all">Collapse all</button>${tree ? `<span class="tree-zoom"><button class="secondary" data-zoom="-1" aria-label="Zoom out">−</button><button class="secondary" data-zoom="0" title="Fit to screen">Fit</button><button class="secondary" data-zoom="1" aria-label="Zoom in">+</button></span>` : ""}</div></div>` +
     body;
-  document.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => orgChartPage(renderId, b.dataset.view)));
+  document.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => orgChartPage(renderId, b.dataset.view, layout)));
+  document.querySelectorAll("[data-layout]").forEach((b) => (b.onclick = () => orgChartPage(renderId, view, chartLayout(b.dataset.layout))));
+  // Zoom (CSS zoom keeps scrolling right) and drag-to-move with the mouse; touch scrolls natively.
+  let zoom = 1;
+  const wraps = [...document.querySelectorAll(".tree-wrap")];
+  const setZoom = (z) => {
+    zoom = Math.min(1.6, Math.max(0.3, z));
+    wraps.forEach((w) => (w.firstElementChild.style.zoom = zoom));
+  };
+  // "Fit" shows the whole tree however small; other fits stop at 60% so names stay readable.
+  const fit = (floor = 0.3) => {
+    const w = wraps[0];
+    if (!w) return;
+    const c = w.firstElementChild;
+    c.style.zoom = 1;
+    setZoom(Math.max(floor, Math.min(1, (w.clientWidth - 24) / c.scrollWidth)));
+  };
+  document.querySelectorAll("[data-zoom]").forEach((b) => {
+    b.onclick = () => (b.dataset.zoom === "0" ? fit() : setZoom(zoom + Number(b.dataset.zoom) * 0.15));
+  });
+  for (const w of wraps) {
+    let drag = null;
+    w.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "mouse" || e.button !== 0 || e.target.closest("button,a,input")) return;
+      drag = { x: e.clientX, y: e.clientY, l: w.scrollLeft, t: w.scrollTop };
+      w.classList.add("dragging");
+    });
+    w.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      w.scrollLeft = drag.l - (e.clientX - drag.x);
+      w.scrollTop = drag.t - (e.clientY - drag.y);
+    });
+    const end = () => {
+      drag = null;
+      w.classList.remove("dragging");
+    };
+    w.addEventListener("pointerup", end);
+    w.addEventListener("pointerleave", end);
+  }
+  // Start centred on the person viewing (or the top of the tree).
+  const centre = (el) => {
+    const w = el?.closest(".tree-wrap");
+    if (!w) return;
+    const r = el.getBoundingClientRect();
+    const wr = w.getBoundingClientRect();
+    w.scrollLeft += r.left + r.width / 2 - (wr.left + wr.width / 2);
+  };
+  if (tree && wraps[0]) {
+    // Shrink a wide chart to fit (not below 60%, so names stay readable), then centre it.
+    fit(0.6);
+    wraps.forEach((w) => centre(w.querySelector(".tcard.me") || w.querySelector(".tcard")));
+  }
   const kidsOf = (li) => li.querySelector(":scope > .chart-kids");
   document.querySelectorAll("[data-toggle]").forEach((b) => {
     b.onclick = () => {
       const ul = kidsOf(b.closest("li"));
       ul.hidden = !ul.hidden;
       b.setAttribute("aria-expanded", String(!ul.hidden));
+      if (tree) centre(b.closest(".tcard"));
     };
   });
   // Everyone below a person, as a CSV: name, code, designation, department, reports to, level.
@@ -151,7 +242,13 @@ async function orgChartPage(id, view = "people") {
         .querySelector(":scope > .chart-card [data-toggle]")
         ?.setAttribute("aria-expanded", String(show));
     });
-  document.querySelector("#expand-all").onclick = () => setAll(true);
+  document.querySelector("#expand-all").onclick = () => {
+    setAll(true);
+    if (tree) {
+      fit(0.6);
+      wraps.forEach((w) => centre(w.querySelector(".tcard")));
+    }
+  };
   document.querySelector("#collapse-all").onclick = () => setAll(false);
   document.querySelector("#chart-q").oninput = (e) => {
     const q = e.target.value.trim().toLowerCase();
@@ -161,6 +258,7 @@ async function orgChartPage(id, view = "people") {
     if (!q) return;
     for (const li of document.querySelectorAll(".chart li[data-node]")) {
       const p = byId.get(Number(li.dataset.node));
+      if (!p) continue;
       if (
         p.name.toLowerCase().includes(q) ||
         (p.employee_code || "").toLowerCase().includes(q)
@@ -176,7 +274,7 @@ async function orgChartPage(id, view = "people") {
     }
     document
       .querySelector(".chart li.hit")
-      ?.scrollIntoView({ block: "center" });
+      ?.scrollIntoView({ block: "center", inline: "center" });
   };
 }
 
