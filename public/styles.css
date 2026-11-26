@@ -2238,7 +2238,7 @@ dialog .gallery-full {
   gap: 34px 26px;
   padding: 24px 6px 30px;
 }
-.stack {
+.album-stack {
   position: relative;
   width: 210px;
   height: 250px;
@@ -2300,14 +2300,14 @@ dialog .gallery-full {
   color: #b9bdd6;
 }
 /* Hover and keyboard focus light the stack up; the photos do not move. */
-.stack:hover .stack-photo.s0,
-.stack:focus-visible .stack-photo.s0 {
+.album-stack:hover .stack-photo.s0,
+.album-stack:focus-visible .stack-photo.s0 {
   box-shadow:
     0 0 0 2px rgba(122, 162, 255, 0.9),
     0 0 28px rgba(70, 224, 255, 0.55),
     0 12px 26px rgba(0, 0, 0, 0.45);
 }
-.stack:focus-visible {
+.album-stack:focus-visible {
   outline: none;
 }
 .album-grid {
@@ -2336,7 +2336,7 @@ dialog .gallery-full {
   outline-offset: -3px;
 }
 @media (max-width: 750px) {
-  .stack {
+  .album-stack {
     width: 160px;
     height: 200px;
   }

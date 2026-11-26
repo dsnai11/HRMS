@@ -705,7 +705,7 @@ async function galleryCard(id) {
       ? `<div class="gallery stacks">${albums
           .map(
             (a, i) =>
-              `<button type="button" class="stack" data-css="${scatter(a.photos[0].id)}" data-album="${i}" aria-label="${esc(a.title)}, ${a.photos.length} photo(s)">${a.photos
+              `<button type="button" class="album-stack" data-css="${scatter(a.photos[0].id)}" data-album="${i}" aria-label="${esc(a.title)}, ${a.photos.length} photo(s)">${a.photos
                 .slice(0, 3)
                 .map((p, k) => `<img class="stack-photo s${k}" src="/api/gallery/${p.id}/image" alt="" loading="lazy">`)
                 .join("")}<span class="stack-count">${a.photos.length} ${a.photos.length === 1 ? "photo" : "photos"}</span><span class="stack-cap"><strong>${esc(a.title)}</strong><small>${esc(a.category)} · ${fmtDate(a.event_date)}${a.branch_name ? ` · ${esc(a.branch_name)}` : ""}</small></span></button>`,
