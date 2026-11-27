@@ -88,7 +88,7 @@ export function atsScore(opening, cand) {
     });
   }
   const words = jdKeywords(opening);
-  if (resume && words.length >= 3) {
+  if (resume && words.length >= 1) {
     const found = words.filter((w) => has(resume, w));
     parts.push({
       key: "jd_keywords",

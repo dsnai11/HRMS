@@ -92,6 +92,74 @@ function uploadDialog(userId) {
     },
   );
 }
+// ---- bulk upload: many files, each matched to one employee by the code or PAN in its name ----------
+const BULK_DOC_KINDS = { hr_document: "HR document (letter, certificate…)", esi_card: "ESI card", offer_letter: "Offer / appointment letter" };
+function bulkDocsHtml() {
+  return `<div class="card" id="bulk-docs"><div class="card-head"><div><h2>Upload documents for many employees</h2><p class="muted">Choose all the files at once. Each file goes to one employee, found by the <strong>employee code</strong> in its name (for example <code>LIFC0101.pdf</code>, <code>LIFC0101_ESI.pdf</code> or <code>Ravi LIFC0101 increment.pdf</code>) or the PAN. You check the list before anything is saved. Each employee sees only their own file, under Documents and HR documents in the app.</p></div></div>
+  <form id="bulk-form" class="form-grid"><label>Type<select name="kind">${Object.entries(BULK_DOC_KINDS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select></label>${input("title", "Title shown to employees (optional)", "", 'maxlength=120 placeholder="e.g. Increment letter 2026 (else the file name)"')}<label class="full">Files (PDF, JPG or PNG, up to 2 MB each)<input type="file" name="files" multiple accept="application/pdf,image/jpeg,image/png" required></label><label class="check full"><input type="checkbox" name="notify" checked> Tell each employee on the app when their file is added</label><div class="actions full"><button type="submit">Match files to employees</button></div></form><div id="bulk-review"></div></div>`;
+}
+function bulkDocsWire() {
+  const form = document.querySelector("#bulk-form");
+  if (!form) return;
+  const box = document.querySelector("#bulk-review");
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    busy(e.submitter, async () => {
+      const files = [...form.files.files];
+      if (!files.length) return;
+      const { matches, people } = await api("/admin/documents/match", { files: files.map((f) => f.name) });
+      const opts = (sel) => `<option value="">— Choose the employee —</option>${people.map((p) => `<option value="${p.id}" ${p.id === sel ? "selected" : ""}>${esc(p.name)}${p.employee_code ? ` (${esc(p.employee_code)})` : ""}</option>`).join("")}`;
+      const rows = files.map((f, i) => ({ f, m: matches[i] }));
+      const unmatched = rows.filter((r) => !r.m.user).length;
+      box.innerHTML = `<h3>Check before uploading</h3><p class="muted">${rows.length - unmatched} of ${rows.length} matched automatically.${unmatched ? ` Choose the employee for the ${unmatched} marked in red, or leave them out.` : ""}</p><div class="table-wrap"><table><thead><tr><th>File</th><th>Employee</th><th>Status</th></tr></thead><tbody>${rows
+        .map(
+          (r, i) =>
+            `<tr class="${r.m.user ? "" : "bulk-miss"}"><td>${esc(r.f.name)}<small>${Math.ceil(r.f.size / 1024)} KB${r.f.size > 2 * 1024 * 1024 ? " · too large (2 MB limit)" : ""}</small></td><td><select data-bulk-who="${i}" aria-label="Employee for ${esc(r.f.name)}">${opts(r.m.user?.id)}</select>${r.m.by ? `<small>matched by ${r.m.by === "pan" ? "PAN" : "employee code"}</small>` : ""}</td><td data-bulk-state="${i}">${r.f.size > 2 * 1024 * 1024 ? '<span class="pill danger">Too large</span>' : r.m.user ? '<span class="pill neutral">Ready</span>' : '<span class="pill danger">No match</span>'}</td></tr>`,
+        )
+        .join("")}</tbody></table></div><div class="actions spaced"><button id="bulk-go">Upload</button><button class="ghost" id="bulk-cancel">Cancel</button></div>`;
+      const count = () => {
+        const n = rows.filter((r, i) => box.querySelector(`[data-bulk-who="${i}"]`).value && r.f.size <= 2 * 1024 * 1024).length;
+        box.querySelector("#bulk-go").textContent = `Upload ${n} ${n === 1 ? "file" : "files"}`;
+        box.querySelector("#bulk-go").disabled = !n;
+      };
+      box.querySelectorAll("[data-bulk-who]").forEach((s) => (s.onchange = count));
+      count();
+      box.querySelector("#bulk-cancel").onclick = () => (box.innerHTML = "");
+      box.querySelector("#bulk-go").onclick = (ev) =>
+        busy(ev.target, async () => {
+          let ok = 0, failed = 0;
+          for (const [i, r] of rows.entries()) {
+            const who = box.querySelector(`[data-bulk-who="${i}"]`).value;
+            const cell = box.querySelector(`[data-bulk-state="${i}"]`);
+            if (!who || r.f.size > 2 * 1024 * 1024) {
+              cell.innerHTML = '<span class="pill neutral">Left out</span>';
+              continue;
+            }
+            cell.innerHTML = '<span class="pill neutral">Uploading…</span>';
+            try {
+              const res = await api("/admin/documents/bulk", {
+                user_id: Number(who),
+                kind: form.kind.value,
+                title: form.title.value.trim() || undefined,
+                file_name: r.f.name,
+                mime: r.f.type,
+                data: await toB64(r.f),
+                notify: form.notify.checked,
+              });
+              cell.innerHTML = `<span class="pill">Saved for ${esc(res.employee)}</span>`;
+              ok++;
+            } catch (err) {
+              cell.innerHTML = `<span class="pill danger">${esc(err.message)}</span>`;
+              failed++;
+            }
+          }
+          box.querySelector("#bulk-go").remove();
+          notice(`${ok} uploaded${failed ? `, ${failed} failed` : ""}.`, Boolean(failed));
+        });
+    });
+  };
+}
+
 async function documentsPage(id) {
   const manage = has("employees.write");
   const mine = await api("/documents");
@@ -103,6 +171,7 @@ async function documentsPage(id) {
       '<button id="add-doc">Add a document</button>',
     ) +
     `<div class="card"><h2>My documents</h2><div id="mine">${docTable(mine, { canVerify: false, canDelete: (d) => !d.verified_at && !["esi_card", "hr_document", "form16", "offer_letter"].includes(d.kind) })}</div></div>` +
+    (manage ? bulkDocsHtml() : "") +
     (manage
       ? '<div class="card"><h2>Employee documents</h2><div class="actions spaced"><select id="who"></select><button class="secondary" id="load-who">Show</button><button class="ghost" id="missing">Who is missing documents</button></div><div id="theirs"></div></div>'
       : "");
@@ -112,6 +181,7 @@ async function documentsPage(id) {
   await hrDocumentsCard(id);
   if (!manage) return;
   const people = (await api("/admin/employees?limit=200&active=1")).items;
+  bulkDocsWire();
   document.querySelector("#who").innerHTML = people
     .map(
       (p) =>
@@ -460,6 +530,7 @@ function perfWire(tab) {
   );
   on("#apply-kra", async () => {
     const people = (await api("/admin/employees?limit=200&active=1")).items;
+  bulkDocsWire();
     dialog(
       "Apply KRAs",
       `<label>Employee<select name="user_id">${people.map((p) => `<option value="${p.id}">${esc(p.name)}${p.designation_name ? ` (${esc(p.designation_name)})` : ""}</option>`).join("")}</select></label><p class="full muted">Creates goals from the KRAs of their designation, skipping any they already have.</p>`,

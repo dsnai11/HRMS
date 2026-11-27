@@ -112,6 +112,7 @@ export function openingExtras(b) {
     if (b[k] !== undefined) out[k] = optionalString(b[k], label, max) || null;
   };
   txt("qualifications", "Qualifications", 1000);
+  txt("description", "Job description", 4000);
   txt("location", "Location", 120);
   txt("justification", "Justification", 1000);
   num("min_experience_years", "Experience", 60);

@@ -14,7 +14,12 @@ let boardOpening = "";
 const matchPill = (c) =>
   c.match_score == null
     ? ""
-    : `<span class="pill ${c.opening_min_score && c.match_score < c.opening_min_score ? "neutral" : ""}" title="Skill and experience match">${c.match_score}% match</span>`;
+    : `<span class="ats-mini ${c.match_score >= (c.opening_min_score || 60) ? "good" : c.match_score >= (c.opening_min_score || 60) - 15 ? "mid" : "low"}" title="ATS score against the job description">${c.match_score}%</span>`;
+// What to show when a candidate has no ATS score yet, and why.
+const atsMissing = (c) =>
+  !c.opening_id
+    ? '<small class="muted" title="Link the candidate to an opening to score them">No opening</small>'
+    : `<button class="ghost ats-fix" data-ats-fix="${c.opening_id}" title="This opening has no job description, skills, qualification or experience to compare with">Add job details</button>`;
 
 async function recruitTabHtml(tab) {
   if (tab === "board") {
@@ -232,12 +237,13 @@ async function openingDetailsDialog(id) {
   const o = (await api("/admin/openings")).find((x) => x.id === id);
   dialog(
     `Details · ${o.title}`,
-    `${input("qualifications", "Qualifications", o.qualifications || "", "maxlength=1000")}${input("location", "Location", o.location || "", "maxlength=120")}${input("min_experience_years", "Minimum experience (years)", o.min_experience_years ?? "", 'type="number" min="0" max="60" step="0.5"')}${input("closing_date", "Closing date", o.closing_date || "", 'type="date"')}${input("salary_min", "Pay from (₹ a year)", o.salary_min ?? "", 'type="number" min="0"')}${input("salary_max", "Pay up to (₹ a year)", o.salary_max ?? "", 'type="number" min="0"')}<label class="full">Skills needed, separated by commas<input name="skills" value="${esc(JSON.parse(o.skills || "[]").join(", "))}" maxlength="600"></label>${input("min_score", "Flag candidates below this match (%)", o.min_score, 'type="number" min="0" max="100"')}<label class="check"><input type="checkbox" name="published" ${o.published ? "checked" : ""} ${o.approval_status === "approved" ? "" : "disabled"}> Show on the careers page</label>`,
+    `<label class="full">Job description (the ATS score compares resumes with this)<textarea name="description" rows="5" maxlength="4000">${esc(o.description || "")}</textarea></label>${input("qualifications", "Qualifications", o.qualifications || "", "maxlength=1000")}${input("location", "Location", o.location || "", "maxlength=120")}${input("min_experience_years", "Minimum experience (years)", o.min_experience_years ?? "", 'type="number" min="0" max="60" step="0.5"')}${input("closing_date", "Closing date", o.closing_date || "", 'type="date"')}${input("salary_min", "Pay from (₹ a year)", o.salary_min ?? "", 'type="number" min="0"')}${input("salary_max", "Pay up to (₹ a year)", o.salary_max ?? "", 'type="number" min="0"')}<label class="full">Skills needed, separated by commas<input name="skills" value="${esc(JSON.parse(o.skills || "[]").join(", "))}" maxlength="600"></label>${input("min_score", "Flag candidates below this match (%)", o.min_score, 'type="number" min="0" max="100"')}<label class="check"><input type="checkbox" name="published" ${o.published ? "checked" : ""} ${o.approval_status === "approved" ? "" : "disabled"}> Show on the careers page</label>`,
     async (f) => {
       const num = (v) => (v === "" ? null : Number(v));
       await api(
         `/admin/openings/${id}/details`,
         {
+          description: f.description,
           qualifications: f.qualifications,
           location: f.location,
           min_experience_years: num(f.min_experience_years),
@@ -250,7 +256,7 @@ async function openingDetailsDialog(id) {
         },
         "PATCH",
       );
-      notice("Saved. Candidates were re-scored against the skills.");
+      notice("Saved. Candidates were re-scored against the job.");
     },
   );
 }
@@ -945,7 +951,7 @@ async function rmsPage(id) {
       )
       .join("")}</div>${
       shown.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Candidate</th><th>Contact</th><th>Skills</th><th>Sources</th><th>Received</th><th>Match</th><th>Stage</th><th></th></tr></thead><tbody>${shown
+        ? `<div class="table-wrap"><table><thead><tr><th>Candidate</th><th>Contact</th><th>Skills</th><th>Sources</th><th>Received</th><th>ATS score</th><th>Stage</th><th></th></tr></thead><tbody>${shown
             .map(
               (p) =>
                 `<tr><td><strong>${esc(p.name)}</strong>${p.experience_years != null ? `<small>${p.experience_years} yrs experience</small>` : ""}</td><td>${esc(p.phone || "")}<small>${esc(p.email || "")}</small></td><td>${p.skills.slice(0, 4).map((s) => `<span class="pill neutral">${esc(s)}</span>`).join(" ")}${p.skills.length > 4 ? ` <small>+${p.skills.length - 4}</small>` : ""}</td><td>${p.sources.map((s) => `<span class="pill neutral">${esc(s)}</span>`).join(" ")}</td><td>${time(p.created_at)}</td><td>${p.match_score == null ? "—" : `${p.match_score}%`}</td><td>${stagePill(p.stage)}</td><td>${p.resume_id ? `<a class="button secondary" href="/api/admin/candidate-files/${p.resume_id}" target="_blank" rel="noopener">Resume${p.resumes > 1 ? ` (${p.resumes})` : ""}</a> <button class="ghost" data-read-resume="${p.id}" title="Read the resume again and fill in missing details">Read</button> ` : ""}<button class="ghost" data-cand-open="${p.id}">Open</button></td></tr>`,

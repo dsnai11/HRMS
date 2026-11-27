@@ -135,8 +135,9 @@ test("imported resumes fill in the candidate, score them, match duplicates and c
   const priya = inbox.find((p) => p.name === "Priya Sharma");
   assert.ok(priya, JSON.stringify(inbox));
   assert.deepEqual([priya.email, priya.phone, priya.experience_years], ["priya.sharma@example.com", "9876543210", 4.5]);
-  // 3 of 4 skills (70%) and full experience (30%).
-  assert.equal(priya.match_score, Math.round(0.75 * 70 + 30));
+  // ATS: 3 of 4 skills (35), full experience (15), and both title words "sales officer"
+  // in the resume (25).
+  assert.equal(priya.match_score, Math.round(((0.75 * 35 + 15 + 25) / 75) * 100));
   const ravi = inbox.find((p) => p.email === "ravi.k@example.com");
   assert.equal(ravi.name, "Ravi Kumar");
 
