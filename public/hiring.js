@@ -120,7 +120,7 @@ async function hiringTabHtml(tab) {
     ]);
     return `${requisitionsCard(rows)}${careersCard()}<div class="stats"><div class="stat"><div class="stat-label">Open positions</div><div class="stat-value">${summary.open_positions}</div></div>${["applied", "screening", "interview", "offer", "hired"].map((s) => `<div class="stat"><div class="stat-label">${STAGE[s]}</div><div class="stat-value">${summary.stages[s] ?? 0}</div></div>`).join("")}</div><div class="card"><div class="card-head"><div><h2>Job openings</h2></div><button id="new-opening">New opening</button></div>${
       rows.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Title</th><th>Department</th><th>Positions</th><th>In process</th><th>Filled</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((o) => `<tr><td>${esc(o.title)}<small>${esc(o.branch_name || "")}${o.hiring_manager_name ? ` · ${esc(o.hiring_manager_name)}` : ""}</small></td><td>${esc(o.department_name || "—")}</td><td>${o.positions}</td><td>${o.in_process}</td><td>${o.filled}</td><td><span class="pill ${o.status === "open" ? "" : "neutral"}">${esc(o.status.replace("_", " "))}</span>${o.published ? ' <span class="pill">Public</span>' : ""}${o.approval_status === "pending_approval" ? ' <span class="pill neutral">Needs approval</span>' : ""}</td><td><button class="secondary" data-opening="${o.id}" data-status="${o.status}">${o.status === "open" ? "Close" : "Reopen"}</button> <button class="ghost" data-add-cand="${o.id}">Add candidate</button> <button class="ghost" data-opening-details="${o.id}">Details</button> <button class="ghost" data-posting="${o.id}">Posting text</button></td></tr>`).join("")}</tbody></table></div>`
+        ? `<div class="table-wrap"><table><thead><tr><th>Title</th><th>Department</th><th>Positions</th><th>In process</th><th>Filled</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((o) => `<tr><td>${esc(o.title)}<small>${esc(o.branch_name || "")}${o.hiring_manager_name ? ` · ${esc(o.hiring_manager_name)}` : ""}</small></td><td>${esc(o.department_name || "—")}</td><td>${o.positions}</td><td>${o.in_process}</td><td>${o.filled}</td><td><span class="pill ${o.status === "open" ? "" : "neutral"}">${esc(o.status.replace("_", " "))}</span>${o.published ? ' <span class="pill">Public</span>' : ""}${o.approval_status === "pending_approval" ? ' <span class="pill neutral">Needs approval</span>' : ""}</td><td><button class="secondary" data-opening="${o.id}" data-status="${o.status}">${o.status === "open" ? "Close" : "Reopen"}</button> <button class="ghost" data-add-cand="${o.id}">Add candidate</button> <button class="ghost" data-opening-details="${o.id}">Details</button> <button class="ghost" data-posting="${o.id}">Posting text</button> <button class="ghost" data-apply-link="${o.id}" data-title="${esc(o.title)}" data-published="${o.published ? 1 : 0}" data-approved="${o.approval_status === "approved" ? 1 : 0}">Apply link</button></td></tr>`).join("")}</tbody></table></div>`
         : empty("No openings", "Create an opening, then add candidates to it.")
     }</div>`;
   }
@@ -294,7 +294,7 @@ async function openingDialog() {
     await Promise.all([api("/admin/org"), peopleList()]);
   dialog(
     "New opening",
-    `${input("title", "Title", "", "required maxlength=100")}<label>Department<select name="department_id">${options(deps, null)}</select></label><label>Branch<select name="branch_id">${options(branches, null)}</select></label><label>Designation<select name="designation_id">${options(desigs, null)}</select></label>${input("positions", "Positions", 1, 'type="number" min="1" max="500"')}<label>Hiring manager<select name="hiring_manager_id">${options(people, null)}</select></label>${sel("employment_type", "Employment type", Object.entries(EMPLOYMENT))}<label class="full">Description<input name="description" maxlength="4000"></label>`,
+    `${input("title", "Title", "", "required maxlength=100")}<label>Department<select name="department_id">${options(deps, null)}</select></label><label>Branch<select name="branch_id">${options(branches, null)}</select></label><label>Designation<select name="designation_id">${options(desigs, null)}</select></label>${input("positions", "Positions", 1, 'type="number" min="1" max="500"')}<label>Hiring manager<select name="hiring_manager_id">${options(people, null)}</select></label>${sel("employment_type", "Employment type", Object.entries(EMPLOYMENT))}<label class="full">Job description (the ATS score compares resumes with this)<textarea name="description" rows="5" maxlength="4000" placeholder="What the person will do, tools and knowledge needed"></textarea></label>${input("qualifications", "Qualification needed", "", 'maxlength=1000 placeholder="e.g. B.Com graduate"')}${input("min_experience_years", "Minimum experience (years)", "", 'type="number" min="0" max="60" step="0.5"')}<label class="full">Skills needed, separated by commas<input name="skills" maxlength="600" placeholder="e.g. Tally, GST, Excel"></label>${input("closing_date", "Last date to apply", "", 'type="date"')}<label class="check full"><input type="checkbox" name="published" checked> Create a public apply link (show on the careers page)</label>`,
     async (b) => {
       const body = {
         title: b.title,
@@ -309,8 +309,14 @@ async function openingDialog() {
         "hiring_manager_id",
       ])
         if (b[k]) body[k] = Number(b[k]);
-      await withPostsReason((extra) => api("/admin/openings", { ...body, ...extra }));
+      if (b.qualifications) body.qualifications = b.qualifications;
+      if (b.min_experience_years !== "") body.min_experience_years = Number(b.min_experience_years);
+      if (b.skills) body.skills = b.skills;
+      if (b.closing_date) body.closing_date = b.closing_date;
+      body.published = "published" in b;
+      const r = await withPostsReason((extra) => api("/admin/openings", { ...body, ...extra }));
       notice("Opening created.");
+      if (body.published && r?.id) setTimeout(() => applyLinkDialog(r.id, b.title), 0);
     },
   );
 }
@@ -391,7 +397,7 @@ async function candidateView(id) {
     !c.user_id && c.offers.some((o) => ["sent", "accepted"].includes(o.status))
       ? await api(`/admin/candidates/${id}/preboarding`)
       : null;
-  const html = `<p class="muted">${esc(c.email || "")} ${esc(c.phone || "")} · ${esc(c.opening_title || "No opening")} · ${stagePill(c.stage)}${c.user_id ? " · now an employee" : ""}</p>${exEmployeeHtml(ex)}${matchPill(c)} ${c.qualification ? `<small>${esc(c.qualification)}</small>` : ""} ${c.experience_years != null ? `<small>${c.experience_years} yrs experience</small>` : ""}${JSON.parse(c.skills || "[]").length ? `<p><strong>Skills:</strong> ${JSON.parse(c.skills).map(esc).join(", ")}</p>` : ""}${files.map((f) => `<button class="ghost" data-cfile="${f.id}">View ${esc(f.name)}</button>`).join(" ")} <button class="ghost" id="edit-skills">Edit skills</button>${c.notes ? `<p>${esc(c.notes)}</p>` : ""}${c.resume_url ? `<p><a href="${esc(c.resume_url)}" target="_blank" rel="noopener noreferrer">Resume</a></p>` : ""}
+  const html = `<p class="muted">${esc(c.email || "")} ${esc(c.phone || "")} · ${esc(c.opening_title || "No opening")} · ${stagePill(c.stage)}${c.user_id ? " · now an employee" : ""}</p>${exEmployeeHtml(ex)}${c.match_detail ? atsHtml(c.match_score, c.match_detail, c.opening_min_score) : matchPill(c)}${c.team_view ? `<p><span class="pill ${c.team_view === "shortlist" ? "" : "neutral"}">Team view: ${esc({ shortlist: "Shortlist", hold: "Keep on hold", not_suitable: "Not suitable" }[c.team_view])}</span>${c.team_view_note ? ` <small>${esc(c.team_view_note)}</small>` : ""}</p>` : ""} ${c.qualification ? `<small>${esc(c.qualification)}</small>` : ""} ${c.experience_years != null ? `<small>${c.experience_years} yrs experience</small>` : ""}${JSON.parse(c.skills || "[]").length ? `<p><strong>Skills:</strong> ${JSON.parse(c.skills).map(esc).join(", ")}</p>` : ""}${files.map((f) => `<button class="ghost" data-cfile="${f.id}">View ${esc(f.name)}</button>`).join(" ")} <button class="ghost" id="edit-skills">Edit skills</button>${c.notes ? `<p>${esc(c.notes)}</p>` : ""}${c.resume_url ? `<p><a href="${esc(c.resume_url)}" target="_blank" rel="noopener noreferrer">Resume</a></p>` : ""}
     ${
       live
         ? `<div class="actions spaced">${["applied", "screening", "interview"]

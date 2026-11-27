@@ -253,8 +253,9 @@ export function registerRecruitment(router, app) {
         );
       await setColumns(db, "job_openings", row.id, extras);
       if (
-        extras.skills !== undefined ||
-        extras.min_experience_years !== undefined
+        f.description !== row.description ||
+        f.title !== row.title ||
+        ["skills", "min_experience_years", "qualifications"].some((k) => extras[k] !== undefined)
       )
         for (const c of await db
           .prepare("SELECT id FROM candidates WHERE opening_id=?")

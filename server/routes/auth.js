@@ -255,6 +255,15 @@ export function registerAuth(router, app) {
         },
         permissions: permissionsOf(user),
         is_manager: Boolean(manager),
+        // Heads a department or looks after an opening: sees applicants under Recruitment.
+        hiring_team: Boolean(
+          await db
+            .prepare(
+              `SELECT 1 FROM departments WHERE company_id=? AND head_id=?
+               UNION SELECT 1 FROM job_openings WHERE company_id=? AND (hiring_manager_id=? OR requested_by=?) LIMIT 1`,
+            )
+            .get(user.company_id, user.id, user.company_id, user.id, user.id),
+        ),
         approvals_pending: approvals,
         workplace,
         // Today's shift rule, for the phone's Home strip.

@@ -76,7 +76,7 @@ async function jobs(companyId) {
   document.title = `${data.company} · Careers`;
   const want = Number(q.get("job")) || null;
   const list = data.jobs;
-  box.innerHTML = `<header><img class="page-logo" src="/brand/logo.png" alt=""><p class="eyebrow">${esc(data.company)}</p><h1>Join our team</h1><p class="muted">${list.length ? "Choose a role and apply in two minutes." : "There are no open positions right now. Please check back soon."}</p></header>
+  box.innerHTML = `<header><img class="page-logo" src="/brand/logo.png" alt=""><p class="eyebrow">${esc(data.company)}</p><h1>Join our team</h1><p class="muted">${want && !list.some((j) => j.id === want) ? "This job is no longer open. " : ""}${list.length ? "Choose a role and apply in two minutes." : "There are no open positions right now. Please check back soon."}</p></header>
   <p id="msg" class="muted" role="status"></p>${list
     .map(
       (

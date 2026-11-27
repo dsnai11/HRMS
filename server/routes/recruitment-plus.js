@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { atsScore } from "../ats.js";
+import { openingTeam } from "./hiring-team.js";
 import {
   HttpError,
   clientIp,
@@ -77,30 +79,9 @@ export function parseSkills(v) {
     ),
   ];
 }
-const sameSkill = (a, b) =>
-  a === b ||
-  (a.length >= 3 && b.length >= 3 && (a.includes(b) || b.includes(a)));
-
-/** 0–100 match of a candidate to an opening: skills 70%, experience 30% (whichever is defined). */
+/** 0–100 ATS match of a candidate to an opening (see ats.js for the parts). */
 export function matchScore(opening, cand) {
-  const need = JSON.parse(opening.skills || "[]");
-  const have = JSON.parse(cand.skills || "[]");
-  const minExp = Number(opening.min_experience_years) || 0;
-  if (!need.length && !minExp) return null;
-  const parts = [];
-  if (need.length)
-    parts.push([
-      70,
-      need.filter((n) => have.some((h) => sameSkill(n, h))).length /
-        need.length,
-    ]);
-  if (minExp > 0)
-    parts.push([
-      30,
-      Math.min((Number(cand.experience_years) || 0) / minExp, 1),
-    ]);
-  const weight = parts.reduce((a, [w]) => a + w, 0);
-  return Math.round((parts.reduce((a, [w, r]) => a + w * r, 0) / weight) * 100);
+  return atsScore(opening, cand)?.score ?? null;
 }
 
 export async function rescoreCandidate(db, candidateId) {
@@ -113,11 +94,11 @@ export async function rescoreCandidate(db, candidateId) {
         .prepare("SELECT * FROM job_openings WHERE id=?")
         .get(c.opening_id)
     : null;
-  const score = o ? matchScore(o, c) : null;
+  const ats = o ? atsScore(o, c) : null;
   await db
-    .prepare("UPDATE candidates SET match_score=? WHERE id=?")
-    .run(score, c.id);
-  return score;
+    .prepare("UPDATE candidates SET match_score=?,match_detail=? WHERE id=?")
+    .run(ats?.score ?? null, ats ? JSON.stringify(ats.parts) : null, c.id);
+  return ats?.score ?? null;
 }
 
 /** Extra opening columns from a request body; only fields present are returned. */
@@ -394,8 +375,7 @@ export function registerRecruitmentPlus(router, app) {
       await setColumns(db, "job_openings", o.id, extras);
       // Skills or experience may have changed what "a match" means.
       if (
-        extras.skills !== undefined ||
-        extras.min_experience_years !== undefined
+        ["skills", "min_experience_years", "qualifications", "description", "screening"].some((k) => extras[k] !== undefined)
       )
         for (const c of await db
           .prepare("SELECT id FROM candidates WHERE opening_id=?")
@@ -719,9 +699,19 @@ export function registerRecruitmentPlus(router, app) {
         companyId: co.id,
         kind: "hiring",
         title: `New application: ${name} for ${job.title}`,
-        body: cand.match_score != null ? `Match ${cand.match_score}%` : null,
+        body: cand.match_score != null ? `ATS score ${cand.match_score}%` : null,
         link: "hiring",
       });
+      // The hiring manager and department head see it too, under Requisitions & applicants.
+      const team = (await openingTeam(db, job.id)).filter((u) => !screen.failed.length);
+      if (team.length)
+        await app.notify(team, {
+          companyId: co.id,
+          kind: "hiring",
+          title: `New applicant for ${job.title}: ${name}`,
+          body: cand.match_score != null ? `ATS score ${cand.match_score}%` : null,
+          link: "requisitions",
+        });
       return send(201, { id, track_url: track, token });
     },
   );
