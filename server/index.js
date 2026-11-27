@@ -23,6 +23,7 @@ import { registerPayrollExtras } from "./routes/payroll-extras.js";
 import { registerRecruitment } from "./routes/recruitment.js";
 import { registerExit } from "./routes/exit.js";
 import { registerAlumni, scheduleFnfMails } from "./routes/alumni.js";
+import { registerHiringTeam } from "./routes/hiring-team.js";
 import { registerDocuments } from "./routes/documents.js";
 import { registerPerformance } from "./routes/performance.js";
 import { registerShiftPolicies } from "./routes/shift-policies.js";
@@ -292,6 +293,7 @@ export function createApp({
     registerLearning,
     registerExit,
     registerAlumni,
+    registerHiringTeam,
     registerEngagement,
     registerSecurity,
     registerPeople,

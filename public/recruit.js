@@ -136,6 +136,29 @@ function careersCard() {
   const link = `${location.origin}/careers.html?c=${activeCompany || me.company_id}`;
   return `<div class="card"><div class="card-head"><div><h2>Careers page</h2><p class="muted">Anyone can apply here without a login. Share this link on LinkedIn, Naukri, WhatsApp or your website; each opening you publish appears on it. Use <em>Posting text</em> on an opening to copy a ready-made advert.</p></div><div class="actions"><button class="secondary" id="copy-careers" data-link="${esc(link)}">Copy link</button><a class="button secondary" target="_blank" rel="noopener" href="${esc(link)}">Open page</a></div></div></div>`;
 }
+// ---- one public apply link per opening ---------------------------------------------------------
+const applyLink = (id) => `${location.origin}/careers.html?c=${activeCompany || me.company_id}&job=${id}`;
+function applyLinkDialog(id, title) {
+  const link = applyLink(id);
+  viewDialog(
+    `Apply link · ${title}`,
+    `<p class="muted">Anyone with this link can read the job, upload a resume and answer the screening questions, without a login. Share it on LinkedIn, Naukri, WhatsApp or email. Each application gets an ATS score against this job and shows to HR, the hiring manager and the department head.</p><label class="full">Link<input id="apply-link" value="${esc(link)}" readonly></label><div class="actions spaced"><button id="copy-apply">Copy link</button><a class="button secondary" target="_blank" rel="noopener" href="${esc(link)}">Open</a><a class="button secondary" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(`${title}: apply here ${link}`)}">Share on WhatsApp</a></div>`,
+  );
+  document.querySelector("dialog #copy-apply").onclick = async () => {
+    await navigator.clipboard?.writeText(link).catch(() => {});
+    notice("Link copied.");
+  };
+}
+
+// ---- ATS score with its parts --------------------------------------------------------------------
+function atsHtml(score, parts, minScore) {
+  if (score == null) return "";
+  const cut = minScore || 60;
+  const verdict = score >= cut ? ["", "Shortlist"] : score >= cut - 15 ? ["neutral", "Borderline"] : ["neutral warn", "Below cut-off"];
+  const list = Array.isArray(parts) ? parts : JSON.parse(parts || "[]");
+  return `<div class="ats-box"><div class="ats-head"><span class="ats-score ${score >= cut ? "good" : score >= cut - 15 ? "mid" : "low"}">${score}%</span><div><strong>ATS score</strong> <span class="pill ${verdict[0]}">${verdict[1]}</span><small>Compared with the job description. Shortlist from ${cut}%.</small></div></div>${list.length ? `<div class="ats-parts">${list.map((p) => `<div class="ats-part"><span>${esc(p.label)} <small>(${p.weight})</small></span><span class="ats-bar"><i class="w${Math.round((p.got || 0) * 10)}"></i></span><small>${esc(p.detail || "")}</small></div>`).join("")}</div>` : ""}</div>`;
+}
+
 function recruitOpeningsWire() {
   const on = (s, fn) =>
     document.querySelector(s)?.addEventListener("click", fn);
@@ -172,6 +195,18 @@ function recruitOpeningsWire() {
           },
         )),
   );
+  document.querySelectorAll("[data-apply-link]").forEach((b) => {
+    b.onclick = async () => {
+      const { applyLink: id, title, published, approved } = b.dataset;
+      if (published !== "1") {
+        if (approved !== "1") return notice("Approve this requisition first; then it can have an apply link.", true);
+        if (!confirm(`"${title}" is not on the careers page yet. Publish it so the link works?`)) return;
+        await api(`/admin/openings/${id}/details`, { published: true }, "PATCH");
+        render();
+      }
+      applyLinkDialog(Number(id), title);
+    };
+  });
   document
     .querySelectorAll("[data-opening-details]")
     .forEach(
@@ -220,9 +255,63 @@ async function openingDetailsDialog(id) {
   );
 }
 
+// ---- hiring manager and department head: applicants for their openings ------------------------------
+const TEAM_VIEW = { shortlist: "Shortlist", hold: "Keep on hold", not_suitable: "Not suitable" };
+function teamApplicantsHtml(team) {
+  if (!team.openings.length) return "";
+  const filter = teamApplicantsHtml.opening || "";
+  const list = team.candidates.filter((c) => !filter || c.opening_id === Number(filter));
+  const title = new Map(team.openings.map((o) => [o.id, o.title]));
+  return `<div class="card"><div class="card-head"><div><h2>Applicants for my openings</h2><p class="muted">Openings where you are the hiring manager or the department head. Best ATS score first. Give HR your view; HR moves candidates through the stages.</p></div><label class="inline">Opening<select id="ta-opening"><option value="">All (${team.candidates.length})</option>${team.openings.map((o) => `<option value="${o.id}" ${String(o.id) === filter ? "selected" : ""}>${esc(o.title)} (${o.applicants})</option>`).join("")}</select></label></div>
+  <div class="ta-links">${team.openings.filter((o) => o.published && o.status === "open" && o.approval_status === "approved").map((o) => `<button class="ghost" data-ta-link="${o.id}" data-title="${esc(o.title)}">🔗 Apply link · ${esc(o.title)}</button>`).join("")}</div>${
+    list.length
+      ? `<div class="table-wrap"><table><thead><tr><th>Candidate</th><th>Opening</th><th>ATS score</th><th>Stage</th><th>Your view</th><th></th></tr></thead><tbody>${list
+          .map(
+            (c) =>
+              `<tr><td><strong>${esc(c.name)}</strong><small>${[c.experience_years != null ? `${c.experience_years} yrs` : "", c.qualification || ""].filter(Boolean).map(esc).join(" · ")}</small></td><td>${esc(title.get(c.opening_id) || "")}<small>${esc(c.source || "")} · ${time(c.created_at)}</small></td><td>${c.match_score == null ? "—" : `<span class="ats-mini ${c.match_score >= 60 ? "good" : c.match_score >= 45 ? "mid" : "low"}">${c.match_score}%</span>`}</td><td>${stagePill(c.stage)}</td><td>${c.team_view ? `<span class="pill ${c.team_view === "shortlist" ? "" : "neutral"}">${TEAM_VIEW[c.team_view]}</span>` : '<small class="muted">Not given</small>'}</td><td><button class="ghost" data-ta-open="${c.id}">Open</button></td></tr>`,
+          )
+          .join("")}</tbody></table></div>`
+      : empty("No applicants yet", "Share the apply link; applications show here with their ATS score.")
+  }</div>`;
+}
+function teamApplicantsWire(team) {
+  const sel = document.querySelector("#ta-opening");
+  if (sel)
+    sel.onchange = () => {
+      teamApplicantsHtml.opening = sel.value;
+      render();
+    };
+  document.querySelectorAll("[data-ta-link]").forEach((b) => (b.onclick = () => applyLinkDialog(Number(b.dataset.taLink), b.dataset.title)));
+  document.querySelectorAll("[data-ta-open]").forEach((b) => {
+    b.onclick = () => {
+      const c = team.candidates.find((x) => x.id === Number(b.dataset.taOpen));
+      viewDialog(
+        c.name,
+        `<p class="muted">${esc(c.email || "")} ${esc(c.phone || "")} · ${stagePill(c.stage)}</p>${atsHtml(c.match_score, c.match_detail)}${c.skills.length ? `<p><strong>Skills:</strong> ${c.skills.map(esc).join(", ")}</p>` : ""}<p>${[c.expected_ctc ? `Expects ₹${Number(c.expected_ctc).toLocaleString("en-IN")} a year` : "", c.notice_days != null ? `${c.notice_days} days notice` : ""].filter(Boolean).join(" · ")}</p>${
+          c.screening.length
+            ? `<h3>Screening answers</h3><div class="table-wrap"><table><tbody>${c.screening.map((q) => `<tr><td>${esc(q.question)}</td><td>${esc(String(q.answer ?? "—"))}${q.failed ? ' <span class="pill neutral warn">Knock-out</span>' : ""}</td></tr>`).join("")}</tbody></table></div>`
+            : ""
+        }${c.resume_id ? `<p><a class="button secondary" target="_blank" rel="noopener" href="/api/team-hiring/files/${c.resume_id}">View resume</a></p>` : ""}<h3>Your view</h3>${c.team_view ? `<p class="muted">Given: ${TEAM_VIEW[c.team_view]}${c.team_view_name ? ` by ${esc(c.team_view_name)}` : ""}${c.team_view_note ? ` · ${esc(c.team_view_note)}` : ""}</p>` : ""}<form id="ta-form" class="form-grid"><label>Your view<select name="view">${Object.entries(TEAM_VIEW).map(([k, v]) => `<option value="${k}" ${c.team_view === k ? "selected" : ""}>${v}</option>`).join("")}</select></label><label class="full">Note for HR<input name="note" maxlength="500" value="${esc(c.team_view_note || "")}" placeholder="Needed if not suitable"></label><p class="error-text full" id="ta-error" role="alert"></p><div class="actions full"><button type="submit">Send to HR</button></div></form>`,
+      );
+      document.querySelector("dialog #ta-form").onsubmit = async (e) => {
+        e.preventDefault();
+        const f = Object.fromEntries(new FormData(e.target));
+        try {
+          await api(`/team-hiring/candidates/${c.id}/view`, f);
+          document.querySelector("dialog")?.remove();
+          notice("Sent to HR.");
+          render();
+        } catch (err) {
+          document.querySelector("dialog #ta-error").textContent = err.message;
+        }
+      };
+    };
+  });
+}
+
 // ---- manager: raise and follow requisitions ------------------------------------------------------
 async function requisitionsPage(id) {
-  const rows = await api("/requisitions/mine");
+  const [rows, team] = await Promise.all([api("/requisitions/mine"), api("/team-hiring")]);
   if (id !== renderId) return;
   const STATUS = {
     pending_approval: "Waiting for HR",
@@ -230,12 +319,13 @@ async function requisitionsPage(id) {
     rejected: "Declined",
   };
   document.querySelector("#content").innerHTML =
-    heading("Requisitions", "Ask for a new hire and follow its progress.") +
+    heading("Requisitions & applicants", "Ask for a new hire, follow its progress, and review who applied.") +
     `<div class="card"><div class="card-head"><div><h2>My requisitions</h2></div><button id="new-req">Raise a requisition</button></div>${
       rows.length
         ? `<div class="table-wrap"><table><thead><tr><th>Role</th><th>Positions</th><th>Status</th><th>Candidates</th><th>Filled</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.title)}${r.approval_note ? `<small>${esc(r.approval_note)}</small>` : ""}</td><td>${r.positions}</td><td><span class="pill ${r.approval_status === "approved" ? "" : "neutral"}">${STATUS[r.approval_status]}</span></td><td>${r.candidates}</td><td>${r.filled}</td></tr>`).join("")}</tbody></table></div>`
         : empty("No requisitions", "Raise one when you need to hire.")
-    }</div>`;
+    }</div>${teamApplicantsHtml(team)}`;
+  teamApplicantsWire(team);
   document.querySelector("#new-req").onclick = async () => {
     dialog(
       "Raise a job requisition",

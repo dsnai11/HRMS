@@ -28,6 +28,7 @@ async function loadMe() {
     ...p.user,
     permissions: p.permissions,
     is_manager: p.is_manager,
+    hiring_team: p.hiring_team,
     approvals_pending: p.approvals_pending,
     company: p.company,
     // Company policy asks for two-factor login before anything else.
@@ -339,8 +340,8 @@ function navGroups() {
       "✚",
       [
         staff && ["refer", "Refer A Candidate"],
-        me.is_manager &&
-          !has("recruitment.manage") && ["requisitions", "Requisitions"],
+        (me.is_manager || me.hiring_team) &&
+          !has("recruitment.manage") && ["requisitions", "Requisitions & applicants"],
       ],
     ],
     // Learning: courses to take for every employee; building courses for anyone who manages them

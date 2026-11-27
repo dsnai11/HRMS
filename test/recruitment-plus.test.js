@@ -247,8 +247,13 @@ test("requisitions, careers page, skill match, tracker, templates, offer breakup
   const cid = applied.data.id;
   const cand = await db.prepare("SELECT * FROM candidates WHERE id=?").get(cid);
   assert.equal(cand.source, "Careers page");
-  // 2 of 3 skills (70%) and half the experience (30%): 0.7*0.667 + 0.3*0.5 = 0.617
-  assert.equal(cand.match_score, 62);
+  // ATS: 2 of 3 skills (35), half the experience (15), and a B.Com meets "Graduate" (15):
+  // (35*0.667 + 15*0.5 + 15*1) / 65 = 0.705
+  assert.equal(cand.match_score, 71);
+  assert.deepEqual(
+    JSON.parse(cand.match_detail).map((p) => [p.key, p.got]),
+    [["skills", 0.67], ["experience", 0.5], ["qualification", 1]],
+  );
   assert.equal(
     (
       await db
@@ -290,7 +295,8 @@ test("requisitions, careers page, skill match, tracker, templates, offer breakup
     .data;
   assert.equal(files[0].kind, "resume");
 
-  // Changing the skills needed re-scores everyone.
+  // Changing the skills needed re-scores everyone: all skills (35), half experience (15),
+  // qualification met (15) = 57.5 / 65.
   await call(
     `/admin/openings/${oid}/details`,
     { skills: "excel, kyc" },
@@ -300,7 +306,7 @@ test("requisitions, careers page, skill match, tracker, templates, offer breakup
   assert.equal(
     (await db.prepare("SELECT match_score FROM candidates WHERE id=?").get(cid))
       .match_score,
-    85,
+    88,
   );
 
   // Templates: defaults, edits, and rendering with variables.
