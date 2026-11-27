@@ -5210,3 +5210,14 @@ tbody tr:hover { background: color-mix(in srgb, var(--red) 4%, transparent); }
   gap: 6px;
   margin-bottom: 10px;
 }
+.ats-fix {
+  padding: 2px 8px;
+  min-height: 0;
+  font-size: 0.8rem;
+}
+tr.bulk-miss td {
+  background: color-mix(in srgb, #c53030 7%, transparent);
+}
+#bulk-docs code {
+  font-size: 0.85em;
+}

@@ -41,6 +41,7 @@ import { scheduleTicketEscalation } from "./ticket-escalation.js";
 import { scheduleNoPunchMails } from "./no-punch-mail.js";
 import { registerFeedbackRounds } from "./routes/feedback-rounds.js";
 import { registerForm16 } from "./routes/form16.js";
+import { registerBulkDocuments } from "./routes/bulk-documents.js";
 import { registerEmployeeDetails } from "./routes/employee-details.js";
 import { registerGallery } from "./routes/gallery.js";
 import { registerDownloadLinks } from "./routes/download-links.js";
@@ -309,6 +310,7 @@ export function createApp({
     registerScheduledReports,
     registerFeedbackRounds,
     registerForm16,
+    registerBulkDocuments,
     registerEmployeeDetails,
     registerGallery,
     registerDownloadLinks,

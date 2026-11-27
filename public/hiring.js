@@ -132,7 +132,7 @@ async function hiringTabHtml(tab) {
     hiringCache.openings = openings;
     return `<div class="card"><div class="card-head"><div><h2>Candidates</h2></div><button id="new-cand">Add candidate</button></div>${
       rows.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Opening</th><th>Stage</th><th>Source</th><th>Match</th><th>Updated</th><th></th></tr></thead><tbody>${rows.map((c) => `<tr><td>${esc(c.name)}<small>${esc(c.email || c.phone || "")}</small></td><td>${esc(c.opening_title || "—")}</td><td>${stagePill(c.stage)}</td><td>${esc(c.source || "—")}</td><td>${matchPill(c) || "—"}</td><td>${fmtDate(c.updated_at.slice(0, 10))}</td><td><button class="secondary" data-cand="${c.id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
+        ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Opening</th><th>Stage</th><th>Source</th><th>ATS score</th><th>Updated</th><th></th></tr></thead><tbody>${rows.map((c) => `<tr><td>${esc(c.name)}<small>${esc(c.email || c.phone || "")}</small></td><td>${esc(c.opening_title || "—")}</td><td>${stagePill(c.stage)}</td><td>${esc(c.source || "—")}</td><td>${matchPill(c) || atsMissing(c)}</td><td>${fmtDate(c.updated_at.slice(0, 10))}</td><td><button class="secondary" data-cand="${c.id}">Open</button></td></tr>`).join("")}</tbody></table></div>`
         : empty("No candidates", "Add candidates as they apply.")
     }</div>`;
   }
@@ -211,6 +211,7 @@ async function hiringWire(tab) {
   } else if (tab === "candidates") {
     on("#new-cand", () => candidateDialogNew(null));
     each("[data-cand]", (b) => candidateView(Number(b.dataset.cand)));
+    each("[data-ats-fix]", (b) => openingDetailsDialog(Number(b.dataset.atsFix)));
   } else if (tab === "onboarding") {
     each("[data-pre-cand]", (b) => candidateView(Number(b.dataset.preCand)));
     onboardingPlusWire();
@@ -294,7 +295,7 @@ async function openingDialog() {
     await Promise.all([api("/admin/org"), peopleList()]);
   dialog(
     "New opening",
-    `${input("title", "Title", "", "required maxlength=100")}<label>Department<select name="department_id">${options(deps, null)}</select></label><label>Branch<select name="branch_id">${options(branches, null)}</select></label><label>Designation<select name="designation_id">${options(desigs, null)}</select></label>${input("positions", "Positions", 1, 'type="number" min="1" max="500"')}<label>Hiring manager<select name="hiring_manager_id">${options(people, null)}</select></label>${sel("employment_type", "Employment type", Object.entries(EMPLOYMENT))}<label class="full">Job description (the ATS score compares resumes with this)<textarea name="description" rows="5" maxlength="4000" placeholder="What the person will do, tools and knowledge needed"></textarea></label>${input("qualifications", "Qualification needed", "", 'maxlength=1000 placeholder="e.g. B.Com graduate"')}${input("min_experience_years", "Minimum experience (years)", "", 'type="number" min="0" max="60" step="0.5"')}<label class="full">Skills needed, separated by commas<input name="skills" maxlength="600" placeholder="e.g. Tally, GST, Excel"></label>${input("closing_date", "Last date to apply", "", 'type="date"')}<label class="check full"><input type="checkbox" name="published" checked> Create a public apply link (show on the careers page)</label>`,
+    `${input("title", "Title", "", "required maxlength=100")}<label>Department<select name="department_id">${options(deps, null)}</select></label><label>Branch<select name="branch_id">${options(branches, null)}</select></label><label>Designation<select name="designation_id">${options(desigs, null)}</select></label>${input("positions", "Positions", 1, 'type="number" min="1" max="500"')}<label>Hiring manager<select name="hiring_manager_id">${options(people, null)}</select></label>${sel("employment_type", "Employment type", Object.entries(EMPLOYMENT))}<label class="full">Job description (the ATS score compares resumes with this)<textarea name="description" rows="5" maxlength="4000" minlength="30" required placeholder="What the person will do, tools and knowledge needed"></textarea></label>${input("qualifications", "Qualification needed", "", 'maxlength=1000 placeholder="e.g. B.Com graduate"')}${input("min_experience_years", "Minimum experience (years)", "", 'type="number" min="0" max="60" step="0.5"')}<label class="full">Skills needed, separated by commas<input name="skills" maxlength="600" placeholder="e.g. Tally, GST, Excel"></label>${input("closing_date", "Last date to apply", "", 'type="date"')}<label class="check full"><input type="checkbox" name="published" checked> Create a public apply link (show on the careers page)</label>`,
     async (b) => {
       const body = {
         title: b.title,
