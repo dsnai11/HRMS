@@ -1371,6 +1371,268 @@ ul.chart-kids {
   margin: 24px 0 4px;
 }
 
+/* ---- org chart: tree layout (boxes joined by lines, top to bottom) ---- */
+.tree-wrap {
+  overflow: auto;
+  max-height: 74vh;
+  min-height: 220px;
+  padding: 18px 12px 24px;
+  border-radius: 12px;
+  background:
+    radial-gradient(circle, color-mix(in srgb, var(--line) 70%, transparent) 1px, transparent 1.2px) 0 0 / 18px 18px;
+  cursor: grab;
+}
+.tree-wrap.dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+.tree-canvas {
+  width: max-content;
+  min-width: 100%;
+}
+ul.chart.tree,
+.tree ul.chart-kids {
+  display: flex;
+  justify-content: center;
+  position: relative;
+  margin: 0;
+  padding: 22px 0 0;
+  border: 0;
+}
+ul.chart.tree {
+  padding-top: 0;
+}
+.tree ul.chart-kids[hidden] {
+  display: none;
+}
+.tree li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0;
+  padding: 22px 7px 0;
+}
+.tree > li {
+  padding-top: 0;
+}
+/* the joining lines: a bar across siblings, a drop to each child, a drop from the parent */
+.tree li::before,
+.tree li::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 50%;
+  width: 50%;
+  height: 22px;
+  border-top: 2px solid var(--tree-line);
+}
+.tree li::after {
+  right: auto;
+  left: 50%;
+  border-left: 2px solid var(--tree-line);
+}
+.tree li:only-child::before,
+.tree li:only-child::after {
+  display: none;
+}
+.tree li:only-child {
+  padding-top: 0;
+}
+.tree li:first-child::before,
+.tree li:last-child::after {
+  border: 0 none;
+}
+.tree li:last-child::before {
+  border-right: 2px solid var(--tree-line);
+  border-radius: 0 10px 0 0;
+}
+.tree li:first-child::after {
+  border-radius: 10px 0 0 0;
+}
+.tree > li::before,
+.tree > li::after {
+  display: none;
+}
+.tree ul.chart-kids::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  height: 22px;
+  border-left: 2px solid var(--tree-line);
+}
+.tree-wrap {
+  --tree-line: color-mix(in srgb, var(--muted) 45%, transparent);
+}
+.tcard {
+  position: relative;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 172px;
+  padding: 12px 10px 10px;
+  text-align: center;
+  border-top: 4px solid var(--dept, var(--line));
+  box-shadow: 0 2px 8px rgba(20, 30, 50, 0.08);
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+.tcard:hover {
+  box-shadow: 0 6px 18px rgba(20, 30, 50, 0.16);
+  transform: translateY(-1px);
+}
+.tcard .avatar {
+  width: 40px;
+  height: 40px;
+  margin-bottom: 4px;
+  background: var(--dept, var(--green));
+  color: white;
+}
+.tcard strong {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.92rem;
+}
+.tcard .chart-code {
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+}
+.tcard .tdesig {
+  font-size: 0.78rem;
+  line-height: 1.25;
+  min-height: 1.25em;
+}
+.tdept {
+  margin-top: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  color: var(--dept);
+  background: color-mix(in srgb, var(--dept) 12%, transparent);
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.tchip {
+  margin-top: 8px;
+  padding: 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.75rem;
+  min-height: 0;
+}
+.tchev {
+  display: inline-block;
+  margin-right: 4px;
+  transition: transform 0.15s;
+}
+.tchip[aria-expanded="false"] .tchev {
+  transform: rotate(-90deg);
+}
+.tcsv {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 2px 6px;
+  min-height: 0;
+  font-size: 0.75rem;
+  opacity: 0.5;
+}
+.tcard:hover .tcsv {
+  opacity: 1;
+}
+.tcard.me {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+.tcompany {
+  width: auto;
+  min-width: 200px;
+  border-top-color: var(--ink);
+  background: var(--ink);
+  color: white;
+}
+.tcompany small {
+  color: rgba(255, 255, 255, 0.75) !important;
+}
+.tcompany .tchip {
+  color: white;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.tree li.hit > .tcard {
+  outline: 3px solid #f0b429;
+  outline-offset: 2px;
+}
+.tree-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-bottom: 10px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.dc0 {
+  --dept: hsl(212 62% 48%);
+}
+.dc1 {
+  --dept: hsl(152 62% 48%);
+}
+.dc2 {
+  --dept: hsl(28 62% 48%);
+}
+.dc3 {
+  --dept: hsl(280 62% 48%);
+}
+.dc4 {
+  --dept: hsl(350 62% 48%);
+}
+.dc5 {
+  --dept: hsl(190 62% 48%);
+}
+.dc6 {
+  --dept: hsl(45 62% 48%);
+}
+.dc7 {
+  --dept: hsl(120 62% 48%);
+}
+.dc8 {
+  --dept: hsl(255 62% 48%);
+}
+.dc9 {
+  --dept: hsl(5 62% 48%);
+}
+.dc10 {
+  --dept: hsl(320 62% 48%);
+}
+.dc11 {
+  --dept: hsl(170 62% 48%);
+}
+.dc-none {
+  --dept: var(--muted);
+}
+.tree-legend i {
+  background: var(--dept);
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  border-radius: 3px;
+  vertical-align: -1px;
+}
+.tree-zoom {
+  display: inline-flex;
+  gap: 4px;
+}
+.tree-zoom button {
+  min-width: 36px;
+}
+
 /* ---- team calendar ---- */
 .team-day {
   align-content: start;
@@ -4811,3 +5073,18 @@ tbody tr:hover { background: color-mix(in srgb, var(--red) 4%, transparent); }
 .rehire-box { background: #fff; color: #14151c; border-radius: 16px; padding: 20px; max-width: 440px; width: 100%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); border: 2px solid var(--warn, #d97706); }
 .rehire-box h2 { margin-top: 0; }
 [data-theme="dark"] .rehire-box { background: #12141c; color: #eceef4; }
+[data-theme="dark"] .tcard {
+  border-top: 4px solid var(--dept, var(--line));
+}
+[data-theme="dark"] .tcompany {
+  color: white;
+}
+.tcard .avatar,
+[data-theme="dark"] .tcard .avatar {
+  background: var(--dept, var(--green));
+  color: white;
+  box-shadow: none;
+}
+[data-theme="dark"] .tcompany {
+  background: linear-gradient(135deg, #8a1c2c, #4a0f19);
+}
