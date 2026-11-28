@@ -3,7 +3,7 @@ import { decryptJson, encryptionKey } from "../crypto-store.js";
 import { checkFile } from "./documents.js";
 
 // Bulk upload of HR documents: HR picks many files at once, each is matched to one employee
-// by the employee code (or PAN) in its file name, HR checks the list, then each file is saved
+// by the employee code, PAN or ESI number in its file name, HR checks the list, then each file is saved
 // to that employee only. Employees see only their own files (documents.js decides access).
 
 export const BULK_KINDS = {
@@ -13,17 +13,20 @@ export const BULK_KINDS = {
 };
 const norm = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 const PAN = /(?:^|[^A-Z])([A-Z]{5}[0-9]{4}[A-Z])(?:[^A-Z0-9]|$)/;
+// ESI (IP) numbers are 10 digits (17 on old cards), as ESIC names its certificate files.
+const ESI = /(?:^|[^0-9])(\d{10}|\d{17})(?:[^0-9]|$)/g;
 
 /**
  * Who a file name belongs to. The code must stand on its own in the name ("LIFC0101.pdf",
  * "LIFC0101_ESI.pdf", "Ravi LIFC0101 increment.pdf"); the longest matching code wins, and two
  * different codes of the same length are left for HR to choose.
  */
-export function matchFileName(fileName, people, panOwner = new Map()) {
+export function matchFileName(fileName, people, panOwner = new Map(), esiOwner = new Map()) {
   const base = String(fileName || "").replace(/\.[A-Za-z0-9]{2,4}$/, "");
   const upper = base.toUpperCase();
   const pan = upper.match(PAN)?.[1];
   if (pan && panOwner.has(pan)) return { user: panOwner.get(pan), by: "pan" };
+  for (const m of base.matchAll(ESI)) if (esiOwner.has(m[1])) return { user: esiOwner.get(m[1]), by: "esi" };
   const tokens = upper.split(/[^A-Z0-9]+/).filter(Boolean);
   let best = null;
   let tie = false;
@@ -52,24 +55,29 @@ export function registerBulkDocuments(router, app) {
   const { db, clock } = app;
   const nowIso = () => new Date(clock()).toISOString();
 
-  // PAN → employee, read once per request (PANs are stored encrypted).
-  async function panOwners(companyId) {
+  // PAN → employee and ESI number → employee, read once per request (both are stored encrypted).
+  async function identityOwners(companyId) {
     const key = encryptionKey();
-    const out = new Map();
-    if (!key) return out;
+    const pans = new Map();
+    const esis = new Map();
+    if (!key) return { pans, esis };
     for (const row of await db
       .prepare(
         "SELECT p.user_id,p.data,u.name,u.employee_code FROM employee_private p JOIN users u ON u.id=p.user_id WHERE p.company_id=? AND u.active=1",
       )
       .all(companyId)) {
       try {
-        const pan = String(decryptJson(row.data, key).pan ?? "").toUpperCase();
-        if (pan) out.set(pan, { id: row.user_id, name: row.name, employee_code: row.employee_code });
+        const data = decryptJson(row.data, key);
+        const who = { id: row.user_id, name: row.name, employee_code: row.employee_code };
+        const pan = String(data.pan ?? "").toUpperCase();
+        const esi = String(data.esi_ip ?? "").replace(/\D/g, "");
+        if (pan) pans.set(pan, who);
+        if (esi) esis.set(esi, who);
       } catch {
         /* a row that does not decrypt is skipped */
       }
     }
-    return out;
+    return { pans, esis };
   }
 
   router.post("/api/admin/documents/match", { perm: "employees.write" }, async ({ companyId, body, send }) => {
@@ -80,11 +88,14 @@ export function registerBulkDocuments(router, app) {
     const people = await db
       .prepare("SELECT id,name,employee_code FROM users WHERE company_id=? AND active=1 AND role<>'super_admin' ORDER BY name")
       .all(companyId);
-    const pans = b.files.some((f) => PAN.test(String(f).toUpperCase())) ? await panOwners(companyId) : new Map();
+    // Decrypting everyone's PAN and ESI number is only worth it when a name could hold one.
+    const { pans, esis } = b.files.some((f) => PAN.test(String(f).toUpperCase()) || /\d{10}/.test(String(f)))
+      ? await identityOwners(companyId)
+      : { pans: new Map(), esis: new Map() };
     return send(200, {
       people,
       matches: b.files.map((f) => {
-        const m = matchFileName(string(f, "File name", 200), people, pans);
+        const m = matchFileName(string(f, "File name", 200), people, pans, esis);
         return { file: f, user: m.user && { id: m.user.id, name: m.user.name, employee_code: m.user.employee_code }, by: m.by };
       }),
     });
