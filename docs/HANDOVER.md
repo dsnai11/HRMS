@@ -74,7 +74,7 @@ scripts/smoke/           browser smoke scripts (see its README)
 | `APP_URL` | **set** `https://hrms-hfsr.onrender.com` | builds links in emails (joining link, careers page, password reset) |
 | `COMPANY_NAME`, `REPORT_TIMEZONE` | set | defaults |
 | `SETUP_TOKEN` | remove once the first admin exists | one-time admin setup |
-| `RESEND_API_KEY`, `MAIL_FROM` | **not set** | turns on email. Needs a Resend account and a verified sending domain. Until then nothing is emailed; HR copies links |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` (or `RESEND_API_KEY`, `MAIL_FROM`) | **not set** | turns on email through the company mailbox (SMTP) or Resend. Until then nothing is emailed; HR copies links and resets passwords |
 | `FCM_SERVICE_ACCOUNT` | **not set** | Android push (Firebase). iPhone push is not possible with a free Apple ID |
 | `ANTHROPIC_API_KEY`, `BOT_MODEL` | optional, **not set** | turns on Laxmi's free-text answers by Claude (default model `claude-opus-5-5`). Without it Laxmi answers from rules, the knowledge base and policies only |
 | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION` | recommended | file storage for selfies and documents; see `docs/LAUNCH-5000.md` |
@@ -127,7 +127,7 @@ From the proposal (`docs/PROPOSAL-MATCH.md`), in the order I would do them:
 
 Things only the company can supply:
 
-- **Email:** a Resend account, a verified domain, then set `RESEND_API_KEY` and `MAIL_FROM`.
+- **Email:** the company mailbox's SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`), or a Resend account with `RESEND_API_KEY` and `MAIL_FROM`. `APP_URL` is needed for reset links.
 - **CIBIL:** the bureau or integration partner's API address, key and request format (set under Hiring → Credit checks → Settings). Until then HR enters scores by hand.
 - **Biometric devices:** the device make and model and its SDK or push protocol.
 - **LinkedIn, Naukri, Indeed auto-posting:** their paid APIs. The careers page and copy-paste adverts work now.

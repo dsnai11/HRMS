@@ -177,7 +177,7 @@ export function registerChannels(router, app, env = process.env) {
       whatsapp_ready: whatsappReady(env),
       calls_ready: callsReady(env),
       push_ready: Boolean(env.FCM_SERVICE_ACCOUNT),
-      email_ready: Boolean(env.RESEND_API_KEY && env.MAIL_FROM),
+      email_ready: Boolean(env.MAIL_FROM && (env.RESEND_API_KEY || env.SMTP_HOST)),
     }),
   );
   // The calling provider reports the outcome of a call.

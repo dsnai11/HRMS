@@ -1,14 +1,23 @@
-// In-app notifications, with email when a mail provider is configured
-// (RESEND_API_KEY and MAIL_FROM). Notifications are best-effort: a failure here
+// In-app notifications, with email when mail is configured: the company's own mail server
+// (SMTP_HOST, SMTP_USER, SMTP_PASS, MAIL_FROM; see smtp.js) or Resend (RESEND_API_KEY, MAIL_FROM). Notifications are best-effort: a failure here
 // never fails the action that caused it.
 import { SMS_KINDS, sendSms, smsConfigured } from "./sms.js";
+import { mailReady, smtpSend } from "./smtp.js";
 
 export function createNotifier(app, env = process.env) {
   const { db, clock } = app;
-  const mailConfigured = () => Boolean(env.RESEND_API_KEY && env.MAIL_FROM);
+  const mailConfigured = () => mailReady(env);
 
   async function sendMail(row) {
     try {
+      // The company's own mail server when SMTP is set; otherwise Resend.
+      if (env.SMTP_HOST && !env.RESEND_API_KEY) {
+        await smtpSend(env, { to: row.to_email, subject: row.subject, text: row.body, attachments: row.attachments });
+        await db
+          .prepare("UPDATE email_outbox SET status='sent',sent_at=? WHERE id=?")
+          .run(new Date(clock()).toISOString(), row.id);
+        return;
+      }
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {
