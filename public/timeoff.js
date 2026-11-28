@@ -289,17 +289,24 @@ async function approvalsPage(id) {
   const batches = new Map();
   for (const r of data.regularizations) if (r.batch_id) batches.set(r.batch_id, [...(batches.get(r.batch_id) ?? []), r]);
   data.regularizations = data.regularizations.filter((r) => !r.batch_id);
+  // Bulk decisions: tick rows (or the header box for all), then Approve / Reject selected.
+  const bulkBar = (kind, n) =>
+    n > 1
+      ? `<div class="actions bulk-bar" data-bulk-bar="${kind}"><span class="muted" data-bulk-count="${kind}">None selected</span><button class="secondary" data-bulk="${kind}" data-bulk-act="approved" disabled>Approve selected</button><button class="ghost" data-bulk="${kind}" data-bulk-act="rejected" disabled>Reject selected</button></div>`
+      : "";
+  const pickAll = (kind) => `<th class="pick"><input type="checkbox" data-pick-all="${kind}" aria-label="Select all"></th>`;
+  const pickOne = (kind, r) => `<td class="pick"><input type="checkbox" data-pick="${kind}" value="${r.id}" aria-label="Select ${esc(r.employee_name)}"></td>`;
   const buttons = (kind, r) =>
     `<button class="secondary" data-act="approved" data-kind="${kind}" data-id="${r.id}">Approve</button> <button class="ghost" data-act="rejected" data-kind="${kind}" data-id="${r.id}">Reject</button>`;
   document.querySelector("#content").innerHTML =
     heading("Approvals", "Requests from your team waiting for a decision.") +
-    `<div class="card"><h2>Leave requests</h2>${
+    `<div class="card"><div class="card-head"><h2>Leave requests</h2>${bulkBar("leave", data.leave.length)}</div>${
       data.leave.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th><th></th></tr></thead><tbody>${data.leave.map((r) => `<tr><td>${esc(r.employee_name)}<small>${esc(r.employee_code || "")}</small></td><td>${esc(r.type_name)}<small>${esc(r.reason || "")}</small>${leaveExtras(r)}${r.steps > 1 ? `<small>Step ${r.step_number} of ${r.steps}: ${esc(r.step_name)}</small>` : ""}</td><td>${rangeText(r)}</td><td>${r.days}</td><td>${buttons("leave", r)}</td></tr>`).join("")}</tbody></table></div>`
+        ? `<div class="table-wrap"><table><thead><tr>${pickAll("leave")}<th>Employee</th><th>Type</th><th>Dates</th><th>Days</th><th></th></tr></thead><tbody>${data.leave.map((r) => `<tr>${pickOne("leave", r)}<td>${esc(r.employee_name)}<small>${esc(r.employee_code || "")}</small></td><td>${esc(r.type_name)}<small>${esc(r.reason || "")}</small>${leaveExtras(r)}${r.steps > 1 ? `<small>Step ${r.step_number} of ${r.steps}: ${esc(r.step_name)}</small>` : ""}</td><td>${rangeText(r)}</td><td>${r.days}</td><td>${buttons("leave", r)}</td></tr>`).join("")}</tbody></table></div>`
         : empty("Nothing waiting", "No leave requests need your decision.")
-    }</div><div class="card"><h2>Attendance corrections</h2>${
+    }</div><div class="card"><div class="card-head"><h2>Attendance corrections</h2>${bulkBar("reg", data.regularizations.length)}</div>${
       data.regularizations.length
-        ? `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th>Date</th><th>Times</th><th></th></tr></thead><tbody>${data.regularizations.map((r) => `<tr><td>${esc(r.employee_name)}<small>${esc(r.employee_code || "")}</small></td><td>${esc(REG_KINDS[r.kind])}<small>${esc(r.reason)}</small>${r.steps > 1 ? `<small>Step ${r.step_number} of ${r.steps}: ${esc(r.step_name)}</small>` : ""}</td><td>${fmtDate(r.date)}</td><td>${esc([r.in_time, r.out_time].filter(Boolean).join(" – ") || "Standard day")}</td><td>${buttons("reg", r)}</td></tr>`).join("")}</tbody></table></div>`
+        ? `<div class="table-wrap"><table><thead><tr>${pickAll("reg")}<th>Employee</th><th>Type</th><th>Date</th><th>Times</th><th></th></tr></thead><tbody>${data.regularizations.map((r) => `<tr>${pickOne("reg", r)}<td>${esc(r.employee_name)}<small>${esc(r.employee_code || "")}</small></td><td>${esc(REG_KINDS[r.kind])}<small>${esc(r.reason)}</small>${r.steps > 1 ? `<small>Step ${r.step_number} of ${r.steps}: ${esc(r.step_name)}</small>` : ""}</td><td>${fmtDate(r.date)}</td><td>${esc([r.in_time, r.out_time].filter(Boolean).join(" – ") || "Standard day")}</td><td>${buttons("reg", r)}</td></tr>`).join("")}</tbody></table></div>`
         : empty("Nothing waiting", "No corrections need your decision.")
     }</div>${
       batches.size
@@ -339,6 +346,54 @@ async function approvalsPage(id) {
           await loadMe();
           render();
         })),
+  );
+  const picked = (kind) => [...document.querySelectorAll(`[data-pick="${kind}"]`)].filter((c) => c.checked).map((c) => Number(c.value));
+  const refreshBulk = (kind) => {
+    const n = picked(kind).length;
+    const all = document.querySelectorAll(`[data-pick="${kind}"]`).length;
+    const count = document.querySelector(`[data-bulk-count="${kind}"]`);
+    if (count) count.textContent = n ? `${n} selected` : "None selected";
+    document.querySelectorAll(`[data-bulk="${kind}"]`).forEach((b) => (b.disabled = !n));
+    const head = document.querySelector(`[data-pick-all="${kind}"]`);
+    if (head) (head.checked = n === all && all > 0), (head.indeterminate = n > 0 && n < all);
+  };
+  for (const kind of ["leave", "reg"]) {
+    document.querySelector(`[data-pick-all="${kind}"]`)?.addEventListener("change", (e) => {
+      document.querySelectorAll(`[data-pick="${kind}"]`).forEach((c) => (c.checked = e.target.checked));
+      refreshBulk(kind);
+    });
+    document.querySelectorAll(`[data-pick="${kind}"]`).forEach((c) => c.addEventListener("change", () => refreshBulk(kind)));
+  }
+  document.querySelectorAll("[data-bulk]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const kind = b.dataset.bulk,
+          decision = b.dataset.bulkAct,
+          ids = picked(kind);
+        if (!ids.length) return;
+        const what = kind === "leave" ? "leave request" : "correction";
+        dialog(
+          `${decision === "approved" ? "Approve" : "Reject"} ${ids.length} ${what}${ids.length === 1 ? "" : "s"}`,
+          `<div class="full muted">The same decision and note go to every selected ${what}.</div><label class="full">Note (optional)<input name="note" maxlength="300"></label><p class="full muted" id="bulk-progress"></p>`,
+          async (f) => {
+            const path = kind === "leave" ? "leave/requests" : "regularizations";
+            const failed = [];
+            for (const [i, id] of ids.entries()) {
+              const p = document.querySelector("#bulk-progress");
+              if (p) p.textContent = `Working… ${i + 1} of ${ids.length}`;
+              try {
+                await api(`/${path}/${id}/decision`, { decision, note: f.note || undefined });
+              } catch (err) {
+                const r = (kind === "leave" ? data.leave : data.regularizations).find((x) => x.id === id);
+                failed.push(`${r?.employee_name ?? id}: ${err.message}`);
+              }
+            }
+            const done = ids.length - failed.length;
+            notice(`${done} ${decision === "approved" ? "approved" : "rejected"}${failed.length ? `; ${failed.length} not done (${failed[0]})` : ""}.`, Boolean(failed.length));
+            await loadMe();
+          },
+        );
+      }),
   );
   document.querySelectorAll("[data-act]").forEach(
     (b) =>
