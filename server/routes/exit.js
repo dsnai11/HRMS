@@ -1149,7 +1149,7 @@ export function registerExit(router, app) {
       const to = b.to ? email(b.to) : x.personal_email;
       if (!to) throw new HttpError(400, "There is no personal email for this person. Enter one.");
       if (!(await emailLetters(x.id, companyId, to, audit)))
-        throw new HttpError(409, "Email is not set up yet (RESEND_API_KEY and MAIL_FROM), so the letters could not be sent.");
+        throw new HttpError(409, "Email is not set up yet (SMTP or Resend settings), so the letters could not be sent.");
       return send(200, { ok: true, to });
     },
   );
