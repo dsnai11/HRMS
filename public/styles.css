@@ -5221,3 +5221,18 @@ tr.bulk-miss td {
 #bulk-docs code {
   font-size: 0.85em;
 }
+th.pick,
+td.pick {
+  width: 36px;
+  padding-right: 0;
+}
+th.pick input,
+td.pick input {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+.bulk-bar {
+  margin: 0;
+  align-items: center;
+}
