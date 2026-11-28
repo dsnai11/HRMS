@@ -79,3 +79,22 @@ test("bulk HR documents: matched by employee code, private to each employee", as
   // Employees cannot delete what HR gave them.
   assert.equal((await call(`/documents/${up.data.id}`, undefined, ravi.token, "DELETE")).status, 403);
 });
+
+test("bulk HR documents: ESIC certificates named by ESI number go to the right employee", async (t) => {
+  const prevKey = process.env.DATA_ENCRYPTION_KEY;
+  process.env.DATA_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+  t.after(() => {
+    if (prevKey === undefined) delete process.env.DATA_ENCRYPTION_KEY;
+    else process.env.DATA_ENCRYPTION_KEY = prevKey;
+  });
+  const { call, admin, person } = await world(t);
+  const asha = await person("Asha", { employee_code: "E0003" });
+  const ravi = await person("Ravi", { employee_code: "E0004" });
+  assert.equal((await call(`/admin/employees/${asha.id}/private`, { esi_ip: "1234567890", pan: "ABCDE1234F" }, admin, "PUT")).status, 200);
+  assert.equal((await call(`/admin/employees/${ravi.id}/private`, { esi_ip: "2233445566" }, admin, "PUT")).status, 200);
+  const m = (await call("/admin/documents/match", { files: ["1234567890.pdf", "ESIC_2233445566_ePehchan.pdf", "9999999999.pdf", "Asha_ABCDE1234F.pdf"] }, admin)).data.matches;
+  assert.deepEqual(
+    m.map((x) => [x.user?.employee_code ?? null, x.by]),
+    [["E0003", "esi"], ["E0004", "esi"], [null, null], ["E0003", "pan"]],
+  );
+});

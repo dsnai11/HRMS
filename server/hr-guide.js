@@ -728,9 +728,9 @@ export const GUIDE = [
     area: "People",
     title: "ESI card and HR documents for employees",
     who: "HR (employees.write)",
-    keywords: "esi card e-pehchan esic ip number upload letter certificate hr documents salary slip employee app profile bulk many all employees at once mapped employee code",
+    keywords: "esi card e-pehchan esic ip number upload letter certificate hr documents salary slip employee app profile bulk many all employees at once mapped employee code esi number ip esic certificate",
     steps: [
-      "Many employees at once: Documents → Documents → “Upload documents for many employees”. Choose the type, a title if you like (e.g. Increment letter 2026), and all the files together. Name each file with the employee code (LIFC0101.pdf, LIFC0101_ESI.pdf, “Ravi LIFC0101 increment.pdf”) or the PAN.",
+      "Many employees at once: Documents → Documents → “Upload documents for many employees”. Choose the type, a title if you like (e.g. Increment letter 2026), and all the files together. Name each file with the employee code (LIFC0101.pdf, LIFC0101_ESI.pdf, “Ravi LIFC0101 increment.pdf”), the PAN, or the ESI number. ESIC certificates can be uploaded just as downloaded (e.g. 1234567890.pdf) when payroll has the ESI number.",
       "Click “Match files to employees”. Check the list: files that did not match are marked in red; choose the employee for them or leave them out. Then click Upload. Each employee is told on the app.",
       "One person: Documents → Documents → Employee documents: choose the person, click Show, then “Add for this person”.",
       "For the ESI card choose the type “ESI card (e-Pehchan)”; for letters, certificates and similar choose “HR document”. Upload the PDF or image (up to 2 MB).",
